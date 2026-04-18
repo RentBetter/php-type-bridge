@@ -1,0 +1,20 @@
+services:
+    -
+        class: PTGS\TypeBridge\PHPStan\Rules\Controller\ApiResponsesRequiredRule
+        tags:
+            - phpstan.rules.rule
+
+    -
+        class: PTGS\TypeBridge\PHPStan\Rules\Controller\MutatingApiRequestRequiredRule
+        tags:
+            - phpstan.rules.rule
+
+    -
+        class: PTGS\TypeBridge\PHPStan\Rules\Controller\ApiResponseDeclarationRule
+        tags:
+            - phpstan.rules.rule
+
+    -
+        class: PTGS\TypeBridge\PHPStan\Rules\Form\ContractFormTypeRule
+        tags:
+            - phpstan.rules.rule
