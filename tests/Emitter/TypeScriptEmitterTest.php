@@ -8,10 +8,12 @@ use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
+use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Tests\Fixture\FixtureProject;
+use RuntimeException;
 
 final class TypeScriptEmitterTest extends TestCase
 {
@@ -88,5 +90,76 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface TimestampedView {', $common);
         self::assertStringContainsString('export interface ProjectPathParams {', $common);
         self::assertStringContainsString('id: string;', $common);
+    }
+
+    public function test_it_supports_custom_typescript_naming(): void
+    {
+        $srcDir = FixtureProject::srcDir();
+        $typeDomains = (new PhpDocTypeCollector())->collect($srcDir);
+        $responseCollector = new ResponseClassCollector();
+        $responseDomains = $responseCollector->collect($srcDir);
+        $contracts = (new EndpointContractCollector())->collect($srcDir, $responseCollector->collectIndex($srcDir));
+
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($srcDir);
+
+        $output = (new TypeScriptEmitter(
+            $enumResolver,
+            new DomainMapper('/tmp/type-bridge-output'),
+            new TypeScriptNaming(
+                interfacePrefix: 'I',
+                enumValueSuffix: 'Id',
+                enumShapeSuffix: '',
+                queryAliasSuffix: 'QueryParams',
+                bodyAliasSuffix: 'Payload',
+                pathAliasSuffix: 'RouteParams',
+                endpointMapSuffix: 'Responses',
+                endpointResultSuffix: 'Outcome',
+            ),
+        ))->emit($typeDomains, $responseDomains, $contracts);
+
+        $projects = $output['Projects'];
+        self::assertStringContainsString("import type { IProjectPathParams, ITimestampedView } from '../Common/genTypes';", $projects);
+        self::assertStringContainsString("export type ProjectStatusId = 'draft' | 'active';", $projects);
+        self::assertStringContainsString('export interface IProjectStatus {', $projects);
+        self::assertStringContainsString('value: ProjectStatusId;', $projects);
+        self::assertStringContainsString('statusDetail: IProjectStatus;', $projects);
+        self::assertStringContainsString('export interface IProjectBaseView {', $projects);
+        self::assertStringContainsString('export interface IProjectView extends ITimestampedView {', $projects);
+        self::assertStringContainsString('status: ProjectStatusId;', $projects);
+        self::assertStringContainsString('export interface ICreateProjectRequestData {', $projects);
+        self::assertStringContainsString('export interface IUpdateProjectRequestData {', $projects);
+        self::assertStringContainsString('export interface IShowProjectResponse {', $projects);
+        self::assertStringContainsString('export type ProjectIndexQueryParams = IProjectFiltersData;', $projects);
+        self::assertStringContainsString('export type ProjectShowRouteParams = IProjectPathParams;', $projects);
+        self::assertStringContainsString('export type ProjectCreatePayload = ICreateProjectRequestData;', $projects);
+        self::assertStringContainsString('export type ProjectUpdatePayload = IUpdateProjectRequestData;', $projects);
+        self::assertStringContainsString('export type ProjectShowResponses = {', $projects);
+        self::assertStringContainsString('  200: IShowProjectResponse;', $projects);
+        self::assertStringContainsString('export type ProjectShowOutcome = EndpointResult<ProjectShowResponses>;', $projects);
+
+        $common = $output['Common'];
+        self::assertStringContainsString('export interface ITimestampedView {', $common);
+        self::assertStringContainsString('export interface IProjectPathParams {', $common);
+    }
+
+    public function test_it_fails_when_custom_names_collide(): void
+    {
+        $srcDir = FixtureProject::srcDir();
+        $typeDomains = (new PhpDocTypeCollector())->collect($srcDir);
+        $responseCollector = new ResponseClassCollector();
+        $responseDomains = $responseCollector->collect($srcDir);
+
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($srcDir);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Projects": "ProjectStatus"');
+
+        (new TypeScriptEmitter(
+            $enumResolver,
+            new DomainMapper('/tmp/type-bridge-output'),
+            new TypeScriptNaming(enumShapeSuffix: ''),
+        ))->emit($typeDomains, $responseDomains);
     }
 }

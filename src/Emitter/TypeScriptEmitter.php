@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Emitter;
 
+use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
@@ -36,10 +37,23 @@ final class TypeScriptEmitter
     /** @var array<string, list<CollectedEndpointContract>> */
     private array $contracts = [];
 
+    /** @var array<string, array<string, string>> */
+    private array $symbolMaps = [];
+
+    private string $currentDomain = '';
+
+    /** @var array<string, string> */
+    private array $currentImportedSymbols = [];
+
+    private TypeScriptNaming $naming;
+
     public function __construct(
         private readonly EnumResolver $enumResolver,
         private readonly DomainMapper $domainMapper,
-    ) {}
+        ?TypeScriptNaming $naming = null,
+    ) {
+        $this->naming = $naming ?? new TypeScriptNaming();
+    }
 
     /**
      * @param array<string, CollectedDomain> $domains
@@ -52,6 +66,7 @@ final class TypeScriptEmitter
         $this->domains = $domains;
         $this->responses = $responses;
         $this->contracts = $contracts;
+        $this->symbolMaps = $this->buildSymbolMaps($domains, $responses);
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
         sort($allDomains);
@@ -79,6 +94,8 @@ final class TypeScriptEmitter
         array $responses,
         array $contracts,
     ): string {
+        $this->currentDomain = $domain;
+
         $lines = [];
         $lines[] = '// AUTO-GENERATED. DO NOT EDIT.';
         $lines[] = '';
@@ -107,7 +124,7 @@ final class TypeScriptEmitter
                 );
                 $lines[] = \sprintf(
                     'export type %s = %s;',
-                    $this->enumResolver->getShortName($enumClass),
+                    $this->enumName($enumClass),
                     implode(' | ', $values),
                 );
             }
@@ -140,25 +157,25 @@ final class TypeScriptEmitter
             foreach ($requestContracts as $contract) {
                 if (null !== $contract->request->query) {
                     $lines[] = \sprintf(
-                        'export type %sQuery = %s;',
-                        $contract->name,
-                        $contract->request->query->typeName,
+                        'export type %s = %s;',
+                        $this->naming->queryAliasName($contract->name),
+                        $this->symbolForInputReference($contract->request->query),
                     );
                 }
 
                 if (null !== $contract->request->body) {
                     $lines[] = \sprintf(
-                        'export type %sBody = %s;',
-                        $contract->name,
-                        $contract->request->body->typeName,
+                        'export type %s = %s;',
+                        $this->naming->bodyAliasName($contract->name),
+                        $this->symbolForInputReference($contract->request->body),
                     );
                 }
 
                 if (null !== $contract->request->path) {
                     $lines[] = \sprintf(
-                        'export type %sPathParams = %s;',
-                        $contract->name,
-                        $contract->request->path->typeName,
+                        'export type %s = %s;',
+                        $this->naming->pathAliasName($contract->name),
+                        $this->symbolForInputReference($contract->request->path),
                     );
                 }
 
@@ -178,14 +195,14 @@ final class TypeScriptEmitter
             $lines[] = '';
 
             foreach ($contracts as $contract) {
-                $mapName = $contract->name . 'EndpointMap';
-                $resultName = $contract->name . 'Result';
+                $mapName = $this->naming->endpointMapName($contract->name);
+                $resultName = $this->naming->endpointResultName($contract->name);
                 $lines[] = \sprintf('export type %s = {', $mapName);
 
                 $responses = $contract->responses;
                 usort($responses, static fn(CollectedApiResponseClass $left, CollectedApiResponseClass $right): int => $left->status <=> $right->status);
                 foreach ($responses as $response) {
-                    $lines[] = \sprintf('  %d: %s;', $response->status, $response->name);
+                    $lines[] = \sprintf('  %d: %s;', $response->status, $this->responseSymbolName($response));
                 }
 
                 $lines[] = '};';
@@ -202,27 +219,36 @@ final class TypeScriptEmitter
      */
     private function emitCollectedType(CollectedType $type, array &$lines): void
     {
+        $this->currentImportedSymbols = $this->importedSymbolMap($type->imports);
+
         if ($type->parsed instanceof IntersectionType) {
-            $lines[] = \sprintf('export interface %s extends %s {', $type->name, $this->typeToTs($type->parsed->base));
+            $lines[] = \sprintf(
+                'export interface %s extends %s {',
+                $this->typeDeclarationName($type),
+                $this->typeToTs($type->parsed->base),
+            );
             foreach ($type->parsed->extra->fields as $field) {
                 $this->emitShapeField($field, $lines);
             }
             $lines[] = '}';
+            $this->currentImportedSymbols = [];
 
             return;
         }
 
         if ($type->parsed instanceof ShapeType) {
-            $lines[] = \sprintf('export interface %s {', $type->name);
+            $lines[] = \sprintf('export interface %s {', $this->typeDeclarationName($type));
             foreach ($type->parsed->fields as $field) {
                 $this->emitShapeField($field, $lines);
             }
             $lines[] = '}';
+            $this->currentImportedSymbols = [];
 
             return;
         }
 
-        $lines[] = \sprintf('export type %s = %s;', $type->name, $this->typeToTs($type->parsed));
+        $lines[] = \sprintf('export type %s = %s;', $this->typeDeclarationName($type), $this->typeToTs($type->parsed));
+        $this->currentImportedSymbols = [];
     }
 
     /**
@@ -230,13 +256,16 @@ final class TypeScriptEmitter
      */
     private function emitResponse(CollectedApiResponseClass $response, array &$lines): void
     {
+        $this->currentImportedSymbols = $this->importedSymbolMap($response->imports);
+
         if (204 === $response->status && [] === $response->properties) {
-            $lines[] = \sprintf('export type %s = null;', $response->name);
+            $lines[] = \sprintf('export type %s = null;', $this->responseDeclarationName($response));
+            $this->currentImportedSymbols = [];
 
             return;
         }
 
-        $lines[] = \sprintf('export interface %s {', $response->name);
+        $lines[] = \sprintf('export interface %s {', $this->responseDeclarationName($response));
         foreach ($response->properties as $property) {
             $optional = $property->optional ? '?' : '';
             $lines[] = \sprintf(
@@ -247,6 +276,7 @@ final class TypeScriptEmitter
             );
         }
         $lines[] = '}';
+        $this->currentImportedSymbols = [];
     }
 
     /**
@@ -290,11 +320,15 @@ final class TypeScriptEmitter
         }
 
         if ($type instanceof ValueOfType) {
-            return $this->enumResolver->getShortName($type->enumClass);
+            return $this->enumName($type->enumClass);
         }
 
         if ($type instanceof NameRefType) {
-            return $type->name;
+            if (isset($this->currentImportedSymbols[$type->name])) {
+                return $this->currentImportedSymbols[$type->name];
+            }
+
+            return $this->symbolFor($this->currentDomain, $type->name);
         }
 
         if ($type instanceof ShapeType) {
@@ -397,7 +431,7 @@ final class TypeScriptEmitter
                 continue;
             }
 
-            $imports[$importedType->targetDomain][] = $importedType->targetTypeName;
+            $imports[$importedType->targetDomain][] = $this->symbolFor($importedType->targetDomain, $importedType->targetTypeName);
         }
     }
 
@@ -410,7 +444,7 @@ final class TypeScriptEmitter
             return;
         }
 
-        $imports[$input->domain][] = $input->typeName;
+        $imports[$input->domain][] = $this->symbolForInputReference($input);
     }
 
     /**
@@ -421,7 +455,7 @@ final class TypeScriptEmitter
         if ($type instanceof ValueOfType) {
             $enumDomain = $this->enumResolver->getDomain($type->enumClass);
             if ($enumDomain !== $domain) {
-                $imports[$enumDomain][] = $this->enumResolver->getShortName($type->enumClass);
+                $imports[$enumDomain][] = $this->enumName($type->enumClass);
             }
 
             return;
@@ -475,5 +509,144 @@ final class TypeScriptEmitter
         }
 
         return [];
+    }
+
+    /**
+     * @param array<string, CollectedDomain> $domains
+     * @param array<string, list<CollectedApiResponseClass>> $responses
+     * @return array<string, array<string, string>>
+     */
+    private function buildSymbolMaps(array $domains, array $responses): array
+    {
+        $maps = [];
+        $registrations = [];
+        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses)));
+
+        foreach ($allDomains as $domain) {
+            $maps[$domain] = [];
+            $registrations[$domain] = [];
+
+            foreach (($domains[$domain] ?? new CollectedDomain($domain))->types as $type) {
+                $this->registerSymbol(
+                    domain: $domain,
+                    logicalName: $type->name,
+                    emittedName: $this->typeDeclarationName($type),
+                    descriptor: 'type ' . $type->ownerClass,
+                    maps: $maps,
+                    registrations: $registrations,
+                );
+            }
+
+            foreach ($responses[$domain] ?? [] as $response) {
+                $this->registerSymbol(
+                    domain: $domain,
+                    logicalName: $response->name,
+                    emittedName: $this->responseDeclarationName($response),
+                    descriptor: 'response ' . $response->className,
+                    maps: $maps,
+                    registrations: $registrations,
+                );
+            }
+
+            foreach ($this->collectLocalEnums($domain, $domains[$domain] ?? new CollectedDomain($domain), $responses[$domain] ?? []) as $enumClass) {
+                $emittedName = $this->enumName($enumClass);
+                if (isset($registrations[$domain][$emittedName])) {
+                    throw new RuntimeException(\sprintf(
+                        'TypeScript naming collision in domain "%s": "%s" is emitted by both %s and enum %s.',
+                        $domain,
+                        $emittedName,
+                        $registrations[$domain][$emittedName],
+                        $enumClass,
+                    ));
+                }
+
+                $registrations[$domain][$emittedName] = 'enum ' . $enumClass;
+            }
+        }
+
+        return $maps;
+    }
+
+    /**
+     * @param array<string, array<string, string>> $maps
+     * @param array<string, array<string, string>> $registrations
+     */
+    private function registerSymbol(
+        string $domain,
+        string $logicalName,
+        string $emittedName,
+        string $descriptor,
+        array &$maps,
+        array &$registrations,
+    ): void {
+        if (isset($registrations[$domain][$emittedName])) {
+            throw new RuntimeException(\sprintf(
+                'TypeScript naming collision in domain "%s": "%s" is emitted by both %s and %s.',
+                $domain,
+                $emittedName,
+                $registrations[$domain][$emittedName],
+                $descriptor,
+            ));
+        }
+
+        $maps[$domain][$logicalName] = $emittedName;
+        $registrations[$domain][$emittedName] = $descriptor;
+    }
+
+    private function symbolFor(string $domain, string $logicalName): string
+    {
+        return $this->symbolMaps[$domain][$logicalName] ?? $logicalName;
+    }
+
+    private function symbolForInputReference(CollectedInputReference $input): string
+    {
+        return $this->symbolFor($input->domain, $input->typeName);
+    }
+
+    /**
+     * @param list<ImportedType> $imports
+     * @return array<string, string>
+     */
+    private function importedSymbolMap(array $imports): array
+    {
+        $symbols = [];
+        foreach ($imports as $importedType) {
+            $symbols[$importedType->targetTypeName] = $this->symbolFor($importedType->targetDomain, $importedType->targetTypeName);
+        }
+
+        return $symbols;
+    }
+
+    private function enumName(string $enumClass): string
+    {
+        return $this->naming->enumValueName($this->enumResolver->getShortName($enumClass));
+    }
+
+    private function typeDeclarationName(CollectedType $type): string
+    {
+        $name = $type->name;
+        if (enum_exists($type->ownerClass)) {
+            $name = $this->naming->enumShapeName($this->enumResolver->getShortName($type->ownerClass));
+        }
+
+        if ($type->parsed instanceof ShapeType || $type->parsed instanceof IntersectionType) {
+            return $this->naming->interfaceName($name);
+        }
+
+        return $name;
+    }
+
+    private function responseDeclarationName(CollectedApiResponseClass $response): string
+    {
+        if (204 === $response->status && [] === $response->properties) {
+            return $response->name;
+        }
+
+        return $this->naming->interfaceName($response->name);
+    }
+
+    private function responseSymbolName(CollectedApiResponseClass $response): string
+    {
+        return $this->symbolFor($response->domain, $response->name);
     }
 }

@@ -33,7 +33,7 @@
 
 ## Current Test Status
 
-- PHPUnit: `24 tests, 172 assertions`
+- PHPUnit: `29 tests, 203 assertions`
 
 ## Known Gaps
 
@@ -80,6 +80,7 @@
 
 ## Practical Notes
 
-- Enum-owned `_self` shapes intentionally emit as `<EnumName>Data` to avoid colliding with the enum value union name
+- Enum-owned `_self` shapes default to `<EnumName>Data`, but TS naming is now configurable
+- Custom TS naming fails fast if it would emit colliding symbols in the same domain
 - Projection inheritance is shape-based, not PHP-class-inheritance-based
 - Avoid staging work in other repos; edit this repo directly

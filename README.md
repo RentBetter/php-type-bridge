@@ -10,6 +10,7 @@ It provides:
 - collectors for `_self` PHPStan shapes, response DTOs, endpoint contracts, and Symfony form-backed request inputs
 - a PHPStan extension for endpoint and contract-form enforcement
 - a TypeScript emitter that produces shape types, response types, request aliases, and endpoint result unions
+- configurable TypeScript naming for interfaces, enum value aliases, enum `_self` objects, and endpoint alias suffixes
 
 ## Docs
 
@@ -81,6 +82,55 @@ export interface ProjectStatusData {
 ```
 
 Enum-owned `_self` shapes emit as `<EnumName>Data` to avoid colliding with the enum value union.
+
+## TypeScript naming
+
+If you need project-specific naming, pass a config file to the generator:
+
+```bash
+php bin/console typebridge:generate src assets/types --config=type-bridge.php
+```
+
+`type-bridge.php` should return an array:
+
+```php
+<?php
+
+return [
+    'typescript' => [
+        'interfacePrefix' => 'I',
+        'enumValueSuffix' => 'Id',
+        'enumShapeSuffix' => '',
+        'queryAliasSuffix' => 'QueryParams',
+        'bodyAliasSuffix' => 'Payload',
+        'pathAliasSuffix' => 'RouteParams',
+        'endpointMapSuffix' => 'Responses',
+        'endpointResultSuffix' => 'Outcome',
+    ],
+];
+```
+
+The knobs are intentionally narrow:
+
+- `interfacePrefix` applies only to declarations emitted as `interface`
+- `enumValueSuffix` renames the backed-value union from `value-of<MyEnum>`
+- `enumShapeSuffix` renames enum-owned `_self` types before any interface prefix is applied
+- request and endpoint alias suffixes rename the flat transport helpers without changing the underlying source-of-truth PHP names
+
+For example, the config above emits:
+
+```ts
+export type ProjectStatusId = 'draft' | 'active';
+export interface IProjectStatus {
+  value: ProjectStatusId;
+  label: string;
+  color: string;
+}
+
+export type ProjectCreatePayload = ICreateProjectRequestData;
+```
+
+TypeBridge fails fast if a custom naming scheme would emit colliding symbols in the same domain.
 
 ## Current scope
 
