@@ -88,6 +88,10 @@ final class EndpointContractCollector
     {
         $base = preg_replace('/Controller$/', '', $controllerShortName) ?: $controllerShortName;
 
+        if ('__invoke' === $methodName) {
+            return $base;
+        }
+
         return $base . ucfirst($methodName);
     }
 

@@ -23,7 +23,15 @@ final class EndpointContractCollectorTest extends TestCase
         $contracts = (new EndpointContractCollector())->collect($srcDir, $responses);
 
         self::assertArrayHasKey('Projects', $contracts);
-        self::assertCount(5, $contracts['Projects']);
+        self::assertCount(6, $contracts['Projects']);
+
+        $archive = current(array_filter(
+            $contracts['Projects'],
+            static fn($contract): bool => '__invoke' === $contract->methodName,
+        ));
+
+        self::assertNotFalse($archive);
+        self::assertSame('ArchiveProject', $archive->name);
 
         $index = current(array_filter(
             $contracts['Projects'],
