@@ -6,6 +6,8 @@ namespace PTGS\TypeBridge\PHPStan\Rules\Controller;
 
 use PhpParser\Node;
 use PhpParser\Node\Stmt\ClassMethod;
+use PHPStan\Analyser\Scope;
+use PHPStan\Reflection\ClassReflection;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
 use PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector;
@@ -24,14 +26,15 @@ final class ApiResponsesRequiredRule implements Rule
         return ClassMethod::class;
     }
 
-    public function processNode(Node $node, \PHPStan\Analyser\Scope $scope): array
+    public function processNode(Node $node, Scope $scope): array
     {
         $classReflection = $scope->getClassReflection();
-        if (null === $classReflection || null === $node->name) {
+        if (!$classReflection instanceof ClassReflection) {
             return [];
         }
 
-        $method = $this->apiMethodInspector->inspect($classReflection->getName(), $node->name->toString());
+        $methodName = $node->name->toString();
+        $method = $this->apiMethodInspector->inspect($classReflection->getName(), $methodName);
         if (null === $method || !$method->isApiRoute() || $method->hasApiResponses) {
             return [];
         }
@@ -39,7 +42,10 @@ final class ApiResponsesRequiredRule implements Rule
         return [RuleErrorBuilder::message(\sprintf(
             'API controller method "%s::%s" must declare #[ApiResponses([...])].',
             $classReflection->getName(),
-            $node->name->toString(),
-        ))->line($node->getStartLine())->build()];
+            $methodName,
+        ))
+            ->identifier('typeBridge.apiResponsesRequired')
+            ->line($node->getStartLine())
+            ->build()];
     }
 }

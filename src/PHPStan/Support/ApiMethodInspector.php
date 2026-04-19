@@ -11,6 +11,9 @@ use ReflectionMethod;
 
 final class ApiMethodInspector
 {
+    /**
+     * @param class-string $className
+     */
     public function inspect(string $className, string $methodName): ?InspectedApiMethod
     {
         if (!method_exists($className, $methodName)) {
@@ -49,10 +52,11 @@ final class ApiMethodInspector
             $arguments = $responsesAttributes[0]->getArguments();
             $responses = $arguments['responses'] ?? ($arguments[0] ?? []);
             if (\is_array($responses)) {
-                $declaredResponses = array_values(array_filter(
-                    $responses,
-                    static fn (mixed $value): bool => \is_string($value) && '' !== $value,
-                ));
+                foreach ($responses as $value) {
+                    if (\is_string($value) && '' !== $value) {
+                        $declaredResponses[] = $value;
+                    }
+                }
             }
         }
 
@@ -65,6 +69,9 @@ final class ApiMethodInspector
         );
     }
 
+    /**
+     * @param ReflectionAttribute<object> $attribute
+     */
     private function isRouteAttribute(ReflectionAttribute $attribute): bool
     {
         $name = $attribute->getName();

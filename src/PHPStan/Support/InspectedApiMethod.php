@@ -8,7 +8,7 @@ final readonly class InspectedApiMethod
 {
     /**
      * @param list<string> $httpMethods
-     * @param list<class-string> $declaredResponses
+     * @param list<non-empty-string> $declaredResponses
      */
     public function __construct(
         public ?string $path,

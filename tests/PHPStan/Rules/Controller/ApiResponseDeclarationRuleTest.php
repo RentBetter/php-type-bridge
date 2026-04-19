@@ -14,7 +14,7 @@ final class ApiResponseDeclarationRuleTest extends RuleTestCase
 {
     protected function getRule(): ApiResponseDeclarationRule
     {
-        return new ApiResponseDeclarationRule();
+        return new ApiResponseDeclarationRule($this->createReflectionProvider());
     }
 
     public function testAcceptsDeclaredResponseTypes(): void

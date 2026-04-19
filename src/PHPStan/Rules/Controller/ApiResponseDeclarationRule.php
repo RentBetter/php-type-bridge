@@ -9,14 +9,14 @@ use PhpParser\Node\Expr\Throw_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\NodeFinder;
 use PHPStan\Analyser\Scope;
+use PHPStan\Reflection\ClassReflection;
+use PHPStan\Reflection\ExtendedMethodReflection;
+use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
 use PTGS\TypeBridge\Contract\ApiErrorResponse;
 use PTGS\TypeBridge\Contract\ApiResponse;
 use PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector;
-use ReflectionMethod;
-use ReflectionNamedType;
-use ReflectionUnionType;
 
 /**
  * @implements Rule<ClassMethod>
@@ -26,6 +26,7 @@ final class ApiResponseDeclarationRule implements Rule
     private NodeFinder $nodeFinder;
 
     public function __construct(
+        private readonly ReflectionProvider $reflectionProvider,
         private readonly ApiMethodInspector $apiMethodInspector = new ApiMethodInspector(),
     ) {
         $this->nodeFinder = new NodeFinder();
@@ -39,7 +40,7 @@ final class ApiResponseDeclarationRule implements Rule
     public function processNode(Node $node, Scope $scope): array
     {
         $classReflection = $scope->getClassReflection();
-        if (null === $classReflection || null === $node->name) {
+        if (!$classReflection instanceof ClassReflection) {
             return [];
         }
 
@@ -52,8 +53,13 @@ final class ApiResponseDeclarationRule implements Rule
 
         $declared = array_fill_keys($method->declaredResponses, true);
         $errors = [];
+        if (!$classReflection->hasMethod($methodName)) {
+            return [];
+        }
 
-        foreach ($this->returnedResponseClasses($className, $methodName) as $responseClass) {
+        $methodReflection = $classReflection->getMethod($methodName, $scope);
+
+        foreach ($this->returnedResponseClasses($methodReflection) as $responseClass) {
             if (isset($declared[$responseClass])) {
                 continue;
             }
@@ -63,7 +69,10 @@ final class ApiResponseDeclarationRule implements Rule
                 $className,
                 $methodName,
                 $responseClass,
-            ))->line($node->getStartLine())->build();
+            ))
+                ->identifier('typeBridge.apiResponseReturnUndeclared')
+                ->line($node->getStartLine())
+                ->build();
         }
 
         foreach ($this->thrownResponseClasses($node, $scope) as $responseClass) {
@@ -76,42 +85,35 @@ final class ApiResponseDeclarationRule implements Rule
                 $className,
                 $methodName,
                 $responseClass,
-            ))->line($node->getStartLine())->build();
+            ))
+                ->identifier('typeBridge.apiResponseThrowUndeclared')
+                ->line($node->getStartLine())
+                ->build();
         }
 
         return $errors;
     }
 
     /**
-     * @return list<class-string<ApiResponse>>
+     * @return list<string>
      */
-    private function returnedResponseClasses(string $className, string $methodName): array
+    private function returnedResponseClasses(ExtendedMethodReflection $methodReflection): array
     {
-        $reflection = new ReflectionMethod($className, $methodName);
-        $returnType = $reflection->getReturnType();
-        if (null === $returnType) {
+        $variant = $methodReflection->getVariants()[0] ?? null;
+        if (null === $variant) {
             return [];
         }
 
-        $types = [];
-        if ($returnType instanceof ReflectionNamedType) {
-            $types[] = $returnType;
-        } elseif ($returnType instanceof ReflectionUnionType) {
-            $types = array_values(array_filter(
-                $returnType->getTypes(),
-                static fn (\ReflectionType $type): bool => $type instanceof ReflectionNamedType,
-            ));
-        }
-
+        $returnType = $variant->getReturnType();
         $responses = [];
-        foreach ($types as $type) {
-            if ($type->isBuiltin()) {
+        foreach ($returnType->getObjectClassNames() as $className) {
+            if (!$this->reflectionProvider->hasClass($className)) {
                 continue;
             }
 
-            $typeName = $type->getName();
-            if (is_a($typeName, ApiResponse::class, true)) {
-                $responses[] = $typeName;
+            $classReflection = $this->reflectionProvider->getClass($className);
+            if ($classReflection->implementsInterface(ApiResponse::class)) {
+                $responses[] = $classReflection->getName();
             }
         }
 
@@ -119,7 +121,7 @@ final class ApiResponseDeclarationRule implements Rule
     }
 
     /**
-     * @return list<class-string<ApiErrorResponse>>
+     * @return list<string>
      */
     private function thrownResponseClasses(ClassMethod $node, Scope $scope): array
     {
@@ -132,8 +134,13 @@ final class ApiResponseDeclarationRule implements Rule
 
         foreach ($throws as $throw) {
             foreach ($scope->getType($throw->expr)->getObjectClassNames() as $className) {
-                if (is_a($className, ApiErrorResponse::class, true)) {
-                    $responses[] = $className;
+                if (!$this->reflectionProvider->hasClass($className)) {
+                    continue;
+                }
+
+                $classReflection = $this->reflectionProvider->getClass($className);
+                if ($classReflection->implementsInterface(ApiErrorResponse::class)) {
+                    $responses[] = $classReflection->getName();
                 }
             }
         }
