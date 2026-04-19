@@ -5,6 +5,12 @@
     "license": "MIT",
     "keywords": ["php", "typescript", "api", "static-analysis", "symfony"],
     "homepage": "https://github.com/RentBetter/php-type-bridge",
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/RentBetter/phpstan-rules"
+        }
+    ],
     "require": {
         "php": ">=8.4",
         "symfony/console": "^7.3 || ^8.0",
@@ -12,6 +18,7 @@
         "symfony/http-kernel": "^7.3 || ^8.0"
     },
     "require-dev": {
+        "ptgs/phpstan-rules": "dev-main",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.0"
     },

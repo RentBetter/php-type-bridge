@@ -1,5 +1,17 @@
 services:
     -
+        class: PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector
+
+    -
+        class: PTGS\TypeBridge\PHPStan\Support\FormContractValidator
+
+    -
+        class: PTGS\TypeBridge\Support\FormTypeInspector
+
+    -
+        class: PTGS\TypeBridge\Support\PhpDocTypeHelper
+
+    -
         class: PTGS\TypeBridge\PHPStan\Rules\Controller\ApiResponsesRequiredRule
         tags:
             - phpstan.rules.rule

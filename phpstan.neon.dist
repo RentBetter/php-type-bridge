@@ -1,0 +1,10 @@
+includes:
+    - vendor/ptgs/phpstan-rules/extension.neon
+    - extension.neon
+
+parameters:
+    level: max
+    paths:
+        - src
+    bootstrapFiles:
+        - vendor/autoload.php
