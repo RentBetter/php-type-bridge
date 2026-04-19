@@ -39,7 +39,7 @@ final class ApiResponseDeclarationRuleTest extends RuleTestCase
         $this->analyse([
             __DIR__ . '/../../Fixtures/Controller/Negative/UndeclaredThrowController.php',
         ], [[
-            'API controller method "PTGS\TypeBridge\Tests\PHPStan\Fixtures\Controller\Negative\UndeclaredThrowController::show" throws "PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\ValidationErrorResponse" but it is missing from #[ApiResponses].',
+            'API controller method "PTGS\TypeBridge\Tests\PHPStan\Fixtures\Controller\Negative\UndeclaredThrowController::show" throws "PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Response\ValidationErrorResponse" but it is missing from #[ApiResponses].',
             14,
         ]]);
     }

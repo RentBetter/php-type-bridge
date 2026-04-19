@@ -35,7 +35,8 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertArrayHasKey('Common', $output);
 
         $projects = $output['Projects'];
-        self::assertStringContainsString("import type { ProjectPathParams, TimestampedView } from '../Common/genTypes';", $projects);
+        self::assertStringContainsString("import type { ProjectPathParams, TimestampedView, ValidationErrorResponse } from '../Common/genTypes';", $projects);
+        self::assertStringNotContainsString('export interface ValidationErrorResponse {', $projects);
         self::assertStringContainsString("export type ProjectStatus = 'draft' | 'active';", $projects);
         self::assertStringContainsString('export interface ProjectStatusData {', $projects);
         self::assertStringContainsString('value: ProjectStatus;', $projects);
@@ -90,6 +91,8 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface TimestampedView {', $common);
         self::assertStringContainsString('export interface ProjectPathParams {', $common);
         self::assertStringContainsString('id: string;', $common);
+        self::assertStringContainsString('export interface ValidationErrorResponse {', $common);
+        self::assertStringContainsString('errors: { path: string; message: string }[];', $common);
     }
 
     public function test_it_supports_custom_typescript_naming(): void
@@ -119,7 +122,7 @@ final class TypeScriptEmitterTest extends TestCase
         ))->emit($typeDomains, $responseDomains, $contracts);
 
         $projects = $output['Projects'];
-        self::assertStringContainsString("import type { IProjectPathParams, ITimestampedView } from '../Common/genTypes';", $projects);
+        self::assertStringContainsString("import type { IProjectPathParams, ITimestampedView, IValidationErrorResponse } from '../Common/genTypes';", $projects);
         self::assertStringContainsString("export type ProjectStatusId = 'draft' | 'active';", $projects);
         self::assertStringContainsString('export interface IProjectStatus {', $projects);
         self::assertStringContainsString('value: ProjectStatusId;', $projects);
@@ -141,6 +144,7 @@ final class TypeScriptEmitterTest extends TestCase
         $common = $output['Common'];
         self::assertStringContainsString('export interface ITimestampedView {', $common);
         self::assertStringContainsString('export interface IProjectPathParams {', $common);
+        self::assertStringContainsString('export interface IValidationErrorResponse {', $common);
     }
 
     public function test_it_fails_when_custom_names_collide(): void

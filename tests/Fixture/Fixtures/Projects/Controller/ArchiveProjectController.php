@@ -7,8 +7,8 @@ namespace PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Controller;
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Input\ProjectPathParams;
+use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Response\ValidationErrorResponse;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\UpdateProjectResponse;
-use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\ValidationErrorResponse;
 use Symfony\Component\Routing\Attribute\Route;
 
 final class ArchiveProjectController

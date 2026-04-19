@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response;
+namespace PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Response;
 
 use PTGS\TypeBridge\Contract\ThrowableApiResponse;
 use PTGS\TypeBridge\Status\HttpUnprocessableEntity;

@@ -372,6 +372,14 @@ final class TypeScriptEmitter
         }
 
         foreach ($contracts as $contract) {
+            foreach ($contract->responses as $response) {
+                if ($response->domain === $domain) {
+                    continue;
+                }
+
+                $imports[$response->domain][] = $this->responseSymbolName($response);
+            }
+
             if (null === $contract->request) {
                 continue;
             }

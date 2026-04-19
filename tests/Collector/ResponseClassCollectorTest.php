@@ -8,11 +8,11 @@ use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Tests\Fixture\FixtureProject;
+use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Response\ValidationErrorResponse;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\CreateProjectResponse;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\DeleteProjectResponse;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\ShowProjectResponse;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\UpdateProjectResponse;
-use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\ValidationErrorResponse;
 
 final class ResponseClassCollectorTest extends TestCase
 {
