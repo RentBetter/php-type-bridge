@@ -84,22 +84,42 @@ final class GenerateTypesCommand extends Command
             throw new RuntimeException(\sprintf('TypeBridge config file "%s" was not found.', $configFile));
         }
 
-        $config = require $configFile;
-        if (!is_array($config)) {
-            throw new RuntimeException(\sprintf(
-                'TypeBridge config file "%s" must return an array.',
-                $configFile,
-            ));
-        }
+        $config = $this->requireStringKeyedArray(
+            require $configFile,
+            \sprintf('TypeBridge config file "%s" must return an array.', $configFile),
+        );
 
-        $typeScriptConfig = $config['typescript'] ?? $config;
-        if (!is_array($typeScriptConfig)) {
-            throw new RuntimeException(\sprintf(
-                'TypeBridge config file "%s" must return a "typescript" array.',
-                $configFile,
-            ));
+        $typeScriptConfig = $config;
+        if (array_key_exists('typescript', $config)) {
+            $typeScriptConfig = $this->requireStringKeyedArray(
+                $config['typescript'],
+                \sprintf('TypeBridge config file "%s" must return a "typescript" array.', $configFile),
+            );
         }
 
         return TypeScriptNaming::fromArray($typeScriptConfig);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function requireStringKeyedArray(mixed $value, string $errorMessage): array
+    {
+        if (!is_array($value)) {
+            throw new RuntimeException(\sprintf(
+                $errorMessage,
+            ));
+        }
+
+        $normalized = [];
+        foreach ($value as $key => $entry) {
+            if (!is_string($key)) {
+                throw new RuntimeException($errorMessage);
+            }
+
+            $normalized[$key] = $entry;
+        }
+
+        return $normalized;
     }
 }

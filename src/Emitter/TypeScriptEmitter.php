@@ -28,15 +28,6 @@ use RuntimeException;
 
 final class TypeScriptEmitter
 {
-    /** @var array<string, CollectedDomain> */
-    private array $domains = [];
-
-    /** @var array<string, list<CollectedApiResponseClass>> */
-    private array $responses = [];
-
-    /** @var array<string, list<CollectedEndpointContract>> */
-    private array $contracts = [];
-
     /** @var array<string, array<string, string>> */
     private array $symbolMaps = [];
 
@@ -63,9 +54,6 @@ final class TypeScriptEmitter
      */
     public function emit(array $domains, array $responses = [], array $contracts = []): array
     {
-        $this->domains = $domains;
-        $this->responses = $responses;
-        $this->contracts = $contracts;
         $this->symbolMaps = $this->buildSymbolMaps($domains, $responses);
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
@@ -155,27 +143,32 @@ final class TypeScriptEmitter
         if ([] !== $requestContracts) {
             $lines[] = '// Endpoint inputs';
             foreach ($requestContracts as $contract) {
-                if (null !== $contract->request->query) {
+                $request = $contract->request;
+                if (null === $request) {
+                    continue;
+                }
+
+                if (null !== $request->query) {
                     $lines[] = \sprintf(
                         'export type %s = %s;',
                         $this->naming->queryAliasName($contract->name),
-                        $this->symbolForInputReference($contract->request->query),
+                        $this->symbolForInputReference($request->query),
                     );
                 }
 
-                if (null !== $contract->request->body) {
+                if (null !== $request->body) {
                     $lines[] = \sprintf(
                         'export type %s = %s;',
                         $this->naming->bodyAliasName($contract->name),
-                        $this->symbolForInputReference($contract->request->body),
+                        $this->symbolForInputReference($request->body),
                     );
                 }
 
-                if (null !== $contract->request->path) {
+                if (null !== $request->path) {
                     $lines[] = \sprintf(
                         'export type %s = %s;',
                         $this->naming->pathAliasName($contract->name),
-                        $this->symbolForInputReference($contract->request->path),
+                        $this->symbolForInputReference($request->path),
                     );
                 }
 
@@ -399,7 +392,7 @@ final class TypeScriptEmitter
 
     /**
      * @param list<CollectedApiResponseClass> $responses
-     * @return list<class-string>
+     * @return list<string>
      */
     private function collectLocalEnums(string $domain, CollectedDomain $collected, array $responses): array
     {
@@ -467,7 +460,7 @@ final class TypeScriptEmitter
     }
 
     /**
-     * @param list<class-string> $enumClasses
+     * @param list<string> $enumClasses
      */
     private function appendLocalEnums(string $domain, ParsedType $type, array &$enumClasses): void
     {

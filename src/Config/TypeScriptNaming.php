@@ -59,15 +59,31 @@ final readonly class TypeScriptNaming
         }
 
         return new self(
-            interfacePrefix: $config['interfacePrefix'] ?? '',
-            enumValueSuffix: $config['enumValueSuffix'] ?? '',
-            enumShapeSuffix: $config['enumShapeSuffix'] ?? 'Data',
-            queryAliasSuffix: $config['queryAliasSuffix'] ?? 'Query',
-            bodyAliasSuffix: $config['bodyAliasSuffix'] ?? 'Body',
-            pathAliasSuffix: $config['pathAliasSuffix'] ?? 'PathParams',
-            endpointMapSuffix: $config['endpointMapSuffix'] ?? 'EndpointMap',
-            endpointResultSuffix: $config['endpointResultSuffix'] ?? 'Result',
+            interfacePrefix: self::stringOption($config, 'interfacePrefix', ''),
+            enumValueSuffix: self::stringOption($config, 'enumValueSuffix', ''),
+            enumShapeSuffix: self::stringOption($config, 'enumShapeSuffix', 'Data'),
+            queryAliasSuffix: self::stringOption($config, 'queryAliasSuffix', 'Query'),
+            bodyAliasSuffix: self::stringOption($config, 'bodyAliasSuffix', 'Body'),
+            pathAliasSuffix: self::stringOption($config, 'pathAliasSuffix', 'PathParams'),
+            endpointMapSuffix: self::stringOption($config, 'endpointMapSuffix', 'EndpointMap'),
+            endpointResultSuffix: self::stringOption($config, 'endpointResultSuffix', 'Result'),
         );
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private static function stringOption(array $config, string $key, string $default): string
+    {
+        $value = $config[$key] ?? $default;
+        if (!is_string($value)) {
+            throw new RuntimeException(\sprintf(
+                'TypeScript naming config key "%s" must be a string.',
+                $key,
+            ));
+        }
+
+        return $value;
     }
 
     public function interfaceName(string $name): string
