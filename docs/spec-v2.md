@@ -83,7 +83,7 @@ TypeBridge aims for strong guarantees over declared response contracts. It does 
 TypeBridge provides:
 
 ```php
-namespace TypeBridge;
+namespace PTGS\TypeBridge\Contract;
 
 interface ApiResponse {}
 
@@ -99,20 +99,23 @@ abstract class ThrowableApiResponse extends \RuntimeException implements ApiErro
 It also provides status marker interfaces:
 
 ```php
-namespace TypeBridge\Status;
+namespace PTGS\TypeBridge\Status;
 
-interface HttpOk extends \TypeBridge\ApiSuccessResponse {}
-interface HttpCreated extends \TypeBridge\ApiSuccessResponse {}
-interface HttpAccepted extends \TypeBridge\ApiSuccessResponse {}
-interface HttpNoContent extends \TypeBridge\ApiSuccessResponse {}
+use PTGS\TypeBridge\Contract\ApiErrorResponse;
+use PTGS\TypeBridge\Contract\ApiSuccessResponse;
 
-interface HttpBadRequest extends \TypeBridge\ApiErrorResponse {}
-interface HttpUnauthorized extends \TypeBridge\ApiErrorResponse {}
-interface HttpForbidden extends \TypeBridge\ApiErrorResponse {}
-interface HttpNotFound extends \TypeBridge\ApiErrorResponse {}
-interface HttpConflict extends \TypeBridge\ApiErrorResponse {}
-interface HttpUnprocessableEntity extends \TypeBridge\ApiErrorResponse {}
-interface HttpInternalServerError extends \TypeBridge\ApiErrorResponse {}
+interface HttpOk extends ApiSuccessResponse {}
+interface HttpCreated extends ApiSuccessResponse {}
+interface HttpAccepted extends ApiSuccessResponse {}
+interface HttpNoContent extends ApiSuccessResponse {}
+
+interface HttpBadRequest extends ApiErrorResponse {}
+interface HttpUnauthorized extends ApiErrorResponse {}
+interface HttpForbidden extends ApiErrorResponse {}
+interface HttpNotFound extends ApiErrorResponse {}
+interface HttpConflict extends ApiErrorResponse {}
+interface HttpUnprocessableEntity extends ApiErrorResponse {}
+interface HttpInternalServerError extends ApiErrorResponse {}
 ```
 
 Each response class must implement exactly one status interface.
@@ -190,7 +193,7 @@ interface ShapeNormalizer
 {
     /**
      * @param TSource $source
-     * @return array
+     * @return array<string, mixed>
      */
     public function normalize(object $source): array;
 }
@@ -445,7 +448,7 @@ Response DTOs must not contain raw entities or other domain objects that still n
 ### Success Responses
 
 ```php
-use TypeBridge\Status\HttpOk;
+use PTGS\TypeBridge\Status\HttpOk;
 
 /**
  * @phpstan-import-type _self from ProjectDetailView as ProjectData
@@ -460,7 +463,7 @@ final class ShowProjectResponse implements HttpOk
 ```
 
 ```php
-use TypeBridge\Status\HttpCreated;
+use PTGS\TypeBridge\Status\HttpCreated;
 
 /**
  * @phpstan-import-type _self from ProjectDetailView as ProjectData
@@ -477,7 +480,7 @@ final class CreateProjectResponse implements HttpCreated
 ### No-Content Responses
 
 ```php
-use TypeBridge\Status\HttpNoContent;
+use PTGS\TypeBridge\Status\HttpNoContent;
 
 final class DeleteProjectResponse implements HttpNoContent
 {
@@ -489,8 +492,8 @@ final class DeleteProjectResponse implements HttpNoContent
 ### Error Responses
 
 ```php
-use TypeBridge\ThrowableApiResponse;
-use TypeBridge\Status\HttpConflict;
+use PTGS\TypeBridge\Contract\ThrowableApiResponse;
+use PTGS\TypeBridge\Status\HttpConflict;
 
 final class ConflictResponse extends ThrowableApiResponse implements HttpConflict
 {
@@ -504,8 +507,8 @@ final class ConflictResponse extends ThrowableApiResponse implements HttpConflic
 ```
 
 ```php
-use TypeBridge\ThrowableApiResponse;
-use TypeBridge\Status\HttpUnprocessableEntity;
+use PTGS\TypeBridge\Contract\ThrowableApiResponse;
+use PTGS\TypeBridge\Status\HttpUnprocessableEntity;
 
 final class ValidationErrorResponse extends ThrowableApiResponse implements HttpUnprocessableEntity
 {
@@ -532,7 +535,7 @@ Error response classes are both:
 Each controller method declares its complete typed response contract with one attribute:
 
 ```php
-use TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Attribute\ApiResponses;
 
 #[ApiResponses([
     CreateProjectResponse::class,
@@ -691,7 +694,7 @@ final class ProjectDetailNormalizer implements ShapeNormalizer
 ```
 
 ```php
-use TypeBridge\Status\HttpOk;
+use PTGS\TypeBridge\Status\HttpOk;
 
 /**
  * @phpstan-import-type _self from ProjectDetailView as ProjectData
@@ -833,14 +836,13 @@ The static-analysis layer is the enforcement mechanism.
 
 ### Implemented Today
 
-- routed API controller methods must declare `#[ApiResponses([...])]`
-- routed `POST`/`PUT`/`PATCH` API controller methods must declare `#[ApiRequest(...)]`
-- concrete typed `ApiResponse` return types must be listed in `#[ApiResponses([...])]`
-- typed `ApiErrorResponse` throws in controller bodies must be listed in `#[ApiResponses([...])]`
-- `ContractFormType<TData>` must stay aligned with its configured `data_class`
-- contract form `data_class` types must declare `_self`
-- mapped contract form fields are checked against the backing object graph, including `property_path`
-- nested custom compound forms must also participate in the TypeBridge contract subset
+- routed API controller methods must declare `#[ApiResponses([...])]` (`ApiResponsesRequiredRule`)
+- routed `POST`/`PUT`/`PATCH` API controller methods must declare `#[ApiRequest(...)]` (`MutatingApiRequestRequiredRule`)
+- concrete typed `ApiResponse` return types must be listed in `#[ApiResponses([...])]` (`ApiResponseDeclarationRule`)
+- typed `ApiErrorResponse` throws in controller bodies must be listed in `#[ApiResponses([...])]` (`ApiResponseDeclarationRule`)
+- `ContractFormType<TData>` must stay aligned with its configured `data_class`, `_self`, mapped fields, `property_path`, and nested custom forms (`ContractFormTypeRule`)
+- `_self` shape naming: no `Id` suffix on string reference fields (`NoIdSuffixRule`)
+- `_self` shape naming: no paired `entityType` / `entityId` fields — use a compound `entity: "{type}-{uuid}"` (`NoTypeIdPairRule`)
 
 The remaining rules below are still part of the intended direction.
 
@@ -866,15 +868,7 @@ Every response class must implement exactly one of:
 
 In practice, the status marker interfaces can extend those base interfaces so the kind is inferred.
 
-### Rule 5: `EndpointReturnSubsetRule`
-
-Every response class returned by a controller method must be declared in `#[ApiResponses([...])]`.
-
-### Rule 6: `EndpointThrowsSubsetRule`
-
-Every typed API error response thrown from a controller method must be declared in `#[ApiResponses([...])]`.
-
-### Rule 7: `ApiResponsesClassKindRule`
+### Rule 5: `ApiResponsesClassKindRule`
 
 Every class listed in `#[ApiResponses([...])]` must implement exactly one of:
 
@@ -883,15 +877,15 @@ Every class listed in `#[ApiResponses([...])]` must implement exactly one of:
 
 and exactly one known HTTP status marker interface.
 
-### Rule 8: `DuplicateStatusPerEndpointRule`
+### Rule 6: `DuplicateStatusPerEndpointRule`
 
 Fail if an endpoint declares two different response classes with the same HTTP status unless explicitly allowed in a future extension.
 
-### Rule 9: `NoRawObjectsInResponseDtoRule`
+### Rule 7: `NoRawObjectsInResponseDtoRule`
 
 Response DTO properties may not contain raw entities/domain objects. They must contain already-serialized contract values.
 
-### Rule 10: `UnusedResponseClassRule` (optional)
+### Rule 8: `UnusedResponseClassRule` (optional)
 
 Warn when a response class is never referenced by any `#[ApiResponses]` attribute.
 

@@ -8,14 +8,13 @@ It provides:
 - `#[ApiRequest(...)]` to declare flat endpoint request contracts for query/body/path inputs
 - semantic status marker interfaces such as `HttpOk` and `HttpCreated`
 - collectors for `_self` PHPStan shapes, response DTOs, endpoint contracts, and Symfony form-backed request inputs
-- a PHPStan extension for endpoint and contract-form enforcement
+- a PHPStan extension for endpoint, contract-form, and shape-naming enforcement
 - a TypeScript emitter that produces shape types, response types, request aliases, and endpoint result unions
 - configurable TypeScript naming for interfaces, enum value aliases, enum `_self` objects, and endpoint alias suffixes
 
 ## Docs
 
 - [Specification v2](docs/spec-v2.md)
-- [Session notes](docs/session-notes.md)
 
 ## Example: serializable enum as object data
 
@@ -81,7 +80,7 @@ export interface ProjectStatusData {
 }
 ```
 
-Enum-owned `_self` shapes emit as `<EnumName>Data` to avoid colliding with the enum value union.
+Enum-owned `_self` shapes emit with a suffix (default `Data`) to avoid colliding with the enum value union. Override via `enumShapeSuffix` (see [TypeScript naming](#typescript-naming)).
 
 ## TypeScript naming
 
@@ -109,6 +108,19 @@ return [
     ],
 ];
 ```
+
+Defaults when unset:
+
+| Key                    | Default       |
+| ---------------------- | ------------- |
+| `interfacePrefix`      | `''`          |
+| `enumValueSuffix`      | `''`          |
+| `enumShapeSuffix`      | `'Data'`      |
+| `queryAliasSuffix`     | `'Query'`     |
+| `bodyAliasSuffix`      | `'Body'`      |
+| `pathAliasSuffix`      | `'PathParams'`|
+| `endpointMapSuffix`    | `'EndpointMap'`|
+| `endpointResultSuffix` | `'Result'`    |
 
 The knobs are intentionally narrow:
 
@@ -149,6 +161,7 @@ This first cut is focused on contract collection and code generation:
   - `#[ApiRequest]` on routed mutating API controller methods
   - returned/thrown typed response classes being declared in `#[ApiResponses]`
   - `ContractFormType<TData>` syncing with `data_class`, `_self`, mapped fields, `property_path`, nested custom forms, enums, dates, collections, and common scalar leaf types
+  - `_self` shape naming: no `Id` suffix on string reference fields, and no `entityType` / `entityId` pair (use a compound `entity: "{type}-{uuid}"`)
 
 For request contracts, `query` and `body` point at Symfony form types directly. TypeBridge resolves the form's `data_class` and uses that class's `_self` definition as the generated wire contract.
 Custom forms participating in request contracts must implement `PTGS\TypeBridge\Contract\ContractFormType`.
@@ -165,6 +178,19 @@ includes:
 ```
 
 The rules intentionally target the analyzable subset. If a contract form becomes too dynamic, TypeBridge should fail instead of guessing.
+
+### Shape naming allowlist
+
+The `_self` shape-naming rules flag any string field ending in `Id` as a reference that should be named after the entity (e.g. `project` rather than `projectId`). External-system identifiers can be allow-listed:
+
+```neon
+parameters:
+    typeBridge:
+        shapeNaming:
+            allowIdSuffix:
+                - stripeCustomerId
+                - xeroInvoiceId
+```
 
 ## Testing
 
