@@ -73,8 +73,8 @@ final class PhpDocTypeCollector
     }
 
     /**
-     * @param list<class-string> $classNames
-     * @return array<string, list<class-string>>
+     * @param list<string> $classNames
+     * @return array<string, list<string>>
      */
     private function buildShortNameMap(array $classNames): array
     {

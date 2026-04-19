@@ -47,8 +47,8 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * @param array<class-string, string> $classFiles
-     * @param array<string, list<class-string>> $shortNameMap
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
      * @return array<string, ImportedType>
      */
     public function extractImportedTypes(
@@ -125,9 +125,15 @@ final class PhpDocTypeHelper
         }
 
         if ($type instanceof IntersectionType) {
+            $base = $this->resolveImportedNames($type->base, $imports);
+            $extra = $this->resolveImportedNames($type->extra, $imports);
+            if (!$base instanceof NameRefType || !$extra instanceof ShapeType) {
+                throw new RuntimeException('Resolved intersection type became invalid after import resolution.');
+            }
+
             return new IntersectionType(
-                base: $this->resolveImportedNames($type->base, $imports),
-                extra: $this->resolveImportedNames($type->extra, $imports),
+                base: $base,
+                extra: $extra,
             );
         }
 
@@ -207,8 +213,8 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * @param array<class-string, string> $classFiles
-     * @param array<string, list<class-string>> $shortNameMap
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
      */
     private function resolveClassReference(
         string $classRef,

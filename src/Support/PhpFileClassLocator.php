@@ -7,11 +7,12 @@ namespace PTGS\TypeBridge\Support;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RegexIterator;
+use SplFileInfo;
 
 final class PhpFileClassLocator
 {
     /**
-     * @return array<class-string, string>
+     * @return array<string, string>
      */
     public function classesIn(string $directory): array
     {
@@ -23,6 +24,10 @@ final class PhpFileClassLocator
         );
 
         foreach ($iterator as $fileInfo) {
+            if (!$fileInfo instanceof SplFileInfo) {
+                continue;
+            }
+
             $file = $fileInfo->getPathname();
             $content = file_get_contents($file);
             if (false === $content) {

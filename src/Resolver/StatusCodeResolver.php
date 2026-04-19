@@ -37,6 +37,9 @@ final class StatusCodeResolver
         HttpInternalServerError::class => 500,
     ];
 
+    /**
+     * @param ReflectionClass<object> $class
+     */
     public function resolve(ReflectionClass $class): int
     {
         $matches = $this->matchingInterfaces($class);
@@ -51,11 +54,17 @@ final class StatusCodeResolver
         return self::STATUS_INTERFACES[$matches[0]];
     }
 
+    /**
+     * @param ReflectionClass<object> $class
+     */
     public function isError(ReflectionClass $class): bool
     {
         return $class->implementsInterface(ApiErrorResponse::class);
     }
 
+    /**
+     * @param ReflectionClass<object> $class
+     */
     public function assertResponseClass(ReflectionClass $class): void
     {
         if (!$class->implementsInterface(ApiResponse::class)) {
@@ -66,6 +75,7 @@ final class StatusCodeResolver
     }
 
     /**
+     * @param ReflectionClass<object> $class
      * @return list<class-string>
      */
     private function matchingInterfaces(ReflectionClass $class): array

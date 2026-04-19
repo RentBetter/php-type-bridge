@@ -108,8 +108,8 @@ final class ResponseClassCollector
     }
 
     /**
-     * @param list<class-string> $classNames
-     * @return array<string, list<class-string>>
+     * @param list<string> $classNames
+     * @return array<string, list<string>>
      */
     private function buildShortNameMap(array $classNames): array
     {
@@ -138,10 +138,16 @@ final class ResponseClassCollector
         }
 
         if ($type instanceof ReflectionUnionType) {
-            return implode('|', array_map(
-                static fn(ReflectionNamedType $namedType): string => $namedType->getName(),
-                $type->getTypes(),
-            ));
+            $names = [];
+            foreach ($type->getTypes() as $namedType) {
+                if (!$namedType instanceof ReflectionNamedType) {
+                    continue;
+                }
+
+                $names[] = $namedType->getName();
+            }
+
+            return implode('|', $names);
         }
 
         return 'mixed';

@@ -7,17 +7,18 @@ namespace PTGS\TypeBridge\Resolver;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionEnum;
+use ReflectionEnumBackedCase;
 use RuntimeException;
 
 final class EnumResolver
 {
-    /** @var array<class-string, list<string>> */
+    /** @var array<string, list<string>> */
     private array $cache = [];
 
-    /** @var array<string, class-string> */
+    /** @var array<string, string> */
     private array $classMap = [];
 
-    /** @var array<class-string, string> */
+    /** @var array<string, string> */
     private array $domainMap = [];
 
     public function __construct(
@@ -33,11 +34,17 @@ final class EnumResolver
             }
 
             $reflection = new ReflectionEnum($className);
-            if (!$reflection->isBacked() || 'string' !== (string) $reflection->getBackingType()) {
+            $backingType = $reflection->getBackingType();
+            if (!$reflection->isBacked() || null === $backingType || 'string' !== $backingType->getName()) {
                 continue;
             }
 
-            $this->classMap[$reflection->getShortName()] = $className;
+            $shortName = $reflection->getShortName();
+            if (!is_string($shortName) || '' === $shortName) {
+                continue;
+            }
+
+            $this->classMap[$shortName] = $className;
             $this->domainMap[$className] = $this->domainGuesser->guess($srcDir, $file);
         }
     }
@@ -57,13 +64,24 @@ final class EnumResolver
         }
 
         $reflection = new ReflectionEnum($fqcn);
-        if (!$reflection->isBacked() || 'string' !== (string) $reflection->getBackingType()) {
+        $backingType = $reflection->getBackingType();
+        if (!$reflection->isBacked() || null === $backingType || 'string' !== $backingType->getName()) {
             throw new RuntimeException(\sprintf('Enum "%s" must be string-backed.', $fqcn));
         }
 
         $values = [];
-        foreach ($reflection->getCases() as $case) {
-            $values[] = $case->getBackingValue();
+        $cases = $reflection->getCases();
+        if (!is_array($cases)) {
+            throw new RuntimeException(\sprintf('Enum "%s" cases could not be inspected.', $fqcn));
+        }
+
+        foreach ($cases as $case) {
+            if ($case instanceof ReflectionEnumBackedCase) {
+                $value = $case->getBackingValue();
+                if (is_string($value)) {
+                    $values[] = $value;
+                }
+            }
         }
 
         $this->cache[$fqcn] = $values;

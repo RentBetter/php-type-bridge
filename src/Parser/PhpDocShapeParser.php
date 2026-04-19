@@ -98,7 +98,7 @@ final class PhpDocShapeParser
 
         // Optional key: ?fieldName: type
         $optional = false;
-        $ident = null;
+        $fieldName = null;
         if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
             // Disambiguate: ?fieldName: vs ?type
             // Look ahead for ident followed by ':'
@@ -109,16 +109,15 @@ final class PhpDocShapeParser
             $this->skipWhitespace();
             if (null !== $ident && $this->pos < $this->len && ':' === $this->input[$this->pos]) {
                 $optional = true;
-            // ident and pos are set correctly, fall through
+                $fieldName = $ident;
             } else {
                 // Not an optional field, restore
                 $this->pos = $saved;
-                $ident = null;
             }
         }
 
         if (!$optional) {
-            $ident = $this->parseIdent();
+            $fieldName = $this->parseIdent();
         }
 
         $this->skipWhitespace();
@@ -127,11 +126,7 @@ final class PhpDocShapeParser
 
         $type = $this->parseType();
 
-        // If the field is optional via ?key syntax, we don't wrap in NullableType
-        // The optional flag on ShapeField handles this
-        assert(null !== $ident);
-
-        return new ShapeField($ident, $type, $optional);
+        return new ShapeField($fieldName, $type, $optional);
     }
 
     private function parseType(): ParsedType

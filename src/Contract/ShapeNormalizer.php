@@ -12,7 +12,7 @@ interface ShapeNormalizer
 {
     /**
      * @param TSource $source
-     * @return array
+     * @return array<string, mixed>
      */
     public function normalize(object $source): array;
 }

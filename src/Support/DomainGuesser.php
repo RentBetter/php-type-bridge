@@ -14,7 +14,7 @@ final class DomainGuesser
         }
 
         $segments = preg_split('#[\\\\/]#', $relative);
-        if (false === $segments || [] === $segments) {
+        if (false === $segments) {
             return 'Common';
         }
 
