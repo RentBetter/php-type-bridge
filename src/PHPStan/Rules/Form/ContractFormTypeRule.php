@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\PHPStan\Rules\Form;
 
 use PhpParser\Node;
+use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassNode;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
@@ -25,17 +26,20 @@ final class ContractFormTypeRule implements Rule
         return InClassNode::class;
     }
 
-    public function processNode(Node $node, \PHPStan\Analyser\Scope $scope): array
+    public function processNode(Node $node, Scope $scope): array
     {
         $classReflection = $node->getClassReflection();
-        if (null === $classReflection || !$classReflection->implementsInterface(ContractFormType::class)) {
+        if (!$classReflection->implementsInterface(ContractFormType::class)) {
             return [];
         }
 
         $line = $node->getOriginalNode()->getStartLine();
 
         return array_map(
-            static fn (string $message) => RuleErrorBuilder::message($message)->line($line)->build(),
+            static fn (string $message) => RuleErrorBuilder::message($message)
+                ->identifier('typeBridge.contractForm')
+                ->line($line)
+                ->build(),
             $this->validator->validate($classReflection->getName()),
         );
     }

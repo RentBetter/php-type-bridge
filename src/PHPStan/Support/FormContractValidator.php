@@ -84,6 +84,11 @@ final class FormContractValidator
         return $errors;
     }
 
+    /**
+     * @template TObject of object
+     * @param ReflectionClass<TObject> $reflection
+     * @return class-string|null
+     */
     private function resolveGenericDataClass(ReflectionClass $reflection): ?string
     {
         $docComment = $reflection->getDocComment();
@@ -112,11 +117,11 @@ final class FormContractValidator
             }
         }
 
-        return $dataClass;
+        return null;
     }
 
     /**
-     * @param class-string $dataClass
+     * @param class-string $rootDataClass
      * @return list<string>
      */
     private function validateField(string $formClass, string $rootDataClass, CollectedFormField $field): array
@@ -146,6 +151,17 @@ final class FormContractValidator
 
         if (null !== $field->dataClass && [] !== $field->children) {
             $errors = [];
+            if (!class_exists($field->dataClass)) {
+                $errors[] = \sprintf(
+                    'Contract form "%s" field "%s" references unknown nested data class "%s".',
+                    $formClass,
+                    $field->name,
+                    $field->dataClass,
+                );
+
+                return $errors;
+            }
+
             if (!$this->propertyAcceptsClass($property, $field->dataClass)) {
                 $errors[] = \sprintf(
                     'Contract form "%s" field "%s" expects property "%s" to be "%s".',
@@ -309,18 +325,14 @@ final class FormContractValidator
         return $property;
     }
 
+    /**
+     * @return class-string|null
+     */
     private function resolveTraversablePropertyClass(ReflectionProperty $property): ?string
     {
-        $type = $property->getType();
-        if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
-            return $type->getName();
-        }
-
-        if ($type instanceof ReflectionUnionType) {
-            foreach ($type->getTypes() as $namedType) {
-                if (!$namedType->isBuiltin()) {
-                    return $namedType->getName();
-                }
+        foreach ($this->namedTypes($property->getType()) as $namedType) {
+            if (!$namedType->isBuiltin() && class_exists($namedType->getName())) {
+                return $namedType->getName();
             }
         }
 
@@ -438,6 +450,11 @@ final class FormContractValidator
         return null !== $type && '' !== $type ? ltrim($type, '\\') : null;
     }
 
+    /**
+     * @template TObject of object
+     * @param ReflectionClass<TObject> $reflection
+     * @return class-string|null
+     */
     private function resolveImportedClass(ReflectionClass $reflection, string $shortName): ?string
     {
         $file = $reflection->getFileName();
@@ -462,7 +479,7 @@ final class FormContractValidator
                 continue;
             }
 
-            return $importedClass;
+            return class_exists($importedClass) ? $importedClass : null;
         }
 
         return null;

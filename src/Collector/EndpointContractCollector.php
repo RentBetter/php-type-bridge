@@ -92,7 +92,7 @@ final class EndpointContractCollector
     }
 
     /**
-     * @param array<class-string, string> $classFiles
+     * @param array<string, string> $classFiles
      */
     private function resolveRequestContract(ReflectionMethod $method, string $srcDir, array $classFiles): ?CollectedEndpointRequest
     {
@@ -114,8 +114,8 @@ final class EndpointContractCollector
     }
 
     /**
-     * @param array<class-string, string> $classFiles
-     * @param class-string $formClass
+     * @param array<string, string> $classFiles
+     * @param class-string<\PTGS\TypeBridge\Contract\ContractFormType<object>> $formClass
      */
     private function resolveFormClass(string $formClass, string $srcDir, array $classFiles): CollectedInputReference
     {
@@ -145,7 +145,7 @@ final class EndpointContractCollector
     }
 
     /**
-     * @param array<class-string, string> $classFiles
+     * @param array<string, string> $classFiles
      * @param class-string|null $formClass
      * @param class-string $ownerClass
      * @param list<\PTGS\TypeBridge\Model\CollectedFormField> $fields

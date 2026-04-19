@@ -23,7 +23,7 @@ final class FormTypeInspector
     }
 
     /**
-     * @param class-string<FormTypeInterface> $formClass
+     * @param class-string $formClass
      * @return array{dataClass: ?class-string, fields: list<CollectedFormField>}
      */
     public function inspect(string $formClass): array
@@ -32,14 +32,7 @@ final class FormTypeInspector
             throw new RuntimeException(\sprintf('Form class "%s" was not found.', $formClass));
         }
 
-        if (!is_a($formClass, FormTypeInterface::class, true)) {
-            throw new RuntimeException(\sprintf(
-                'Form class "%s" must implement "%s".',
-                $formClass,
-                FormTypeInterface::class,
-            ));
-        }
-
+        $this->assertFormTypeInterface($formClass);
         $this->assertContractFormType($formClass);
 
         $builder = $this->formFactory->createBuilder($formClass);
@@ -89,7 +82,25 @@ final class FormTypeInspector
     }
 
     /**
-     * @param class-string<FormTypeInterface> $formClass
+     * @param class-string $formClass
+     * @phpstan-assert class-string<FormTypeInterface> $formClass
+     */
+    private function assertFormTypeInterface(string $formClass): void
+    {
+        if (is_a($formClass, FormTypeInterface::class, true)) {
+            return;
+        }
+
+        throw new RuntimeException(\sprintf(
+            'Form class "%s" must implement "%s".',
+            $formClass,
+            FormTypeInterface::class,
+        ));
+    }
+
+    /**
+     * @param class-string $formClass
+     * @phpstan-assert class-string<ContractFormType<object>> $formClass
      */
     private function assertContractFormType(string $formClass): void
     {

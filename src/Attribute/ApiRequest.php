@@ -11,9 +11,9 @@ use PTGS\TypeBridge\Contract\ContractFormType;
 final readonly class ApiRequest
 {
     /**
-     * @param class-string<ContractFormType>|null $query
-     * @param class-string<ContractFormType>|null $body
-     * @param class-string|null $path
+     * @param class-string<ContractFormType<object>>|null $query
+     * @param class-string<ContractFormType<object>>|null $body
+     * @param class-string<object>|null $path
      */
     public function __construct(
         public ?string $query = null,
