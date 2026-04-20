@@ -36,6 +36,9 @@ final class TypeScriptEmitter
     /** @var array<string, string> */
     private array $currentImportedSymbols = [];
 
+    /** @var array<string, array<string, string>> [foreignDomain => [canonicalName => aliasInThisFile]] */
+    private array $currentForeignAliases = [];
+
     private TypeScriptNaming $naming;
 
     public function __construct(
@@ -89,12 +92,18 @@ final class TypeScriptEmitter
         $lines[] = '';
 
         $imports = $this->collectExternalImports($domain, $collected, $responses, $contracts);
+        $this->currentForeignAliases = $this->computeForeignAliases($domain, $collected, $responses, $contracts, $imports);
         foreach ($imports as $importDomain => $symbols) {
             sort($symbols);
             $symbols = array_values(array_unique($symbols));
+            $tokens = array_map(function (string $symbol) use ($importDomain): string {
+                $alias = $this->currentForeignAliases[$importDomain][$symbol] ?? $symbol;
+
+                return $alias === $symbol ? $symbol : \sprintf('%s as %s', $symbol, $alias);
+            }, $symbols);
             $lines[] = \sprintf(
                 "import type { %s } from '%s';",
-                implode(', ', $symbols),
+                implode(', ', $tokens),
                 $this->domainMapper->getRelativeImportPath($domain, $importDomain),
             );
         }
@@ -596,12 +605,30 @@ final class TypeScriptEmitter
 
     private function symbolFor(string $domain, string $logicalName): string
     {
-        return $this->symbolMaps[$domain][$logicalName] ?? $logicalName;
+        if (!isset($this->symbolMaps[$domain][$logicalName])) {
+            throw new RuntimeException(\sprintf(
+                'Unknown TypeScript symbol "%s" referenced in domain "%s". Declare it via @phpstan-type, '
+                . 'import it via @phpstan-import-type, or implement ApiResponse on the response class.',
+                $logicalName,
+                $domain,
+            ));
+        }
+
+        return $this->symbolMaps[$domain][$logicalName];
+    }
+
+    private function localReferenceFor(string $foreignDomain, string $name): string
+    {
+        if ($foreignDomain === $this->currentDomain) {
+            return $this->symbolFor($foreignDomain, $name);
+        }
+
+        return $this->currentForeignAliases[$foreignDomain][$name] ?? $this->symbolFor($foreignDomain, $name);
     }
 
     private function symbolForInputReference(CollectedInputReference $input): string
     {
-        return $this->symbolFor($input->domain, $input->typeName);
+        return $this->localReferenceFor($input->domain, $input->typeName);
     }
 
     /**
@@ -612,7 +639,7 @@ final class TypeScriptEmitter
     {
         $symbols = [];
         foreach ($imports as $importedType) {
-            $symbols[$importedType->targetTypeName] = $this->symbolFor($importedType->targetDomain, $importedType->targetTypeName);
+            $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
         }
 
         return $symbols;
@@ -648,6 +675,82 @@ final class TypeScriptEmitter
 
     private function responseSymbolName(CollectedApiResponseClass $response): string
     {
-        return $this->symbolFor($response->domain, $response->name);
+        return $this->localReferenceFor($response->domain, $response->name);
+    }
+
+    /**
+     * @param list<CollectedApiResponseClass> $responses
+     * @param list<CollectedEndpointContract> $contracts
+     * @param array<string, list<string>> $imports
+     * @return array<string, array<string, string>>
+     */
+    private function computeForeignAliases(
+        string $domain,
+        CollectedDomain $collected,
+        array $responses,
+        array $contracts,
+        array $imports,
+    ): array {
+        $usedNames = $this->localEmittedNames($domain, $collected, $responses, $contracts);
+        $aliases = [];
+
+        $importDomains = array_keys($imports);
+        sort($importDomains);
+
+        foreach ($importDomains as $importDomain) {
+            $names = array_values(array_unique($imports[$importDomain]));
+            sort($names);
+            foreach ($names as $name) {
+                $alias = $name;
+                if (isset($usedNames[$alias])) {
+                    $alias = $importDomain . $name;
+                    $suffix = 0;
+                    while (isset($usedNames[$alias])) {
+                        $alias = $importDomain . $name . (++$suffix);
+                    }
+                }
+                $aliases[$importDomain][$name] = $alias;
+                $usedNames[$alias] = true;
+            }
+        }
+
+        return $aliases;
+    }
+
+    /**
+     * @param list<CollectedApiResponseClass> $responses
+     * @param list<CollectedEndpointContract> $contracts
+     * @return array<string, true>
+     */
+    private function localEmittedNames(string $domain, CollectedDomain $collected, array $responses, array $contracts): array
+    {
+        $names = [];
+        foreach ($collected->types as $type) {
+            $names[$this->typeDeclarationName($type)] = true;
+        }
+        foreach ($responses as $response) {
+            $names[$this->responseDeclarationName($response)] = true;
+        }
+        foreach ($this->collectLocalEnums($domain, $collected, $responses) as $enumClass) {
+            $names[$this->enumName($enumClass)] = true;
+        }
+        foreach ($contracts as $contract) {
+            $request = $contract->request;
+            if (null !== $request) {
+                if (null !== $request->query) {
+                    $names[$this->naming->queryAliasName($contract->name)] = true;
+                }
+                if (null !== $request->body) {
+                    $names[$this->naming->bodyAliasName($contract->name)] = true;
+                }
+                if (null !== $request->path) {
+                    $names[$this->naming->pathAliasName($contract->name)] = true;
+                }
+            }
+            $names[$this->naming->endpointMapName($contract->name)] = true;
+            $names[$this->naming->endpointResultName($contract->name)] = true;
+        }
+
+        return $names;
     }
 }

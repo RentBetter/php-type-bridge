@@ -44,6 +44,16 @@ final class EnumResolver
                 continue;
             }
 
+            if (isset($this->classMap[$shortName]) && $this->classMap[$shortName] !== $className) {
+                throw new RuntimeException(\sprintf(
+                    'Enum short-name collision: "%s" is declared by both "%s" and "%s". '
+                    . 'Rename one of the enums so that each short name is unique across the codebase.',
+                    $shortName,
+                    $this->classMap[$shortName],
+                    $className,
+                ));
+            }
+
             $this->classMap[$shortName] = $className;
             $this->domainMap[$className] = $this->domainGuesser->guess($srcDir, $file);
         }

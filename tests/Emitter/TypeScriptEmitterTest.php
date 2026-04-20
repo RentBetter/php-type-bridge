@@ -147,6 +147,44 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface IValidationErrorResponse {', $common);
     }
 
+    public function test_it_aliases_cross_domain_response_collisions(): void
+    {
+        $srcDir = \PTGS\TypeBridge\Tests\Fixture\AliasFixtureProject::srcDir();
+        $responseCollector = new ResponseClassCollector();
+        $responseDomains = $responseCollector->collect($srcDir);
+        $contracts = (new EndpointContractCollector())->collect($srcDir, $responseCollector->collectIndex($srcDir));
+
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($srcDir);
+
+        $output = (new TypeScriptEmitter($enumResolver, new DomainMapper('/tmp/type-bridge-output')))
+            ->emit([], $responseDomains, $contracts);
+
+        $projects = $output['Projects'];
+        self::assertStringContainsString("import type { SharedResponse as CommonSharedResponse } from '../Common/genTypes';", $projects);
+        self::assertStringContainsString('export interface SharedResponse {', $projects);
+        self::assertStringContainsString('reason: string;', $projects);
+        self::assertStringContainsString('export type SharedEndpointMap = {', $projects);
+        self::assertStringContainsString('  200: CommonSharedResponse;', $projects);
+        self::assertStringContainsString('  404: SharedResponse;', $projects);
+    }
+
+    public function test_it_throws_when_referencing_unknown_type(): void
+    {
+        $srcDir = \PTGS\TypeBridge\Tests\InvalidFixture\InvalidFixtureProject::srcDir('UnknownTypeRef');
+        $typeDomains = (new PhpDocTypeCollector())->collect($srcDir);
+        $responseDomains = (new ResponseClassCollector())->collect($srcDir);
+
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($srcDir);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Unknown TypeScript symbol "GhostType" referenced in domain "View"');
+
+        (new TypeScriptEmitter($enumResolver, new DomainMapper('/tmp/type-bridge-output')))
+            ->emit($typeDomains, $responseDomains);
+    }
+
     public function test_it_fails_when_custom_names_collide(): void
     {
         $srcDir = FixtureProject::srcDir();
