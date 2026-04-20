@@ -1,5 +1,5 @@
 {
-    "name": "rentbetter/php-type-bridge",
+    "name": "ptgs/php-type-bridge",
     "description": "Static API contract collection and TypeScript generation for PHP APIs",
     "type": "library",
     "license": "MIT",

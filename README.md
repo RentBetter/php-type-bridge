@@ -174,7 +174,7 @@ Include the packaged rules in your project config:
 
 ```neon
 includes:
-    - vendor/rentbetter/php-type-bridge/extension.neon
+    - vendor/ptgs/php-type-bridge/extension.neon
 ```
 
 The rules intentionally target the analyzable subset. If a contract form becomes too dynamic, TypeBridge should fail instead of guessing.
