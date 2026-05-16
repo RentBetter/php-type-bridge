@@ -9,7 +9,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\View;
  *
  * @phpstan-type _self = ProjectBaseData & array{
  *     canEdit: bool,
- *     ownerNotes: string|null,
+ *     ownerNotes: ?string,
  * }
  */
 final class ProjectOwnerView

@@ -1,5 +1,5 @@
 includes:
-    - vendor/ptgs/phpstan-rules/extension.neon
+    - vendor/rentbetter/phpstan-rules/extension.neon
     - extension.neon
 
 parameters:

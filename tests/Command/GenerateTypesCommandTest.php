@@ -27,6 +27,9 @@ return [
         'enumShapeSuffix' => '',
         'bodyAliasSuffix' => 'Payload',
     ],
+    'preserveNull' => [
+        'ProjectAdminView.internalNotes',
+    ],
 ];
 PHP);
 

@@ -7,11 +7,10 @@ namespace PTGS\TypeBridge\Command;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
-use PTGS\TypeBridge\Config\TypeScriptNaming;
+use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
-use RuntimeException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -55,10 +54,13 @@ final class GenerateTypesCommand extends Command
         $responses = $responseCollector->collect($sourceDir);
         $contracts = $endpointCollector->collect($sourceDir, $responseCollector->collectIndex($sourceDir));
 
+        $config = null !== $configFile ? TypeBridgeConfig::fromFile($configFile) : new TypeBridgeConfig();
+
         $emitter = new TypeScriptEmitter(
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper($outputDir),
-            naming: $this->loadTypeScriptNaming($configFile),
+            naming: $config->typescript,
+            preserveNull: $config->preserveNull,
         );
 
         foreach ($emitter->emit($domains, $responses, $contracts) as $domain => $typescript) {
@@ -72,54 +74,5 @@ final class GenerateTypesCommand extends Command
         }
 
         return Command::SUCCESS;
-    }
-
-    private function loadTypeScriptNaming(?string $configFile): TypeScriptNaming
-    {
-        if (null === $configFile) {
-            return new TypeScriptNaming();
-        }
-
-        if (!is_file($configFile)) {
-            throw new RuntimeException(\sprintf('TypeBridge config file "%s" was not found.', $configFile));
-        }
-
-        $config = $this->requireStringKeyedArray(
-            require $configFile,
-            \sprintf('TypeBridge config file "%s" must return an array.', $configFile),
-        );
-
-        $typeScriptConfig = $config;
-        if (array_key_exists('typescript', $config)) {
-            $typeScriptConfig = $this->requireStringKeyedArray(
-                $config['typescript'],
-                \sprintf('TypeBridge config file "%s" must return a "typescript" array.', $configFile),
-            );
-        }
-
-        return TypeScriptNaming::fromArray($typeScriptConfig);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function requireStringKeyedArray(mixed $value, string $errorMessage): array
-    {
-        if (!is_array($value)) {
-            throw new RuntimeException(\sprintf(
-                $errorMessage,
-            ));
-        }
-
-        $normalized = [];
-        foreach ($value as $key => $entry) {
-            if (!is_string($key)) {
-                throw new RuntimeException($errorMessage);
-            }
-
-            $normalized[$key] = $entry;
-        }
-
-        return $normalized;
     }
 }

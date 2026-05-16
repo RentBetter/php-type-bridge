@@ -106,6 +106,10 @@ return [
         'endpointMapSuffix' => 'Responses',
         'endpointResultSuffix' => 'Outcome',
     ],
+    'preserveNull' => [
+        'IProject.archivedAt',
+        'IProjectStage.parentId',
+    ],
 ];
 ```
 
@@ -191,6 +195,25 @@ parameters:
                 - stripeCustomerId
                 - xeroInvoiceId
 ```
+
+### Preserve-null consistency
+
+Nullable fields in `@phpstan-type` shapes carry two distinct meanings:
+
+- `?T` — the value is optional. Wire payload omits the field when null; TypeScript emits `field?: T`.
+- `T|null` — null is semantically meaningful (e.g. `archivedAt: null` for "never archived"). Wire payload always sends the key; TypeScript emits `field: T | null`.
+
+To keep the two consistent across a codebase, list every field whose null is meaningful in `preserveNull`. The PHPStan rule enforces that listed fields use `T|null` and unlisted fields use `?T`:
+
+```neon
+parameters:
+    typeBridge:
+        preserveNull:
+            - IProject.archivedAt
+            - IProjectStage.parentId
+```
+
+Mirror the same list in `type-bridge.php` so the emitter validates at codegen time too (the emitter throws on the same mismatch).
 
 ## Testing
 

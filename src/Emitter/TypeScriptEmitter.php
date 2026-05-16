@@ -41,12 +41,23 @@ final class TypeScriptEmitter
 
     private TypeScriptNaming $naming;
 
+    /** @var array<string, true> indexed by "ShapeName.fieldName" for O(1) lookup */
+    private array $preserveNullIndex;
+
+    /**
+     * @param list<string> $preserveNull entries of the form "ShapeName.fieldName".
+     *   Fields listed here must use `T|null` in their @phpstan-type annotation
+     *   and emit as `field: T | null`. All other nullable fields must use `?T`
+     *   and emit as `field?: T`. A mismatch raises RuntimeException at emit time.
+     */
     public function __construct(
         private readonly EnumResolver $enumResolver,
         private readonly DomainMapper $domainMapper,
         ?TypeScriptNaming $naming = null,
+        array $preserveNull = [],
     ) {
         $this->naming = $naming ?? new TypeScriptNaming();
+        $this->preserveNullIndex = array_fill_keys($preserveNull, true);
     }
 
     /**
@@ -230,7 +241,7 @@ final class TypeScriptEmitter
                 $this->typeToTs($type->parsed->base),
             );
             foreach ($type->parsed->extra->fields as $field) {
-                $this->emitShapeField($field, $lines);
+                $this->emitShapeField($field, $lines, $type->name);
             }
             $lines[] = '}';
             $this->currentImportedSymbols = [];
@@ -241,7 +252,7 @@ final class TypeScriptEmitter
         if ($type->parsed instanceof ShapeType) {
             $lines[] = \sprintf('export interface %s {', $this->typeDeclarationName($type));
             foreach ($type->parsed->fields as $field) {
-                $this->emitShapeField($field, $lines);
+                $this->emitShapeField($field, $lines, $type->name);
             }
             $lines[] = '}';
             $this->currentImportedSymbols = [];
@@ -284,8 +295,10 @@ final class TypeScriptEmitter
     /**
      * @param list<string> $lines
      */
-    private function emitShapeField(ShapeField $field, array &$lines): void
+    private function emitShapeField(ShapeField $field, array &$lines, string $shapeName): void
     {
+        $this->assertNullableMatchesPreserveNullConfig($field, $shapeName);
+
         $optional = $field->optional;
         $type = $field->type;
         if ($type instanceof NullableType && $type->optional) {
@@ -294,6 +307,46 @@ final class TypeScriptEmitter
         }
 
         $lines[] = \sprintf('  %s%s: %s;', $field->name, $optional ? '?' : '', $this->typeToTs($type));
+    }
+
+    /**
+     * Enforces the `preserveNull` invariant: fields listed in `preserveNull` must use
+     * `T|null` annotations (emit as `field: T | null`); all other nullable fields must
+     * use `?T` annotations (emit as `field?: T`). Mismatches throw at emit time so
+     * codegen never silently drifts from policy.
+     */
+    private function assertNullableMatchesPreserveNullConfig(ShapeField $field, string $shapeName): void
+    {
+        if (!$field->type instanceof NullableType) {
+            return;
+        }
+
+        $key = $shapeName . '.' . $field->name;
+        $inPreserveNull = isset($this->preserveNullIndex[$key]);
+
+        if ($inPreserveNull && $field->type->optional) {
+            throw new RuntimeException(\sprintf(
+                'Field `%s` in shape `%s` is listed in preserveNull config but its '
+                . '@phpstan-type annotation is `?T` (TS optional). Change the annotation '
+                . 'to `T|null` so null is emitted on the wire, or remove `%s` from preserveNull.',
+                $field->name,
+                $shapeName,
+                $key,
+            ));
+        }
+
+        if (!$inPreserveNull && !$field->type->optional) {
+            throw new RuntimeException(\sprintf(
+                'Field `%s` in shape `%s` has `T|null` annotation but is not listed in '
+                . 'preserveNull config. Change the annotation to `?T` (emits as `%s?: T` '
+                . 'and the field should be omitted when null), or add `%s` to preserveNull '
+                . 'if null is semantically meaningful for this field.',
+                $field->name,
+                $shapeName,
+                $field->name,
+                $key,
+            ));
+        }
     }
 
     private function typeToTs(ParsedType $type): string

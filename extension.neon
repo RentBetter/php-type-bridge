@@ -1,10 +1,12 @@
 parameters:
     typeBridge:
+        preserveNull: []
         shapeNaming:
             allowIdSuffix: []
 
 parametersSchema:
     typeBridge: structure([
+        preserveNull: listOf(string()),
         shapeNaming: structure([
             allowIdSuffix: listOf(string())
         ])
@@ -22,6 +24,9 @@ services:
 
     -
         class: PTGS\TypeBridge\Support\PhpDocTypeHelper
+
+    -
+        class: PTGS\TypeBridge\Parser\PhpDocShapeParser
 
     -
         class: PTGS\TypeBridge\Support\PhpDocShapeParserResolver
@@ -55,5 +60,12 @@ services:
 
     -
         class: PTGS\TypeBridge\PHPStan\Rules\Shape\NoTypeIdPairRule
+        tags:
+            - phpstan.rules.rule
+
+    -
+        class: PTGS\TypeBridge\PHPStan\Rules\Shape\PreserveNullConsistencyRule
+        arguments:
+            preserveNull: %typeBridge.preserveNull%
         tags:
             - phpstan.rules.rule

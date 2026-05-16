@@ -28,7 +28,11 @@ final class TypeScriptEmitterTest extends TestCase
         $enumResolver = new EnumResolver();
         $enumResolver->scanDirectory($srcDir);
 
-        $output = (new TypeScriptEmitter($enumResolver, new DomainMapper('/tmp/type-bridge-output')))
+        $output = (new TypeScriptEmitter(
+            enumResolver: $enumResolver,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            preserveNull: ['ProjectAdminView.internalNotes'],
+        ))
             ->emit($typeDomains, $responseDomains, $contracts);
 
         self::assertArrayHasKey('Projects', $output);
@@ -48,7 +52,7 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('status: ProjectStatus;', $projects);
         self::assertStringContainsString('export interface ProjectOwnerView extends ProjectBaseView {', $projects);
         self::assertStringContainsString('canEdit: boolean;', $projects);
-        self::assertStringContainsString('ownerNotes: string | null;', $projects);
+        self::assertStringContainsString('ownerNotes?: string;', $projects);
         self::assertStringContainsString('export interface ProjectAdminView extends ProjectBaseView {', $projects);
         self::assertStringContainsString('internalNotes: string | null;', $projects);
         self::assertStringContainsString('auditTrail: string[];', $projects);
@@ -107,9 +111,9 @@ final class TypeScriptEmitterTest extends TestCase
         $enumResolver->scanDirectory($srcDir);
 
         $output = (new TypeScriptEmitter(
-            $enumResolver,
-            new DomainMapper('/tmp/type-bridge-output'),
-            new TypeScriptNaming(
+            enumResolver: $enumResolver,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            naming: new TypeScriptNaming(
                 interfacePrefix: 'I',
                 enumValueSuffix: 'Id',
                 enumShapeSuffix: '',
@@ -119,6 +123,7 @@ final class TypeScriptEmitterTest extends TestCase
                 endpointMapSuffix: 'Responses',
                 endpointResultSuffix: 'Outcome',
             ),
+            preserveNull: ['ProjectAdminView.internalNotes'],
         ))->emit($typeDomains, $responseDomains, $contracts);
 
         $projects = $output['Projects'];
@@ -203,5 +208,49 @@ final class TypeScriptEmitterTest extends TestCase
             new DomainMapper('/tmp/type-bridge-output'),
             new TypeScriptNaming(enumShapeSuffix: ''),
         ))->emit($typeDomains, $responseDomains);
+    }
+
+    public function test_it_throws_when_field_has_explicit_null_but_is_not_in_preserve_null_config(): void
+    {
+        $srcDir = FixtureProject::srcDir();
+        $typeDomains = (new PhpDocTypeCollector())->collect($srcDir);
+        $responseCollector = new ResponseClassCollector();
+        $responseDomains = $responseCollector->collect($srcDir);
+        $contracts = (new EndpointContractCollector())->collect($srcDir, $responseCollector->collectIndex($srcDir));
+
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($srcDir);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Field `internalNotes` in shape `ProjectAdminView`');
+        $this->expectExceptionMessage('not listed in preserveNull');
+
+        (new TypeScriptEmitter(
+            enumResolver: $enumResolver,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            preserveNull: [],
+        ))->emit($typeDomains, $responseDomains, $contracts);
+    }
+
+    public function test_it_throws_when_field_is_in_preserve_null_but_annotation_is_optional(): void
+    {
+        $srcDir = FixtureProject::srcDir();
+        $typeDomains = (new PhpDocTypeCollector())->collect($srcDir);
+        $responseCollector = new ResponseClassCollector();
+        $responseDomains = $responseCollector->collect($srcDir);
+        $contracts = (new EndpointContractCollector())->collect($srcDir, $responseCollector->collectIndex($srcDir));
+
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($srcDir);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Field `ownerNotes` in shape `ProjectOwnerView`');
+        $this->expectExceptionMessage('listed in preserveNull config but its @phpstan-type annotation is `?T`');
+
+        (new TypeScriptEmitter(
+            enumResolver: $enumResolver,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            preserveNull: ['ProjectAdminView.internalNotes', 'ProjectOwnerView.ownerNotes'],
+        ))->emit($typeDomains, $responseDomains, $contracts);
     }
 }
