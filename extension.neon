@@ -69,3 +69,8 @@ services:
             preserveNull: %typeBridge.preserveNull%
         tags:
             - phpstan.rules.rule
+
+    -
+        class: PTGS\TypeBridge\PHPStan\Rules\Enum\EnumIdSourceReturnTypeRule
+        tags:
+            - phpstan.rules.rule
