@@ -28,6 +28,7 @@ final readonly class EmitContext
      * @param list<CollectedEndpointContract>       $contracts
      * @param array<string, array<string, string>>  $foreignAliases foreignDomain => (canonicalName => aliasInThisFile)
      * @param array<string, true>                   $preserveNullIndex keyed by "ShapeName.fieldName"
+     * @param list<string>                          $candidateClasses every class in the generation run (for emitters that scan, e.g. a common-module emitter)
      */
     public function __construct(
         public string $domain,
@@ -41,6 +42,7 @@ final readonly class EmitContext
         public EnumResolver $enumResolver,
         public TypeScriptNaming $naming,
         private array $preserveNullIndex,
+        public array $candidateClasses = [],
     ) {}
 
     public function convert(ParsedType $type, ConversionScope $scope): string

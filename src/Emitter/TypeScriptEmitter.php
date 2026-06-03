@@ -129,6 +129,7 @@ final class TypeScriptEmitter
             enumResolver: $this->enumResolver,
             naming: $this->naming,
             preserveNullIndex: $this->preserveNullIndex,
+            candidateClasses: $classes,
         );
 
         /** @var array<string, list<EmittedBlock>> $blocksByDomain */
