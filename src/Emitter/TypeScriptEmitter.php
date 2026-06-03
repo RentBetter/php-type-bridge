@@ -5,41 +5,47 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Emitter;
 
 use PTGS\TypeBridge\Config\TypeScriptNaming;
+use PTGS\TypeBridge\Emitter\Builtin\EndpointContractEmitter;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
-use PTGS\TypeBridge\Model\CollectedResponseProperty;
-use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
-use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
-use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
+use ReflectionClass;
 use RuntimeException;
 
+/**
+ * Orchestrates TypeScript generation: builds the shared services and per-domain
+ * context, routes each domain's classes to their owning {@see TypeEmitter}, and
+ * hands the emitted blocks to {@see DomainAssembler}.
+ *
+ * Cross-domain import collection and collision-avoiding aliasing live here (they
+ * span every declaration in a domain); per-declaration rendering lives in the
+ * emitters.
+ */
 final class TypeScriptEmitter
 {
-    /** @var array<string, array<string, string>> */
-    private array $symbolMaps = [];
+    private EmittedNames $names;
 
-    private string $currentDomain = '';
+    private SymbolRegistry $symbols;
 
-    /** @var array<string, string> */
-    private array $currentImportedSymbols = [];
-
-    /** @var array<string, array<string, string>> [foreignDomain => [canonicalName => aliasInThisFile]] */
-    private array $currentForeignAliases = [];
+    private TypeToTsConverter $converter;
 
     private TypeScriptNaming $naming;
+
+    private readonly EmitterRegistry $registry;
+
+    private readonly DomainAssembler $assembler;
 
     /** @var array<string, true> indexed by "ShapeName.fieldName" for O(1) lookup */
     private array $preserveNullIndex;
@@ -55,9 +61,13 @@ final class TypeScriptEmitter
         private readonly DomainMapper $domainMapper,
         ?TypeScriptNaming $naming = null,
         array $preserveNull = [],
+        ?EmitterRegistry $registry = null,
+        ?DomainAssembler $assembler = null,
     ) {
         $this->naming = $naming ?? new TypeScriptNaming();
         $this->preserveNullIndex = array_fill_keys($preserveNull, true);
+        $this->registry = $registry ?? EmitterRegistry::default();
+        $this->assembler = $assembler ?? new DomainAssembler();
     }
 
     /**
@@ -68,7 +78,9 @@ final class TypeScriptEmitter
      */
     public function emit(array $domains, array $responses = [], array $contracts = []): array
     {
-        $this->symbolMaps = $this->buildSymbolMaps($domains, $responses);
+        $this->names = new EmittedNames($this->naming, $this->enumResolver);
+        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses));
+        $this->converter = new TypeToTsConverter($this->names, $this->symbols);
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
         sort($allDomains);
@@ -96,19 +108,83 @@ final class TypeScriptEmitter
         array $responses,
         array $contracts,
     ): string {
-        $this->currentDomain = $domain;
-
-        $lines = [];
-        $lines[] = '// AUTO-GENERATED. DO NOT EDIT.';
-        $lines[] = '';
-
         $imports = $this->collectExternalImports($domain, $collected, $responses, $contracts);
-        $this->currentForeignAliases = $this->computeForeignAliases($domain, $collected, $responses, $contracts, $imports);
+        $foreignAliases = $this->computeForeignAliases($domain, $collected, $responses, $contracts, $imports);
+
+        $context = new EmitContext(
+            domain: $domain,
+            collected: $collected,
+            responses: $responses,
+            contracts: $contracts,
+            foreignAliases: $foreignAliases,
+            symbols: $this->symbols,
+            converter: $this->converter,
+            names: $this->names,
+            enumResolver: $this->enumResolver,
+            naming: $this->naming,
+            preserveNullIndex: $this->preserveNullIndex,
+        );
+
+        $blocks = [];
+
+        foreach ($this->collectLocalEnums($domain, $collected, $responses) as $enumClass) {
+            $reflection = $this->reflect($enumClass);
+            if (null !== $reflection) {
+                $blocks = array_merge($blocks, $this->registry->byConvention('value-of')->emit($reflection, $context)->blocks);
+            }
+        }
+
+        $seenShapeOwners = [];
+        foreach ($collected->types as $type) {
+            if (isset($seenShapeOwners[$type->ownerClass])) {
+                continue;
+            }
+            $seenShapeOwners[$type->ownerClass] = true;
+            $reflection = $this->reflect($type->ownerClass);
+            if (null !== $reflection) {
+                $blocks = array_merge($blocks, $this->registry->byConvention('_self')->emit($reflection, $context)->blocks);
+            }
+        }
+
+        foreach ($responses as $response) {
+            $reflection = $this->reflect($response->className);
+            if (null !== $reflection) {
+                $blocks = array_merge($blocks, $this->registry->byConvention('responses')->emit($reflection, $context)->blocks);
+            }
+        }
+
+        if ([] !== $contracts) {
+            $blocks[] = new EmittedBlock(50, '// Endpoint results', EndpointContractEmitter::RESULT_HELPER);
+
+            $seenControllers = [];
+            foreach ($contracts as $contract) {
+                if (isset($seenControllers[$contract->controllerClass])) {
+                    continue;
+                }
+                $seenControllers[$contract->controllerClass] = true;
+                $reflection = $this->reflect($contract->controllerClass);
+                if (null !== $reflection) {
+                    $blocks = array_merge($blocks, $this->registry->byConvention('endpoint-contracts')->emit($reflection, $context)->blocks);
+                }
+            }
+        }
+
+        return $this->assembler->assemble($this->renderImportLines($domain, $imports, $foreignAliases), $blocks);
+    }
+
+    /**
+     * @param array<string, list<string>> $imports
+     * @param array<string, array<string, string>> $foreignAliases
+     * @return list<string>
+     */
+    private function renderImportLines(string $domain, array $imports, array $foreignAliases): array
+    {
+        $lines = [];
         foreach ($imports as $importDomain => $symbols) {
             sort($symbols);
             $symbols = array_values(array_unique($symbols));
-            $tokens = array_map(function (string $symbol) use ($importDomain): string {
-                $alias = $this->currentForeignAliases[$importDomain][$symbol] ?? $symbol;
+            $tokens = array_map(static function (string $symbol) use ($importDomain, $foreignAliases): string {
+                $alias = $foreignAliases[$importDomain][$symbol] ?? $symbol;
 
                 return $alias === $symbol ? $symbol : \sprintf('%s as %s', $symbol, $alias);
             }, $symbols);
@@ -118,298 +194,8 @@ final class TypeScriptEmitter
                 $this->domainMapper->getRelativeImportPath($domain, $importDomain),
             );
         }
-        if ([] !== $imports) {
-            $lines[] = '';
-        }
 
-        $localEnums = $this->collectLocalEnums($domain, $collected, $responses);
-        if ([] !== $localEnums) {
-            $lines[] = '// Enums';
-            foreach ($localEnums as $enumClass) {
-                $values = array_map(
-                    static fn(string $value): string => "'" . $value . "'",
-                    $this->enumResolver->resolve($enumClass),
-                );
-                $lines[] = \sprintf(
-                    'export type %s = %s;',
-                    $this->enumName($enumClass),
-                    implode(' | ', $values),
-                );
-            }
-            $lines[] = '';
-        }
-
-        if ([] !== $collected->types) {
-            $lines[] = '// Shapes';
-            foreach ($collected->types as $type) {
-                $this->emitCollectedType($type, $lines);
-                $lines[] = '';
-            }
-        }
-
-        if ([] !== $responses) {
-            $lines[] = '// Responses';
-            foreach ($responses as $response) {
-                $this->emitResponse($response, $lines);
-                $lines[] = '';
-            }
-        }
-
-        $requestContracts = array_values(array_filter(
-            $contracts,
-            static fn(CollectedEndpointContract $contract): bool => null !== $contract->request && $contract->request->hasAnyInput(),
-        ));
-
-        if ([] !== $requestContracts) {
-            $lines[] = '// Endpoint inputs';
-            foreach ($requestContracts as $contract) {
-                $request = $contract->request;
-                if (null === $request) {
-                    continue;
-                }
-
-                if (null !== $request->query) {
-                    $lines[] = \sprintf(
-                        'export type %s = %s;',
-                        $this->naming->queryAliasName($contract->name),
-                        $this->symbolForInputReference($request->query),
-                    );
-                }
-
-                if (null !== $request->body) {
-                    $lines[] = \sprintf(
-                        'export type %s = %s;',
-                        $this->naming->bodyAliasName($contract->name),
-                        $this->symbolForInputReference($request->body),
-                    );
-                }
-
-                if (null !== $request->path) {
-                    $lines[] = \sprintf(
-                        'export type %s = %s;',
-                        $this->naming->pathAliasName($contract->name),
-                        $this->symbolForInputReference($request->path),
-                    );
-                }
-
-                $lines[] = '';
-            }
-        }
-
-        if ([] !== $contracts) {
-            $lines[] = '// Endpoint results';
-            $lines[] = 'export type EndpointResult<M extends Record<number, unknown>> = {';
-            $lines[] = '  [S in keyof M & number]: {';
-            $lines[] = '    ok: S extends 200 | 201 | 202 | 204 ? true : false;';
-            $lines[] = '    status: S;';
-            $lines[] = '    data: M[S];';
-            $lines[] = '  };';
-            $lines[] = '}[keyof M & number];';
-            $lines[] = '';
-
-            foreach ($contracts as $contract) {
-                $mapName = $this->naming->endpointMapName($contract->name);
-                $resultName = $this->naming->endpointResultName($contract->name);
-                $lines[] = \sprintf('export type %s = {', $mapName);
-
-                $responses = $contract->responses;
-                usort($responses, static fn(CollectedApiResponseClass $left, CollectedApiResponseClass $right): int => $left->status <=> $right->status);
-                foreach ($responses as $response) {
-                    $lines[] = \sprintf('  %d: %s;', $response->status, $this->responseSymbolName($response));
-                }
-
-                $lines[] = '};';
-                $lines[] = \sprintf('export type %s = EndpointResult<%s>;', $resultName, $mapName);
-                $lines[] = '';
-            }
-        }
-
-        return rtrim(implode("\n", $lines)) . "\n";
-    }
-
-    /**
-     * @param list<string> $lines
-     */
-    private function emitCollectedType(CollectedType $type, array &$lines): void
-    {
-        $this->currentImportedSymbols = $this->importedSymbolMap($type->imports);
-
-        if ($type->parsed instanceof IntersectionType) {
-            $lines[] = \sprintf(
-                'export interface %s extends %s {',
-                $this->typeDeclarationName($type),
-                $this->typeToTs($type->parsed->base),
-            );
-            foreach ($type->parsed->extra->fields as $field) {
-                $this->emitShapeField($field, $lines, $type->name);
-            }
-            $lines[] = '}';
-            $this->currentImportedSymbols = [];
-
-            return;
-        }
-
-        if ($type->parsed instanceof ShapeType) {
-            $lines[] = \sprintf('export interface %s {', $this->typeDeclarationName($type));
-            foreach ($type->parsed->fields as $field) {
-                $this->emitShapeField($field, $lines, $type->name);
-            }
-            $lines[] = '}';
-            $this->currentImportedSymbols = [];
-
-            return;
-        }
-
-        $lines[] = \sprintf('export type %s = %s;', $this->typeDeclarationName($type), $this->typeToTs($type->parsed));
-        $this->currentImportedSymbols = [];
-    }
-
-    /**
-     * @param list<string> $lines
-     */
-    private function emitResponse(CollectedApiResponseClass $response, array &$lines): void
-    {
-        $this->currentImportedSymbols = $this->importedSymbolMap($response->imports);
-
-        if (204 === $response->status && [] === $response->properties) {
-            $lines[] = \sprintf('export type %s = null;', $this->responseDeclarationName($response));
-            $this->currentImportedSymbols = [];
-
-            return;
-        }
-
-        $lines[] = \sprintf('export interface %s {', $this->responseDeclarationName($response));
-        foreach ($response->properties as $property) {
-            $optional = $property->optional ? '?' : '';
-            $lines[] = \sprintf(
-                '  %s%s: %s;',
-                $property->name,
-                $optional,
-                $this->typeToTs($property->parsed),
-            );
-        }
-        $lines[] = '}';
-        $this->currentImportedSymbols = [];
-    }
-
-    /**
-     * @param list<string> $lines
-     */
-    private function emitShapeField(ShapeField $field, array &$lines, string $shapeName): void
-    {
-        $this->assertNullableMatchesPreserveNullConfig($field, $shapeName);
-
-        $optional = $field->optional;
-        $type = $field->type;
-        if ($type instanceof NullableType && $type->optional) {
-            $optional = true;
-            $type = $type->inner;
-        }
-
-        $lines[] = \sprintf('  %s%s: %s;', $field->name, $optional ? '?' : '', $this->typeToTs($type));
-    }
-
-    /**
-     * Enforces the `preserveNull` invariant: fields listed in `preserveNull` must use
-     * `T|null` annotations (emit as `field: T | null`); all other nullable fields must
-     * use `?T` annotations (emit as `field?: T`). Mismatches throw at emit time so
-     * codegen never silently drifts from policy.
-     */
-    private function assertNullableMatchesPreserveNullConfig(ShapeField $field, string $shapeName): void
-    {
-        if (!$field->type instanceof NullableType) {
-            return;
-        }
-
-        $key = $shapeName . '.' . $field->name;
-        $inPreserveNull = isset($this->preserveNullIndex[$key]);
-
-        if ($inPreserveNull && $field->type->optional) {
-            throw new RuntimeException(\sprintf(
-                'Field `%s` in shape `%s` is listed in preserveNull config but its '
-                . '@phpstan-type annotation is `?T` (TS optional). Change the annotation '
-                . 'to `T|null` so null is emitted on the wire, or remove `%s` from preserveNull.',
-                $field->name,
-                $shapeName,
-                $key,
-            ));
-        }
-
-        if (!$inPreserveNull && !$field->type->optional) {
-            throw new RuntimeException(\sprintf(
-                'Field `%s` in shape `%s` has `T|null` annotation but is not listed in '
-                . 'preserveNull config. Change the annotation to `?T` (emits as `%s?: T` '
-                . 'and the field should be omitted when null), or add `%s` to preserveNull '
-                . 'if null is semantically meaningful for this field.',
-                $field->name,
-                $shapeName,
-                $field->name,
-                $key,
-            ));
-        }
-    }
-
-    private function typeToTs(ParsedType $type): string
-    {
-        if ($type instanceof ScalarType) {
-            return match ($type->type) {
-                'string' => 'string',
-                'int', 'float', 'numeric' => 'number',
-                'bool' => 'boolean',
-                'mixed' => 'unknown',
-                'null' => 'null',
-                default => throw new RuntimeException(\sprintf('Unknown scalar type "%s".', $type->type)),
-            };
-        }
-
-        if ($type instanceof NullableType) {
-            if ($type->optional) {
-                return $this->typeToTs($type->inner);
-            }
-
-            return $this->typeToTs($type->inner) . ' | null';
-        }
-
-        if ($type instanceof ListType) {
-            return $this->typeToTs($type->inner) . '[]';
-        }
-
-        if ($type instanceof ValueOfType) {
-            return $this->enumName($type->enumClass);
-        }
-
-        if ($type instanceof NameRefType) {
-            if (isset($this->currentImportedSymbols[$type->name])) {
-                return $this->currentImportedSymbols[$type->name];
-            }
-
-            return $this->symbolFor($this->currentDomain, $type->name);
-        }
-
-        if ($type instanceof ShapeType) {
-            $fields = array_map(function (ShapeField $field): string {
-                $optional = $field->optional;
-                $type = $field->type;
-                if ($type instanceof NullableType && $type->optional) {
-                    $optional = true;
-                    $type = $type->inner;
-                }
-
-                return \sprintf('%s%s: %s', $field->name, $optional ? '?' : '', $this->typeToTs($type));
-            }, $type->fields);
-
-            return '{ ' . implode('; ', $fields) . ' }';
-        }
-
-        if ($type instanceof UnionType) {
-            return implode(' | ', array_map(fn(ParsedType $member): string => $this->typeToTs($member), $type->types));
-        }
-
-        if ($type instanceof IntersectionType) {
-            return $this->typeToTs($type->base) . ' & ' . $this->typeToTs($type->extra);
-        }
-
-        throw new RuntimeException(\sprintf('Unhandled parsed type "%s".', $type::class));
+        return $lines;
     }
 
     /**
@@ -439,7 +225,7 @@ final class TypeScriptEmitter
                     continue;
                 }
 
-                $imports[$response->domain][] = $this->responseSymbolName($response);
+                $imports[$response->domain][] = $this->symbolFor($response->domain, $response->name);
             }
 
             if (null === $contract->request) {
@@ -507,7 +293,7 @@ final class TypeScriptEmitter
             return;
         }
 
-        $imports[$input->domain][] = $this->symbolForInputReference($input);
+        $imports[$input->domain][] = $this->symbolFor($input->domain, $input->typeName);
     }
 
     /**
@@ -518,7 +304,7 @@ final class TypeScriptEmitter
         if ($type instanceof ValueOfType) {
             $enumDomain = $this->enumResolver->getDomain($type->enumClass);
             if ($enumDomain !== $domain) {
-                $imports[$enumDomain][] = $this->enumName($type->enumClass);
+                $imports[$enumDomain][] = $this->names->enumName($type->enumClass);
             }
 
             return;
@@ -593,7 +379,7 @@ final class TypeScriptEmitter
                 $this->registerSymbol(
                     domain: $domain,
                     logicalName: $type->name,
-                    emittedName: $this->typeDeclarationName($type),
+                    emittedName: $this->names->typeDeclarationName($type),
                     descriptor: 'type ' . $type->ownerClass,
                     maps: $maps,
                     registrations: $registrations,
@@ -604,7 +390,7 @@ final class TypeScriptEmitter
                 $this->registerSymbol(
                     domain: $domain,
                     logicalName: $response->name,
-                    emittedName: $this->responseDeclarationName($response),
+                    emittedName: $this->names->responseDeclarationName($response),
                     descriptor: 'response ' . $response->className,
                     maps: $maps,
                     registrations: $registrations,
@@ -612,7 +398,7 @@ final class TypeScriptEmitter
             }
 
             foreach ($this->collectLocalEnums($domain, $domains[$domain] ?? new CollectedDomain($domain), $responses[$domain] ?? []) as $enumClass) {
-                $emittedName = $this->enumName($enumClass);
+                $emittedName = $this->names->enumName($enumClass);
                 if (isset($registrations[$domain][$emittedName])) {
                     throw new RuntimeException(\sprintf(
                         'TypeScript naming collision in domain "%s": "%s" is emitted by both %s and enum %s.',
@@ -658,77 +444,23 @@ final class TypeScriptEmitter
 
     private function symbolFor(string $domain, string $logicalName): string
     {
-        if (!isset($this->symbolMaps[$domain][$logicalName])) {
-            throw new RuntimeException(\sprintf(
-                'Unknown TypeScript symbol "%s" referenced in domain "%s". Declare it via @phpstan-type, '
-                . 'import it via @phpstan-import-type, or implement ApiResponse on the response class.',
-                $logicalName,
-                $domain,
-            ));
-        }
-
-        return $this->symbolMaps[$domain][$logicalName];
-    }
-
-    private function localReferenceFor(string $foreignDomain, string $name): string
-    {
-        if ($foreignDomain === $this->currentDomain) {
-            return $this->symbolFor($foreignDomain, $name);
-        }
-
-        return $this->currentForeignAliases[$foreignDomain][$name] ?? $this->symbolFor($foreignDomain, $name);
-    }
-
-    private function symbolForInputReference(CollectedInputReference $input): string
-    {
-        return $this->localReferenceFor($input->domain, $input->typeName);
+        return $this->symbols->resolve($domain, $logicalName);
     }
 
     /**
-     * @param list<ImportedType> $imports
-     * @return array<string, string>
+     * Reflects a collected class-like name. Returns null only when the name is not
+     * loadable — collected models never produce that, so the guard exists to make
+     * the class-string narrowing explicit for static analysis.
+     *
+     * @return ReflectionClass<object>|null
      */
-    private function importedSymbolMap(array $imports): array
+    private function reflect(string $className): ?ReflectionClass
     {
-        $symbols = [];
-        foreach ($imports as $importedType) {
-            $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
+        if (!class_exists($className) && !interface_exists($className) && !trait_exists($className)) {
+            return null;
         }
 
-        return $symbols;
-    }
-
-    private function enumName(string $enumClass): string
-    {
-        return $this->naming->enumValueName($this->enumResolver->getShortName($enumClass));
-    }
-
-    private function typeDeclarationName(CollectedType $type): string
-    {
-        $name = $type->name;
-        if (enum_exists($type->ownerClass)) {
-            $name = $this->naming->enumShapeName($this->enumResolver->getShortName($type->ownerClass));
-        }
-
-        if ($type->parsed instanceof ShapeType || $type->parsed instanceof IntersectionType) {
-            return $this->naming->interfaceName($name);
-        }
-
-        return $name;
-    }
-
-    private function responseDeclarationName(CollectedApiResponseClass $response): string
-    {
-        if (204 === $response->status && [] === $response->properties) {
-            return $response->name;
-        }
-
-        return $this->naming->interfaceName($response->name);
-    }
-
-    private function responseSymbolName(CollectedApiResponseClass $response): string
-    {
-        return $this->localReferenceFor($response->domain, $response->name);
+        return new ReflectionClass($className);
     }
 
     /**
@@ -779,13 +511,13 @@ final class TypeScriptEmitter
     {
         $names = [];
         foreach ($collected->types as $type) {
-            $names[$this->typeDeclarationName($type)] = true;
+            $names[$this->names->typeDeclarationName($type)] = true;
         }
         foreach ($responses as $response) {
-            $names[$this->responseDeclarationName($response)] = true;
+            $names[$this->names->responseDeclarationName($response)] = true;
         }
         foreach ($this->collectLocalEnums($domain, $collected, $responses) as $enumClass) {
-            $names[$this->enumName($enumClass)] = true;
+            $names[$this->names->enumName($enumClass)] = true;
         }
         foreach ($contracts as $contract) {
             $request = $contract->request;
