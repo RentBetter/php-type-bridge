@@ -41,7 +41,7 @@ final readonly class EmitterRegistry
      * Merges emitters discovered via #[AsTypeBridgeEmitter] on the given candidate
      * classes onto a base registry (the built-ins by default).
      *
-     * @param list<class-string> $candidateClasses
+     * @param list<string> $candidateClasses
      */
     public static function fromAttributeScan(array $candidateClasses, ?self $base = null): self
     {

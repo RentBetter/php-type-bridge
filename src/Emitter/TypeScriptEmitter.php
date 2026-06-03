@@ -99,6 +99,120 @@ final class TypeScriptEmitter
     }
 
     /**
+     * Generates modules from Discovered-mode emitters (and their optional common
+     * module), routing each candidate class to its owning emitter. Kept separate
+     * from {@see self::emit()} so the built-in Referenced conventions are unaffected.
+     *
+     * @param list<string> $classes candidate classes to scan
+     * @return array<string, string> domain (or '' for the root module) => TypeScript
+     */
+    public function emitDiscovered(array $classes): array
+    {
+        $discovered = $this->registry->discovered();
+        if ([] === $discovered) {
+            return [];
+        }
+
+        $this->names = new EmittedNames($this->naming, $this->enumResolver);
+        $this->symbols = new SymbolRegistry([]);
+        $this->converter = new TypeToTsConverter($this->names, $this->symbols);
+
+        $context = new EmitContext(
+            domain: '',
+            collected: new CollectedDomain(''),
+            responses: [],
+            contracts: [],
+            foreignAliases: [],
+            symbols: $this->symbols,
+            converter: $this->converter,
+            names: $this->names,
+            enumResolver: $this->enumResolver,
+            naming: $this->naming,
+            preserveNullIndex: $this->preserveNullIndex,
+        );
+
+        /** @var array<string, list<EmittedBlock>> $blocksByDomain */
+        $blocksByDomain = [];
+        /** @var array<string, list<EmitImport>> $importsByDomain */
+        $importsByDomain = [];
+        /** @var array<string, list<ReflectionClass<object>>> $claimedByConvention */
+        $claimedByConvention = [];
+
+        foreach ($classes as $class) {
+            $reflection = $this->reflect($class);
+            if (null === $reflection) {
+                continue;
+            }
+
+            $owner = $this->registry->ownerFor($reflection);
+            if (null === $owner || EmitMode::Discovered !== $owner->mode) {
+                continue;
+            }
+
+            $claimedByConvention[$owner->convention][] = $reflection;
+            $this->collectEmitted($owner->emitter->emit($reflection, $context), $blocksByDomain, $importsByDomain);
+        }
+
+        foreach ($discovered as $registered) {
+            if ($registered->emitter instanceof CommonModuleEmitter) {
+                $claimed = $claimedByConvention[$registered->convention] ?? [];
+                $this->collectEmitted($registered->emitter->emitCommon($claimed, $context), $blocksByDomain, $importsByDomain);
+            }
+        }
+
+        $output = [];
+        $domains = array_keys($blocksByDomain);
+        sort($domains);
+        foreach ($domains as $domain) {
+            $output[$domain] = $this->assembler->assemble(
+                $this->renderEmitterImports($domain, $importsByDomain[$domain] ?? []),
+                $blocksByDomain[$domain],
+            );
+        }
+
+        return $output;
+    }
+
+    /**
+     * @param array<string, list<EmittedBlock>> $blocksByDomain
+     * @param array<string, list<EmitImport>>   $importsByDomain
+     */
+    private function collectEmitted(EmittedType $emitted, array &$blocksByDomain, array &$importsByDomain): void
+    {
+        $blocksByDomain[$emitted->domain] = array_merge($blocksByDomain[$emitted->domain] ?? [], $emitted->blocks);
+        $importsByDomain[$emitted->domain] = array_merge($importsByDomain[$emitted->domain] ?? [], $emitted->imports);
+    }
+
+    /**
+     * Renders emitter-declared imports, grouped by target module, preserving the
+     * order the emitter declared them (the convention owns ordering).
+     *
+     * @param list<EmitImport> $imports
+     * @return list<string>
+     */
+    private function renderEmitterImports(string $domain, array $imports): array
+    {
+        /** @var array<string, array<string, true>> $byTarget */
+        $byTarget = [];
+        foreach ($imports as $import) {
+            if ($import->targetDomain === $domain) {
+                continue;
+            }
+            $byTarget[$import->targetDomain][$import->canonicalName] = true;
+        }
+
+        $lines = [];
+        foreach ($byTarget as $targetDomain => $names) {
+            $path = '' === $targetDomain
+                ? $this->domainMapper->getRootImportPath($domain)
+                : $this->domainMapper->getRelativeImportPath($domain, $targetDomain);
+            $lines[] = \sprintf("import type { %s } from '%s';", implode(', ', array_keys($names)), $path);
+        }
+
+        return $lines;
+    }
+
+    /**
      * @param list<CollectedApiResponseClass> $responses
      * @param list<CollectedEndpointContract> $contracts
      */

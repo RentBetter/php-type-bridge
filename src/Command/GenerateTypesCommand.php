@@ -9,9 +9,11 @@ use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Emitter\DomainAssembler;
+use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -57,16 +59,25 @@ final class GenerateTypesCommand extends Command
 
         $config = null !== $configFile ? TypeBridgeConfig::fromFile($configFile) : new TypeBridgeConfig();
 
+        $candidateClasses = array_keys((new PhpFileClassLocator())->classesIn($sourceDir));
+        $registry = EmitterRegistry::fromAttributeScan($candidateClasses);
+
         $mapper = new DomainMapper($outputDir, $config->output);
         $emitter = new TypeScriptEmitter(
             enumResolver: $enumResolver,
             domainMapper: $mapper,
             naming: $config->typescript,
             preserveNull: $config->preserveNull,
+            registry: $registry,
             assembler: new DomainAssembler($config->output->header),
         );
 
-        foreach ($emitter->emit($domains, $responses, $contracts) as $domain => $typescript) {
+        $files = array_merge(
+            $emitter->emit($domains, $responses, $contracts),
+            $emitter->emitDiscovered($candidateClasses),
+        );
+
+        foreach ($files as $domain => $typescript) {
             $path = '' === $domain ? $mapper->getRootOutputPath() : $mapper->getOutputPath($domain);
             $directory = \dirname($path);
             if (!is_dir($directory)) {
