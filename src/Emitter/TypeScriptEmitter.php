@@ -188,10 +188,13 @@ final class TypeScriptEmitter
 
                 return $alias === $symbol ? $symbol : \sprintf('%s as %s', $symbol, $alias);
             }, $symbols);
+            $path = '' === $importDomain
+                ? $this->domainMapper->getRootImportPath($domain)
+                : $this->domainMapper->getRelativeImportPath($domain, $importDomain);
             $lines[] = \sprintf(
                 "import type { %s } from '%s';",
                 implode(', ', $tokens),
-                $this->domainMapper->getRelativeImportPath($domain, $importDomain),
+                $path,
             );
         }
 

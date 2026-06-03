@@ -36,6 +36,20 @@ final class TypeBridgeConfigTest extends TestCase
         self::assertFalse($config->isPreserveNull('IProject', 'unrelated'));
     }
 
+    public function test_parses_output_structure_section(): void
+    {
+        $config = TypeBridgeConfig::fromArray([
+            'output' => [
+                'segmentCase' => 'perSegmentLcFirst',
+                'importStrategy' => 'alias',
+                'aliasBase' => '@/api/genTypes',
+            ],
+        ]);
+
+        self::assertSame(\PTGS\TypeBridge\Config\SegmentCase::PerSegmentLcFirst, $config->output->segmentCase);
+        self::assertSame('@/api/genTypes', $config->output->aliasBase);
+    }
+
     public function test_rejects_unknown_top_level_keys(): void
     {
         $this->expectException(RuntimeException::class);

@@ -8,6 +8,7 @@ use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
+use PTGS\TypeBridge\Emitter\DomainAssembler;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
@@ -56,15 +57,17 @@ final class GenerateTypesCommand extends Command
 
         $config = null !== $configFile ? TypeBridgeConfig::fromFile($configFile) : new TypeBridgeConfig();
 
+        $mapper = new DomainMapper($outputDir, $config->output);
         $emitter = new TypeScriptEmitter(
             enumResolver: $enumResolver,
-            domainMapper: new DomainMapper($outputDir),
+            domainMapper: $mapper,
             naming: $config->typescript,
             preserveNull: $config->preserveNull,
+            assembler: new DomainAssembler($config->output->header),
         );
 
         foreach ($emitter->emit($domains, $responses, $contracts) as $domain => $typescript) {
-            $path = (new DomainMapper($outputDir))->getOutputPath($domain);
+            $path = '' === $domain ? $mapper->getRootOutputPath() : $mapper->getOutputPath($domain);
             $directory = \dirname($path);
             if (!is_dir($directory)) {
                 mkdir($directory, recursive: true);

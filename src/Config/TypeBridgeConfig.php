@@ -22,6 +22,7 @@ final readonly class TypeBridgeConfig
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),
         public array $preserveNull = [],
+        public OutputStructure $output = new OutputStructure(),
     ) {}
 
     public static function fromFile(string $path): self
@@ -43,7 +44,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config): self
     {
-        $allowedKeys = ['typescript', 'preserveNull'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -60,8 +61,9 @@ final readonly class TypeBridgeConfig
             self::stringKeyedArray($config['typescript'] ?? [], 'typescript'),
         );
         $preserveNull = self::preserveNullList($config['preserveNull'] ?? []);
+        $output = OutputStructure::fromArray(self::stringKeyedArray($config['output'] ?? [], 'output'));
 
-        return new self($typescript, $preserveNull);
+        return new self($typescript, $preserveNull, $output);
     }
 
     public function isPreserveNull(string $shapeName, string $fieldName): bool
