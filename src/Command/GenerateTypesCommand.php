@@ -62,7 +62,8 @@ final class GenerateTypesCommand extends Command
             naming: $config->typescript,
             preserveNull: $config->preserveNull,
             registry: $registry,
-            assembler: new DomainAssembler($config->output->header),
+            assembler: new DomainAssembler($config->output->header, $config->output->declarationOrder->strategy()),
+            importSort: $config->output->importOrder->strategy(),
         );
 
         $files = [];

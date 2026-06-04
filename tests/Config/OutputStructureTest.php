@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Config\ImportStrategy;
 use PTGS\TypeBridge\Config\OutputStructure;
 use PTGS\TypeBridge\Config\SegmentCase;
+use PTGS\TypeBridge\Config\SortOrder;
 use RuntimeException;
 
 final class OutputStructureTest extends TestCase
@@ -21,6 +22,8 @@ final class OutputStructureTest extends TestCase
         self::assertSame(ImportStrategy::RelativeSibling, $structure->importStrategy);
         self::assertNull($structure->aliasBase);
         self::assertSame('// AUTO-GENERATED. DO NOT EDIT.', $structure->header);
+        self::assertSame(SortOrder::Declared, $structure->declarationOrder);
+        self::assertSame(SortOrder::Name, $structure->importOrder);
     }
 
     public function test_parses_a_full_structure(): void
@@ -31,6 +34,8 @@ final class OutputStructureTest extends TestCase
             'importStrategy' => 'alias',
             'aliasBase' => '@/api/genTypes',
             'header' => '// custom header',
+            'declarationOrder' => 'name',
+            'importOrder' => 'declared',
         ]);
 
         self::assertSame(SegmentCase::PerSegmentLcFirst, $structure->segmentCase);
@@ -38,6 +43,8 @@ final class OutputStructureTest extends TestCase
         self::assertSame(ImportStrategy::Alias, $structure->importStrategy);
         self::assertSame('@/api/genTypes', $structure->aliasBase);
         self::assertSame('// custom header', $structure->header);
+        self::assertSame(SortOrder::Name, $structure->declarationOrder);
+        self::assertSame(SortOrder::Declared, $structure->importOrder);
     }
 
     public function test_alias_strategy_requires_alias_base(): void

@@ -11,6 +11,10 @@ namespace PTGS\TypeBridge\Emitter;
  * assembler emits each distinct non-null {@see self::$banner} once, before the
  * first block that carries it. {@see self::$code} is the full declaration text
  * (possibly multi-line) with no surrounding blank lines.
+ *
+ * {@see self::$sortKey} is the name used when the output's declarationOrder is
+ * SortOrder::Name; blocks within an order group are sorted by it only when every
+ * block in that group provides one (otherwise declared order is preserved).
  */
 final readonly class EmittedBlock
 {
@@ -18,5 +22,6 @@ final readonly class EmittedBlock
         public int $order,
         public ?string $banner,
         public string $code,
+        public ?string $sortKey = null,
     ) {}
 }

@@ -20,6 +20,8 @@ use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
+use PTGS\TypeBridge\Sorting\AlphabeticalOrder;
+use PTGS\TypeBridge\Sorting\SortStrategy;
 use PTGS\TypeBridge\Support\DomainMapper;
 use ReflectionClass;
 use RuntimeException;
@@ -63,11 +65,21 @@ final class TypeScriptEmitter
         array $preserveNull = [],
         ?EmitterRegistry $registry = null,
         ?DomainAssembler $assembler = null,
+        private readonly SortStrategy $importSort = new AlphabeticalOrder(),
     ) {
         $this->naming = $naming ?? new TypeScriptNaming();
         $this->preserveNullIndex = array_fill_keys($preserveNull, true);
         $this->registry = $registry ?? EmitterRegistry::default();
         $this->assembler = $assembler ?? new DomainAssembler();
+    }
+
+    /**
+     * @param list<string> $names
+     * @return list<string>
+     */
+    private function orderImports(array $names): array
+    {
+        return $this->importSort->sort($names, static fn (string $name): string => $name);
     }
 
     /**
@@ -211,7 +223,7 @@ final class TypeScriptEmitter
             $path = '' === $targetDomain
                 ? $this->domainMapper->getRootImportPath($domain)
                 : $this->domainMapper->getRelativeImportPath($domain, $targetDomain);
-            $lines[] = \sprintf("import type { %s } from '%s';", implode(', ', array_keys($names)), $path);
+            $lines[] = \sprintf("import type { %s } from '%s';", implode(', ', $this->orderImports(array_keys($names))), $path);
         }
 
         return $lines;
@@ -300,8 +312,7 @@ final class TypeScriptEmitter
     {
         $lines = [];
         foreach ($imports as $importDomain => $symbols) {
-            sort($symbols);
-            $symbols = array_values(array_unique($symbols));
+            $symbols = $this->orderImports(array_values(array_unique($symbols)));
             $tokens = array_map(static function (string $symbol) use ($importDomain, $foreignAliases): string {
                 $alias = $foreignAliases[$importDomain][$symbol] ?? $symbol;
 

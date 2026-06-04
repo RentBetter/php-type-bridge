@@ -22,6 +22,8 @@ final readonly class OutputStructure
         public ImportStrategy $importStrategy = ImportStrategy::RelativeSibling,
         public ?string $aliasBase = null,
         public string $header = '// AUTO-GENERATED. DO NOT EDIT.',
+        public SortOrder $declarationOrder = SortOrder::Declared,
+        public SortOrder $importOrder = SortOrder::Name,
     ) {}
 
     /**
@@ -29,7 +31,7 @@ final readonly class OutputStructure
      */
     public static function fromArray(array $config): self
     {
-        $allowedKeys = ['segmentCase', 'rootModule', 'importStrategy', 'aliasBase', 'header'];
+        $allowedKeys = ['segmentCase', 'rootModule', 'importStrategy', 'aliasBase', 'header', 'declarationOrder', 'importOrder'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -47,6 +49,8 @@ final readonly class OutputStructure
         $aliasBase = self::nullableStringOption($config, 'aliasBase');
         $header = self::nullableStringOption($config, 'header') ?? '// AUTO-GENERATED. DO NOT EDIT.';
         $rootModule = self::nullableStringOption($config, 'rootModule');
+        $declarationOrder = self::enumOption($config, 'declarationOrder', SortOrder::class, SortOrder::Declared);
+        $importOrder = self::enumOption($config, 'importOrder', SortOrder::class, SortOrder::Name);
 
         if (ImportStrategy::Alias === $importStrategy && null === $aliasBase) {
             throw new RuntimeException('TypeBridge output config "aliasBase" is required when "importStrategy" is "alias".');
@@ -58,6 +62,8 @@ final readonly class OutputStructure
             importStrategy: $importStrategy,
             aliasBase: $aliasBase,
             header: $header,
+            declarationOrder: $declarationOrder,
+            importOrder: $importOrder,
         );
     }
 

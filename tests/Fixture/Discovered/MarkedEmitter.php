@@ -40,7 +40,7 @@ final class MarkedEmitter implements TypeEmitter, CommonModuleEmitter
 
         return new EmittedType(
             domain: 'Marked',
-            blocks: [new EmittedBlock(10, null, $code)],
+            blocks: [new EmittedBlock(10, null, $code, $shortName)],
             imports: [new EmitImport('', 'Base')],
         );
     }
