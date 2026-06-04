@@ -112,6 +112,7 @@ final class TypeScriptEmitter
         if ([] === $discovered) {
             return [];
         }
+        usort($discovered, static fn (RegisteredEmitter $a, RegisteredEmitter $b): int => $b->priority <=> $a->priority);
 
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->symbols = new SymbolRegistry([]);
@@ -145,13 +146,16 @@ final class TypeScriptEmitter
                 continue;
             }
 
-            $owner = $this->registry->ownerFor($reflection);
-            if (null === $owner || EmitMode::Discovered !== $owner->mode) {
-                continue;
-            }
+            foreach ($discovered as $registered) {
+                if (!$registered->emitter->claims($reflection)) {
+                    continue;
+                }
 
-            $claimedByConvention[$owner->convention][] = $reflection;
-            $this->collectEmitted($owner->emitter->emit($reflection, $context), $blocksByDomain, $importsByDomain);
+                $claimedByConvention[$registered->convention][] = $reflection;
+                $this->collectEmitted($registered->emitter->emit($reflection, $context), $blocksByDomain, $importsByDomain);
+
+                break;
+            }
         }
 
         foreach ($discovered as $registered) {
