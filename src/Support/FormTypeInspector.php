@@ -47,6 +47,8 @@ final class FormTypeInspector
     }
 
     /**
+     * @param FormBuilderInterface<mixed> $builder
+     *
      * @return list<CollectedFormField>
      */
     private function collectFields(FormBuilderInterface $builder): array
@@ -83,7 +85,7 @@ final class FormTypeInspector
 
     /**
      * @param class-string $formClass
-     * @phpstan-assert class-string<FormTypeInterface> $formClass
+     * @phpstan-assert class-string<FormTypeInterface<mixed>> $formClass
      */
     private function assertFormTypeInterface(string $formClass): void
     {
@@ -120,11 +122,17 @@ final class FormTypeInspector
         return str_starts_with($formClass, 'Symfony\\Component\\Form\\');
     }
 
+    /**
+     * @param FormConfigInterface<mixed> $config
+     */
     private function requiresContractMarker(FormConfigInterface $config): bool
     {
         return $config->getCompound() || null !== $config->getDataClass();
     }
 
+    /**
+     * @param FormConfigInterface<mixed> $config
+     */
     private function resolvePropertyPath(FormConfigInterface $config, string $default): string
     {
         $propertyPath = $config->getPropertyPath();
@@ -135,6 +143,9 @@ final class FormTypeInspector
         return (string) $propertyPath;
     }
 
+    /**
+     * @param FormConfigInterface<mixed> $config
+     */
     private function resolveEntryTypeClass(FormConfigInterface $config): ?string
     {
         $entryType = $this->resolveStringOption($config, 'entry_type');
@@ -145,6 +156,9 @@ final class FormTypeInspector
         return is_a($entryType, FormTypeInterface::class, true) ? $entryType : null;
     }
 
+    /**
+     * @param FormConfigInterface<mixed> $config
+     */
     private function resolveEntryDataClass(FormConfigInterface $config): ?string
     {
         $entryTypeClass = $this->resolveEntryTypeClass($config);
@@ -163,6 +177,9 @@ final class FormTypeInspector
         return $dataClass;
     }
 
+    /**
+     * @param FormConfigInterface<mixed> $config
+     */
     private function resolveStringOption(FormConfigInterface $config, string $option): ?string
     {
         if (!$config->hasOption($option)) {

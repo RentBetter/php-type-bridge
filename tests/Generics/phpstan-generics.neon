@@ -1,0 +1,9 @@
+# phpstan/phpstan-symfony is auto-loaded by phpstan/extension-installer, so it must NOT
+# be included here (doing so triggers a "included multiple times" warning). This config
+# only narrows the analysis to the dual-generic ContractFormType fixture at level max.
+parameters:
+    level: max
+    paths:
+        - Fixtures
+    bootstrapFiles:
+        - ../../vendor/autoload.php

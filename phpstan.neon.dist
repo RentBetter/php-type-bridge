@@ -1,5 +1,4 @@
 includes:
-    - vendor/rentbetter/phpstan-rules/extension.neon
     - extension.neon
     - rules.neon
 

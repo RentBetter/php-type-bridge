@@ -33,6 +33,13 @@ final class ContractFormTypeRule implements Rule
             return [];
         }
 
+        // Abstract contract-form bases (e.g. AbstractFormType) declare the data type as a
+        // template variable, not a concrete class, and carry no data_class. Only their
+        // concrete subclasses are real contracts to validate.
+        if ($classReflection->isAbstract()) {
+            return [];
+        }
+
         $line = $node->getOriginalNode()->getStartLine();
 
         return array_map(
