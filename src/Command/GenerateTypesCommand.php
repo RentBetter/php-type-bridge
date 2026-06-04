@@ -33,7 +33,8 @@ final class GenerateTypesCommand extends Command
         $this
             ->addArgument('source', InputArgument::OPTIONAL, 'Source directory to scan', 'src')
             ->addArgument('output', InputArgument::OPTIONAL, 'Directory to write generated TypeScript files', 'src')
-            ->addOption('config', null, InputOption::VALUE_REQUIRED, 'Optional PHP config file that returns TypeBridge settings');
+            ->addOption('config', null, InputOption::VALUE_REQUIRED, 'Optional PHP config file that returns TypeBridge settings')
+            ->addOption('discovered-only', null, InputOption::VALUE_NONE, 'Skip the built-in @phpstan-type / response / endpoint conventions; run only Discovered-mode emitters');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -46,19 +47,11 @@ final class GenerateTypesCommand extends Command
         $outputDir = $input->getArgument('output');
         /** @var string|null $configFile */
         $configFile = $input->getOption('config');
-
-        $typeCollector = new PhpDocTypeCollector();
-        $responseCollector = new ResponseClassCollector();
-        $endpointCollector = new EndpointContractCollector();
-        $enumResolver = new EnumResolver();
-        $enumResolver->scanDirectory($sourceDir);
-
-        $domains = $typeCollector->collect($sourceDir);
-        $responses = $responseCollector->collect($sourceDir);
-        $contracts = $endpointCollector->collect($sourceDir, $responseCollector->collectIndex($sourceDir));
+        $discoveredOnly = (bool) $input->getOption('discovered-only');
 
         $config = null !== $configFile ? TypeBridgeConfig::fromFile($configFile) : new TypeBridgeConfig();
 
+        $enumResolver = new EnumResolver();
         $candidateClasses = array_keys((new PhpFileClassLocator())->classesIn($sourceDir));
         $registry = EmitterRegistry::fromAttributeScan($candidateClasses);
 
@@ -72,10 +65,18 @@ final class GenerateTypesCommand extends Command
             assembler: new DomainAssembler($config->output->header),
         );
 
-        $files = array_merge(
-            $emitter->emit($domains, $responses, $contracts),
-            $emitter->emitDiscovered($candidateClasses),
-        );
+        $files = [];
+        if (!$discoveredOnly) {
+            $enumResolver->scanDirectory($sourceDir);
+            $responseCollector = new ResponseClassCollector();
+            $files = $emitter->emit(
+                (new PhpDocTypeCollector())->collect($sourceDir),
+                $responseCollector->collect($sourceDir),
+                (new EndpointContractCollector())->collect($sourceDir, $responseCollector->collectIndex($sourceDir)),
+            );
+        }
+
+        $files = array_merge($files, $emitter->emitDiscovered($candidateClasses));
 
         foreach ($files as $domain => $typescript) {
             $path = '' === $domain ? $mapper->getRootOutputPath() : $mapper->getOutputPath($domain);
