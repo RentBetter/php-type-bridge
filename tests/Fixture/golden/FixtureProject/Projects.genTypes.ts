@@ -103,6 +103,8 @@ export type ProjectCreateBody = CreateProjectRequestData;
 export type ProjectUpdateBody = UpdateProjectRequestData;
 export type ProjectUpdatePathParams = ProjectPathParams;
 
+export type ProjectDeletePathParams = { id: number };
+
 // Endpoint results
 export type EndpointResult<M extends Record<number, unknown>> = {
   [S in keyof M & number]: {

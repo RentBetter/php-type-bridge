@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Controller;
 
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Routing\PathParam;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Input\ProjectPathParams;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Response\ValidationErrorResponse;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
@@ -54,7 +55,7 @@ final class ProjectController
         throw new \LogicException('Fixture only.');
     }
 
-    #[Route('/api/projects/{id}', methods: ['DELETE'])]
+    #[Route('/api/projects/{id}', methods: ['DELETE'], requirements: ['id' => PathParam::INT])]
     #[ApiResponses([DeleteProjectResponse::class])]
     public function delete(): DeleteProjectResponse
     {

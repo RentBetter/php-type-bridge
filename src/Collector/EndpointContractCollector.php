@@ -10,6 +10,8 @@ use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Model\CollectedPathParam;
+use PTGS\TypeBridge\Routing\PathParam;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
@@ -101,20 +103,59 @@ final class EndpointContractCollector
     private function resolveRequestContract(ReflectionMethod $method, string $srcDir, array $classFiles): ?CollectedEndpointRequest
     {
         $attributes = $method->getAttributes(ApiRequest::class);
-        if ([] === $attributes) {
-            return null;
-        }
+        /** @var ApiRequest|null $request */
+        $request = [] !== $attributes ? $attributes[0]->newInstance() : null;
 
-        /** @var ApiRequest $request */
-        $request = $attributes[0]->newInstance();
+        // An explicit class on #[ApiRequest(path:)] wins; otherwise the path params are
+        // derived from the #[Route] placeholders (each a string unless its requirement
+        // refines the type — see PathParam).
+        $path = null !== $request && null !== $request->path
+            ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles)
+            : null;
 
         $collected = new CollectedEndpointRequest(
-            query: null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles) : null,
-            body: null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles) : null,
-            path: null !== $request->path ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles) : null,
+            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles) : null,
+            body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles) : null,
+            path: $path,
+            pathParams: null === $path ? $this->derivePathParamsFromRoute($method) : null,
         );
 
         return $collected->hasAnyInput() ? $collected : null;
+    }
+
+    /**
+     * Derives path parameters from the method's #[Route] placeholders. Each segment types as a
+     * plain string unless its route requirement matches a known {@see PathParam} pattern. Returns
+     * null when there is no #[Route] or it carries no placeholders.
+     *
+     * @return list<CollectedPathParam>|null
+     */
+    private function derivePathParamsFromRoute(ReflectionMethod $method): ?array
+    {
+        $routeAttributes = $method->getAttributes('Symfony\\Component\\Routing\\Attribute\\Route');
+        if ([] === $routeAttributes) {
+            return null;
+        }
+
+        $arguments = $routeAttributes[0]->getArguments();
+        $pathTemplate = $arguments['path'] ?? $arguments[0] ?? null;
+        if (!\is_string($pathTemplate) || 0 === preg_match_all('/\{(\w+)\}/', $pathTemplate, $matches)) {
+            return null;
+        }
+
+        $requirements = $arguments['requirements'] ?? [];
+        if (!\is_array($requirements)) {
+            $requirements = [];
+        }
+
+        $params = [];
+        foreach ($matches[1] as $name) {
+            $requirement = $requirements[$name] ?? null;
+            $requirement = \is_string($requirement) ? $requirement : null;
+            $params[] = new CollectedPathParam($name, PathParam::tsType($requirement), $requirement);
+        }
+
+        return $params;
     }
 
     /**

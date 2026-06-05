@@ -13,6 +13,7 @@ use PTGS\TypeBridge\Emitter\EmitMode;
 use PTGS\TypeBridge\Emitter\TypeEmitter;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
+use PTGS\TypeBridge\Model\CollectedPathParam;
 use ReflectionClass;
 use ReflectionMethod;
 
@@ -77,9 +78,26 @@ final class EndpointContractEmitter implements TypeEmitter
         }
         if (null !== $request->path) {
             $lines[] = \sprintf('export type %s = %s;', $context->naming->pathAliasName($contract->name), $context->symbolForInputReference($request->path));
+        } elseif (null !== $request->pathParams) {
+            $lines[] = \sprintf('export type %s = %s;', $context->naming->pathAliasName($contract->name), $this->renderPathParams($request->pathParams));
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Renders route-derived path params as an inline object type, e.g. `{ accountId: string }`.
+     *
+     * @param list<CollectedPathParam> $params
+     */
+    private function renderPathParams(array $params): string
+    {
+        $fields = [];
+        foreach ($params as $param) {
+            $fields[] = \sprintf('%s: %s', $param->name, $param->tsType);
+        }
+
+        return '{ ' . implode('; ', $fields) . ' }';
     }
 
     private function renderResult(CollectedEndpointContract $contract, EmitContext $context): string
