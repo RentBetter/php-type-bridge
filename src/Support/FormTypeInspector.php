@@ -6,11 +6,13 @@ namespace PTGS\TypeBridge\Support;
 
 use PTGS\TypeBridge\Contract\ContractFormType;
 use PTGS\TypeBridge\Model\CollectedFormField;
+use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
 use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\FormTypeInterface;
 use Symfony\Component\Form\Forms;
+use Symfony\Component\Validator\Validation;
 use RuntimeException;
 
 final class FormTypeInspector
@@ -19,7 +21,13 @@ final class FormTypeInspector
 
     public function __construct(?FormFactoryInterface $formFactory = null)
     {
-        $this->formFactory = $formFactory ?? Forms::createFormFactory();
+        // The validator extension makes form-level validation options (constraints,
+        // validation_groups, …) valid when a form is built for inspection — consuming apps
+        // routinely attach field constraints. No validation is ever run here; the form is
+        // built only to read its field structure.
+        $this->formFactory = $formFactory ?? Forms::createFormFactoryBuilder()
+            ->addExtension(new ValidatorExtension(Validation::createValidator()))
+            ->getFormFactory();
     }
 
     /**
