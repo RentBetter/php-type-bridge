@@ -6,10 +6,12 @@ namespace PTGS\TypeBridge\Collector;
 
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Attribute\McpTool;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Support\DomainGuesser;
@@ -78,14 +80,16 @@ final class EndpointContractCollector
                     }
 
                     $domain = $this->domainGuesser->guess($srcDir, $file);
+                    $endpointName = $this->endpointName($reflection->getShortName(), $method->getName());
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
-                        name: $this->endpointName($reflection->getShortName(), $method->getName()),
+                        name: $endpointName,
                         domain: $domain,
                         controllerClass: $className,
                         methodName: $method->getName(),
                         responses: $responses,
                         request: $this->resolveRequestContract($method, $srcDir, $classFiles),
+                        mcp: $this->resolveMcpTool($method, $endpointName),
                     );
                 }
             }
@@ -105,6 +109,50 @@ final class EndpointContractCollector
         }
 
         return $base . ucfirst($methodName);
+    }
+
+    private function resolveMcpTool(ReflectionMethod $method, string $endpointName): ?CollectedMcpTool
+    {
+        $attributes = $method->getAttributes(McpTool::class);
+        if ([] === $attributes) {
+            return null;
+        }
+
+        /** @var McpTool $tool */
+        $tool = $attributes[0]->newInstance();
+        [$httpMethod, $httpPath] = $this->routeMethodAndPath($method);
+
+        return new CollectedMcpTool(
+            name: $tool->name ?? $endpointName,
+            description: $tool->description,
+            httpMethod: $httpMethod,
+            httpPath: $httpPath,
+            destructive: $tool->destructive ?? ('GET' !== $httpMethod),
+        );
+    }
+
+    /**
+     * @return array{0: string, 1: string} [HTTP method (uppercased, first listed), path template]
+     */
+    private function routeMethodAndPath(ReflectionMethod $method): array
+    {
+        $routeAttributes = $method->getAttributes('Symfony\\Component\\Routing\\Attribute\\Route');
+        if ([] === $routeAttributes) {
+            return ['GET', ''];
+        }
+
+        $arguments = $routeAttributes[0]->getArguments();
+        $path = $arguments['path'] ?? $arguments[0] ?? '';
+        $methods = $arguments['methods'] ?? [];
+
+        $httpMethod = 'GET';
+        if (\is_string($methods)) {
+            $httpMethod = strtoupper($methods);
+        } elseif (\is_array($methods) && \is_string($firstMethod = $methods[0] ?? null)) {
+            $httpMethod = strtoupper($firstMethod);
+        }
+
+        return [$httpMethod, \is_string($path) ? $path : ''];
     }
 
     /**

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use PTGS\TypeBridge\Command\GenerateMcpManifestCommand;
 use PTGS\TypeBridge\Command\GenerateTypesCommand;
 use PTGS\TypeBridge\Form\DefaultValidationErrorResponseFactory;
 use PTGS\TypeBridge\Form\RequestFormProcessor;
@@ -32,6 +33,7 @@ return static function (ContainerConfigurator $container): void {
     $services->set(EnumResolver::class);
 
     $services->set(GenerateTypesCommand::class);
+    $services->set(GenerateMcpManifestCommand::class);
 
     $services->set(TypeBridgeResponseSubscriber::class);
     $services->set(TypeBridgeThrowableListener::class);
