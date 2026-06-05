@@ -78,3 +78,8 @@ services:
             preserveNull: %typeBridge.preserveNull%
         tags:
             - phpstan.rules.rule
+
+    -
+        class: PTGS\TypeBridge\PHPStan\Rules\Normalizer\ShapeNormalizerBatchRule
+        tags:
+            - phpstan.rules.rule
