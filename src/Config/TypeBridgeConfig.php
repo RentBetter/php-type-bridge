@@ -18,11 +18,15 @@ final readonly class TypeBridgeConfig
      *   where the shape name matches the @phpstan-type alias (or class short name
      *   for `_self` shapes). Fields listed here must be annotated `T|null`; all
      *   other nullable fields must be annotated `?T`.
+     * @param array<string, string> $requirementTypes route-parameter requirement regex => TS
+     *   type, merged over the bundle's Symfony Requirement defaults to refine derived path-param
+     *   types (e.g. a project's own short-uuid pattern => "string")
      */
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),
         public array $preserveNull = [],
         public OutputStructure $output = new OutputStructure(),
+        public array $requirementTypes = [],
     ) {}
 
     public static function fromFile(string $path): self
@@ -44,7 +48,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -62,8 +66,9 @@ final readonly class TypeBridgeConfig
         );
         $preserveNull = self::preserveNullList($config['preserveNull'] ?? []);
         $output = OutputStructure::fromArray(self::stringKeyedArray($config['output'] ?? [], 'output'));
+        $requirementTypes = self::requirementTypesMap($config['requirementTypes'] ?? []);
 
-        return new self($typescript, $preserveNull, $output);
+        return new self($typescript, $preserveNull, $output, $requirementTypes);
     }
 
     public function isPreserveNull(string $shapeName, string $fieldName): bool
@@ -100,6 +105,26 @@ final readonly class TypeBridgeConfig
             }
 
             $result[] = $entry;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function requirementTypesMap(mixed $value): array
+    {
+        if (!is_array($value)) {
+            throw new RuntimeException('TypeBridge config key "requirementTypes" must be a map of requirement-regex => TS type.');
+        }
+
+        $result = [];
+        foreach ($value as $regex => $tsType) {
+            if (!is_string($regex) || !is_string($tsType)) {
+                throw new RuntimeException('TypeBridge config key "requirementTypes" must map requirement-regex strings to TS type strings.');
+            }
+            $result[$regex] = $tsType;
         }
 
         return $result;

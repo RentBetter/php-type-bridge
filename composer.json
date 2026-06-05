@@ -19,7 +19,8 @@
         "symfony/event-dispatcher": "^7.3 || ^8.0",
         "symfony/form": "^7.3 || ^8.0",
         "symfony/http-foundation": "^7.3 || ^8.0",
-        "symfony/http-kernel": "^7.3 || ^8.0"
+        "symfony/http-kernel": "^7.3 || ^8.0",
+        "symfony/routing": "^7.3 || ^8.0"
     },
     "require-dev": {
         "phpstan/extension-installer": "^1.4",

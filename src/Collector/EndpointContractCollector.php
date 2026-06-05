@@ -11,7 +11,7 @@ use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedPathParam;
-use PTGS\TypeBridge\Routing\PathParam;
+use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
@@ -22,12 +22,22 @@ use RuntimeException;
 
 final class EndpointContractCollector
 {
+    /** @var array<string, string> requirement regex => TS type */
+    private readonly array $requirementTypes;
+
+    /**
+     * @param array<string, string> $requirementTypes project requirement-regex => TS type,
+     *        merged over {@see RequirementType::defaults()}
+     */
     public function __construct(
         private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
         private readonly FormTypeInspector $formTypeInspector = new FormTypeInspector(),
-    ) {}
+        array $requirementTypes = [],
+    ) {
+        $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
+    }
 
     /**
      * @param array<class-string, CollectedApiResponseClass> $responseIndex
@@ -152,7 +162,8 @@ final class EndpointContractCollector
         foreach ($matches[1] as $name) {
             $requirement = $requirements[$name] ?? null;
             $requirement = \is_string($requirement) ? $requirement : null;
-            $params[] = new CollectedPathParam($name, PathParam::tsType($requirement), $requirement);
+            $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
+            $params[] = new CollectedPathParam($name, $tsType, $requirement);
         }
 
         return $params;
