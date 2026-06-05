@@ -119,7 +119,7 @@ final class EndpointContractCollector
 
     /**
      * @param array<string, string> $classFiles
-     * @param class-string<\PTGS\TypeBridge\Contract\ContractFormType<object>> $formClass
+     * @param class-string $formClass
      */
     private function resolveFormClass(string $formClass, string $srcDir, array $classFiles): CollectedInputReference
     {

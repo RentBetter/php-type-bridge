@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Attribute;
 
 use Attribute;
-use PTGS\TypeBridge\Contract\ContractFormType;
 
 #[Attribute(Attribute::TARGET_METHOD)]
 final readonly class ApiRequest
 {
     /**
-     * @param class-string<ContractFormType<object>>|null $query
-     * @param class-string<ContractFormType<object>>|null $body
+     * @param class-string|null $query
+     * @param class-string|null $body
      * @param class-string<object>|null $path
      */
     public function __construct(
