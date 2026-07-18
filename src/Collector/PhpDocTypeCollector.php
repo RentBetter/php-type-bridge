@@ -10,6 +10,7 @@ use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
+use RuntimeException;
 
 final class PhpDocTypeCollector
 {
@@ -54,6 +55,17 @@ final class PhpDocTypeCollector
 
             foreach ($definitions as $alias => $definition) {
                 $emittedName = $this->emittedTypeName($alias, $className);
+
+                $existing = $domains[$domain]->types[$emittedName] ?? null;
+                if (null !== $existing && $existing->ownerClass !== $className) {
+                    throw new RuntimeException(\sprintf(
+                        'Duplicate @phpstan-type "%s" in domain "%s": declared by both %s and %s. Rename one alias.',
+                        $emittedName,
+                        $domain,
+                        $existing->ownerClass,
+                        $className,
+                    ));
+                }
 
                 $domains[$domain]->types[$emittedName] = new CollectedType(
                     name: $emittedName,

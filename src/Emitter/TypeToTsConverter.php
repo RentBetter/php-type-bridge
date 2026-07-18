@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Emitter;
 
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\LiteralType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
@@ -42,6 +43,18 @@ final readonly class TypeToTsConverter
                 'null' => 'null',
                 default => throw new RuntimeException(\sprintf('Unknown scalar type "%s".', $type->type)),
             };
+        }
+
+        if ($type instanceof LiteralType) {
+            if (\is_string($type->value)) {
+                return "'" . str_replace(['\\', "'"], ['\\\\', "\\'"], $type->value) . "'";
+            }
+
+            if (\is_bool($type->value)) {
+                return $type->value ? 'true' : 'false';
+            }
+
+            return (string) $type->value;
         }
 
         if ($type instanceof NullableType) {

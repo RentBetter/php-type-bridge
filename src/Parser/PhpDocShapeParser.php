@@ -13,9 +13,11 @@ use RuntimeException;
  *   TypeDef    = Shape | NameRef '&' Shape | NameRef
  *   Shape      = 'array{' Fields '}'
  *   Fields     = Field (',' Field)* ','?
- *   Field      = Ident ':' Type | '?' Ident ':' Type
- *   Type       = '?' Type | 'value-of<' ClassName '>' | ScalarType | Shape | 'list<' Type '>' | NameRef | Type '|' 'null'
- *   ScalarType = 'string' | 'int' | 'float' | 'bool' | 'mixed' | 'numeric'
+ *   Field      = Ident '?'? ':' Type | '?' Ident ':' Type
+ *   Type       = SingleType ('|' SingleType)*
+ *   SingleType = '?' SingleType | 'value-of<' ClassName '>' | ScalarType | Literal | Shape | 'list<' Type '>' | NameRef
+ *   ScalarType = 'string' | 'int' | 'float' | 'bool' | 'mixed' | 'numeric' | 'null'
+ *   Literal    = StringLiteral | NumberLiteral | 'true' | 'false'
  */
 final class PhpDocShapeParser
 {
@@ -118,6 +120,11 @@ final class PhpDocShapeParser
 
         if (!$optional) {
             $fieldName = $this->parseIdent();
+            // Standard PHPStan optional-key syntax: fieldName?: type
+            if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
+                $this->pos++;
+                $optional = true;
+            }
         }
 
         $this->skipWhitespace();
@@ -206,12 +213,31 @@ final class PhpDocShapeParser
             return new ValueOfType($className);
         }
 
+        // Quoted string literal: 'draft' or "draft"
+        if ($this->pos < $this->len && ("'" === $this->input[$this->pos] || '"' === $this->input[$this->pos])) {
+            return new LiteralType($this->parseStringLiteral());
+        }
+
+        // Number literal: 42, -1, 3.14
+        if ($this->atNumberLiteral()) {
+            return $this->parseNumberLiteral();
+        }
+
         // Scalar types
         foreach (['string', 'int', 'float', 'bool', 'mixed', 'numeric', 'null'] as $scalar) {
             if ($this->lookAhead($scalar) && !$this->isIdentChar($this->pos + \strlen($scalar))) {
                 $this->pos += \strlen($scalar);
 
                 return new ScalarType($scalar);
+            }
+        }
+
+        // Boolean literals
+        foreach (['true' => true, 'false' => false] as $keyword => $value) {
+            if ($this->lookAhead($keyword) && !$this->isIdentChar($this->pos + \strlen($keyword))) {
+                $this->pos += \strlen($keyword);
+
+                return new LiteralType($value);
             }
         }
 
@@ -226,6 +252,76 @@ final class PhpDocShapeParser
             $this->pos,
             $this->input,
         ));
+    }
+
+    private function parseStringLiteral(): string
+    {
+        $quote = $this->input[$this->pos];
+        $this->pos++;
+
+        $value = '';
+        while ($this->pos < $this->len && $this->input[$this->pos] !== $quote) {
+            if ('\\' === $this->input[$this->pos] && $this->pos + 1 < $this->len) {
+                $this->pos++;
+            }
+            $value .= $this->input[$this->pos];
+            $this->pos++;
+        }
+
+        if ($this->pos >= $this->len) {
+            throw new RuntimeException(\sprintf(
+                'Unterminated string literal starting at position %d in "%s"',
+                $this->pos,
+                $this->input,
+            ));
+        }
+
+        $this->pos++; // closing quote
+
+        return $value;
+    }
+
+    private function atNumberLiteral(): bool
+    {
+        if ($this->pos >= $this->len) {
+            return false;
+        }
+
+        if (ctype_digit($this->input[$this->pos])) {
+            return true;
+        }
+
+        return '-' === $this->input[$this->pos]
+            && $this->pos + 1 < $this->len
+            && ctype_digit($this->input[$this->pos + 1]);
+    }
+
+    private function parseNumberLiteral(): LiteralType
+    {
+        $start = $this->pos;
+        if ('-' === $this->input[$this->pos]) {
+            $this->pos++;
+        }
+        while ($this->pos < $this->len && ctype_digit($this->input[$this->pos])) {
+            $this->pos++;
+        }
+
+        $isFloat = false;
+        if (
+            $this->pos + 1 < $this->len
+            && '.' === $this->input[$this->pos]
+            && ctype_digit($this->input[$this->pos + 1])
+        ) {
+            $isFloat = true;
+            $this->pos++;
+            while ($this->pos < $this->len && ctype_digit($this->input[$this->pos])) {
+                $this->pos++;
+            }
+        }
+
+        $raw = \substr($this->input, $start, $this->pos - $start);
+
+        return new LiteralType($isFloat ? (float) $raw : (int) $raw);
     }
 
     private function parseIdent(): string
