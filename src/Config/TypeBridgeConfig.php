@@ -21,12 +21,18 @@ final readonly class TypeBridgeConfig
      * @param array<string, string> $requirementTypes route-parameter requirement regex => TS
      *   type, merged over the bundle's Symfony Requirement defaults to refine derived path-param
      *   types (e.g. a project's own short-uuid pattern => "string")
+     * @param string|null $mcpScopeAttribute FQCN of the project's auth-scope attribute (e.g. a
+     *   TokenAccess attribute). When set, every #[McpTool] endpoint must carry it — its string /
+     *   string-backed-enum values are collected into the tool's `scopes` in the MCP manifest,
+     *   and generation fails for a tool without one (an unguessable-scope tool would be
+     *   uncallable or ungated).
      */
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),
         public array $preserveNull = [],
         public OutputStructure $output = new OutputStructure(),
         public array $requirementTypes = [],
+        public ?string $mcpScopeAttribute = null,
     ) {}
 
     public static function fromFile(string $path): self
@@ -48,7 +54,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -67,8 +73,9 @@ final readonly class TypeBridgeConfig
         $preserveNull = self::preserveNullList($config['preserveNull'] ?? []);
         $output = OutputStructure::fromArray(self::stringKeyedArray($config['output'] ?? [], 'output'));
         $requirementTypes = self::requirementTypesMap($config['requirementTypes'] ?? []);
+        $mcpScopeAttribute = self::mcpScopeAttributeName($config['mcpScopeAttribute'] ?? null);
 
-        return new self($typescript, $preserveNull, $output, $requirementTypes);
+        return new self($typescript, $preserveNull, $output, $requirementTypes, $mcpScopeAttribute);
     }
 
     public function isPreserveNull(string $shapeName, string $fieldName): bool
@@ -108,6 +115,19 @@ final readonly class TypeBridgeConfig
         }
 
         return $result;
+    }
+
+    private static function mcpScopeAttributeName(mixed $value): ?string
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        if (!is_string($value) || '' === $value) {
+            throw new RuntimeException('TypeBridge config key "mcpScopeAttribute" must be an attribute class name.');
+        }
+
+        return $value;
     }
 
     /**

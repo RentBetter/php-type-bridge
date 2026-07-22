@@ -44,8 +44,11 @@ final class GenerateMcpManifestCommand extends Command
         $config = null !== $configFile ? TypeBridgeConfig::fromFile($configFile) : new TypeBridgeConfig();
 
         $responseCollector = new ResponseClassCollector();
-        $contracts = (new EndpointContractCollector(requirementTypes: $config->requirementTypes))
-            ->collect($sourceDir, $responseCollector->collectIndex($sourceDir));
+        $collector = new EndpointContractCollector(
+            requirementTypes: $config->requirementTypes,
+            mcpScopeAttribute: $config->mcpScopeAttribute,
+        );
+        $contracts = $collector->collect($sourceDir, $responseCollector->collectIndex($sourceDir));
 
         $manifest = (new McpManifestBuilder())->build($contracts);
 

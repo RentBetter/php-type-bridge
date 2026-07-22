@@ -8,6 +8,8 @@ use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\McpTool;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Input\ProjectPathParams;
+use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\FixtureScope;
+use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Response\ValidationErrorResponse;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectFiltersType;
@@ -19,6 +21,7 @@ use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Response\UpdateProjectRespon
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Routing\Requirement\Requirement;
 
+#[RequiresScope(FixtureScope::PROJECTS_READ)]
 final class ProjectController
 {
     #[Route('/api/projects', methods: ['GET'])]
@@ -41,6 +44,7 @@ final class ProjectController
     #[ApiRequest(body: CreateProjectRequestType::class)]
     #[ApiResponses([CreateProjectResponse::class, ValidationErrorResponse::class])]
     #[McpTool(description: 'Create a project.')]
+    #[RequiresScope([FixtureScope::PROJECTS_WRITE, 'projects:publish'])]
     public function create(): CreateProjectResponse
     {
         throw new \LogicException('Fixture only.');

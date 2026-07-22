@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
+use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
 
 final class McpManifestBuilderTest extends TestCase
 {
@@ -41,6 +42,7 @@ final class McpManifestBuilderTest extends TestCase
                     'method' => 'PUT',
                     'path' => '/admin/accounts/{accountId}/features/{feature}',
                     'destructive' => true,
+                    'scopes' => ['admin:features:write'],
                     'inputSchema' => [
                         'type' => 'object',
                         'properties' => [
@@ -65,6 +67,8 @@ final class McpManifestBuilderTest extends TestCase
         $names = array_map(static fn (array $tool): mixed => $tool['name'], $manifest['tools']);
         self::assertSame(['alpha', 'zebra'], $names);
         self::assertArrayNotHasKey('description', $manifest['tools'][0]);
+        // No scope attribute configured -> no scopes key rather than an empty list.
+        self::assertArrayNotHasKey('scopes', $manifest['tools'][0]);
     }
 
     public function testCollectsMcpToolsFromAnnotatedFixtureControllers(): void
@@ -98,6 +102,48 @@ final class McpManifestBuilderTest extends TestCase
             'properties' => ['id' => ['type' => 'number']],
             'required' => ['id'],
         ], $byName['ProjectDelete']['inputSchema']);
+
+        // Without a configured scope attribute the fixture scopes are not collected.
+        self::assertArrayNotHasKey('scopes', $byName['ProjectCreate']);
+    }
+
+    public function testCollectsScopesFromConfiguredScopeAttribute(): void
+    {
+        $srcDir = __DIR__ . '/../Fixture/Fixtures';
+        $responseIndex = (new ResponseClassCollector())->collectIndex($srcDir);
+        $contracts = (new EndpointContractCollector(mcpScopeAttribute: RequiresScope::class))
+            ->collect($srcDir, $responseIndex);
+
+        $manifest = (new McpManifestBuilder())->build($contracts);
+
+        $byName = [];
+        foreach ($manifest['tools'] as $tool) {
+            $name = $tool['name'];
+            self::assertIsString($name);
+            $byName[$name] = $tool;
+        }
+
+        // Class-level scopes come first, then method-level; enum values read as their
+        // backed strings, raw strings pass through, duplicates collapse.
+        self::assertSame(
+            ['projects:read', 'projects:write', 'projects:publish'],
+            $byName['ProjectCreate']['scopes'],
+        );
+
+        // Delete has no method-level attribute — the class-level scope alone applies.
+        self::assertSame(['projects:read'], $byName['ProjectDelete']['scopes']);
+    }
+
+    public function testFailsWhenAnMcpToolEndpointLacksTheScopeAttribute(): void
+    {
+        $srcDir = __DIR__ . '/../Fixture/MissingScopeFixtures';
+        $responseIndex = (new ResponseClassCollector())->collectIndex($srcDir);
+        $collector = new EndpointContractCollector(mcpScopeAttribute: RequiresScope::class);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('is exposed as an MCP tool but does not declare');
+
+        $collector->collect($srcDir, $responseIndex);
     }
 
     private function setFeatureContract(): CollectedEndpointContract
@@ -136,6 +182,7 @@ final class McpManifestBuilderTest extends TestCase
                 httpMethod: 'PUT',
                 httpPath: '/admin/accounts/{accountId}/features/{feature}',
                 destructive: true,
+                scopes: ['admin:features:write'],
             ),
         );
     }

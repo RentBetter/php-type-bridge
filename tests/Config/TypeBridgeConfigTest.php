@@ -82,6 +82,23 @@ final class TypeBridgeConfigTest extends TestCase
         TypeBridgeConfig::fromArray(['preserveNull' => [123]]);
     }
 
+    public function test_parses_mcp_scope_attribute(): void
+    {
+        self::assertNull(TypeBridgeConfig::fromArray([])->mcpScopeAttribute);
+
+        $config = TypeBridgeConfig::fromArray(['mcpScopeAttribute' => 'App\\Security\\TokenAccess']);
+
+        self::assertSame('App\\Security\\TokenAccess', $config->mcpScopeAttribute);
+    }
+
+    public function test_rejects_non_string_mcp_scope_attribute(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('mcpScopeAttribute');
+
+        TypeBridgeConfig::fromArray(['mcpScopeAttribute' => '']);
+    }
+
     public function test_from_file_loads_php_array(): void
     {
         $path = sys_get_temp_dir() . '/type-bridge-config-' . bin2hex(random_bytes(6)) . '.php';

@@ -30,6 +30,9 @@ final class EndpointContractCollector
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
      *        merged over {@see RequirementType::defaults()}
+     * @param string|null $mcpScopeAttribute FQCN of the project's auth-scope attribute; when set,
+     *        every #[McpTool] endpoint must carry it (method- or class-level) and its string /
+     *        string-backed-enum values become the tool's scopes
      */
     public function __construct(
         private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
@@ -37,6 +40,7 @@ final class EndpointContractCollector
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
         private readonly FormTypeInspector $formTypeInspector = new FormTypeInspector(),
         array $requirementTypes = [],
+        private readonly ?string $mcpScopeAttribute = null,
     ) {
         $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
     }
@@ -128,7 +132,84 @@ final class EndpointContractCollector
             httpMethod: $httpMethod,
             httpPath: $httpPath,
             destructive: $tool->destructive ?? ('GET' !== $httpMethod),
+            scopes: $this->resolveMcpScopes($method),
         );
+    }
+
+    /**
+     * Reads the tool's required auth scopes from the configured scope attribute (class-level
+     * declarations first, then method-level, matching gate semantics where both apply). Scope
+     * values are the attribute instance's public string / string-backed-enum values. Fails when
+     * an #[McpTool] endpoint carries no scope attribute: an ungated generated tool would bypass
+     * the project's whitelist-by-default token model.
+     *
+     * @return list<string>
+     */
+    private function resolveMcpScopes(ReflectionMethod $method): array
+    {
+        if (null === $this->mcpScopeAttribute) {
+            return [];
+        }
+
+        $attributes = [
+            ...$method->getDeclaringClass()->getAttributes($this->mcpScopeAttribute),
+            ...$method->getAttributes($this->mcpScopeAttribute),
+        ];
+        if ([] === $attributes) {
+            throw new RuntimeException(\sprintf(
+                'Endpoint "%s::%s" is exposed as an MCP tool but does not declare #[%s].',
+                $method->getDeclaringClass()->getName(),
+                $method->getName(),
+                $this->mcpScopeAttribute,
+            ));
+        }
+
+        $scopes = [];
+        foreach ($attributes as $attribute) {
+            foreach ((new \ReflectionObject($instance = $attribute->newInstance()))->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+                foreach ($this->scopeValues($property->getValue($instance)) as $scope) {
+                    if (!\in_array($scope, $scopes, strict: true)) {
+                        $scopes[] = $scope;
+                    }
+                }
+            }
+        }
+
+        if ([] === $scopes) {
+            throw new RuntimeException(\sprintf(
+                'Endpoint "%s::%s" declares #[%s] but no scope values could be read from it.',
+                $method->getDeclaringClass()->getName(),
+                $method->getName(),
+                $this->mcpScopeAttribute,
+            ));
+        }
+
+        return $scopes;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function scopeValues(mixed $value): array
+    {
+        if (\is_string($value)) {
+            return [$value];
+        }
+
+        if ($value instanceof \BackedEnum && \is_string($value->value)) {
+            return [$value->value];
+        }
+
+        if (\is_array($value)) {
+            $values = [];
+            foreach ($value as $entry) {
+                $values = [...$values, ...$this->scopeValues($entry)];
+            }
+
+            return $values;
+        }
+
+        return [];
     }
 
     /**
