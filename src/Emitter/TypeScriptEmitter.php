@@ -13,6 +13,7 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ShapeField;
@@ -473,6 +474,13 @@ final class TypeScriptEmitter
     {
         if ($type instanceof NullableType || $type instanceof ListType) {
             return [$type->inner];
+        }
+
+        // Both sides: a nested shape or a value-of enum can sit in either
+        // position, and skipping the key side would drop its local type from
+        // the emitted file.
+        if ($type instanceof MapType) {
+            return [$type->key, $type->value];
         }
 
         if ($type instanceof ShapeType) {

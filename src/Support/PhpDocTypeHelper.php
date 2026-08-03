@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Support;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
@@ -109,6 +110,13 @@ final class PhpDocTypeHelper
 
         if ($type instanceof ListType) {
             return new ListType($this->resolveImportedNames($type->inner, $imports));
+        }
+
+        if ($type instanceof MapType) {
+            return new MapType(
+                key: $this->resolveImportedNames($type->key, $imports),
+                value: $this->resolveImportedNames($type->value, $imports),
+            );
         }
 
         if ($type instanceof ShapeType) {

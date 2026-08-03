@@ -15,7 +15,8 @@ use RuntimeException;
  *   Fields     = Field (',' Field)* ','?
  *   Field      = Ident '?'? ':' Type | '?' Ident ':' Type
  *   Type       = SingleType ('|' SingleType)*
- *   SingleType = '?' SingleType | 'value-of<' ClassName '>' | ScalarType | Literal | Shape | 'list<' Type '>' | NameRef
+ *   SingleType = '?' SingleType | 'value-of<' ClassName '>' | ScalarType | Literal | Shape | 'list<' Type '>' | Map | NameRef
+ *   Map        = 'array<' Type ',' Type '>'
  *   ScalarType = 'string' | 'int' | 'float' | 'bool' | 'mixed' | 'numeric' | 'null'
  *   Literal    = StringLiteral | NumberLiteral | 'true' | 'false'
  */
@@ -201,6 +202,33 @@ final class PhpDocShapeParser
             $this->expect('>');
 
             return new ListType($inner);
+        }
+
+        // array<K, V> → MapType. Sits after the `array{` branch above, so a
+        // shape is never mistaken for a map.
+        //
+        // Only the two-argument form is accepted. PHPStan reads one-argument
+        // `array<V>` as an INTEGER-keyed list, so quietly treating it as a
+        // string-keyed map would emit a type that lies about the data — better
+        // to reject it and make the author write `list<V>`.
+        if ($this->lookAhead('array<')) {
+            $this->expect('array<');
+            $key = $this->parseType();
+            $this->skipWhitespace();
+            if ($this->pos >= $this->len || ',' !== $this->input[$this->pos]) {
+                throw new RuntimeException(\sprintf(
+                    'array<> needs a key and a value type at position %d in "%s" — '
+                    . 'single-argument array<V> is an integer-keyed list; write list<V> instead.',
+                    $this->pos,
+                    $this->input,
+                ));
+            }
+            $this->pos++;
+            $value = $this->parseType();
+            $this->skipWhitespace();
+            $this->expect('>');
+
+            return new MapType($key, $value);
         }
 
         // value-of<ClassName>

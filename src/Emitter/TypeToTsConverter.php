@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Emitter;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
+use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
@@ -67,6 +68,14 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof ListType) {
             return $this->convert($type->inner, $scope) . '[]';
+        }
+
+        if ($type instanceof MapType) {
+            return \sprintf(
+                'Record<%s, %s>',
+                $this->convert($type->key, $scope),
+                $this->convert($type->value, $scope),
+            );
         }
 
         if ($type instanceof ValueOfType) {
