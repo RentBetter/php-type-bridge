@@ -94,16 +94,16 @@ export interface UpdateProjectResponse {
 // Endpoint inputs
 export type ArchiveProjectPathParams = ProjectPathParams;
 
-export type ProjectIndexQuery = ProjectFiltersData;
+export type ListProjectsQuery = ProjectFiltersData;
 
-export type ProjectShowPathParams = ProjectPathParams;
+export type ShowProjectPathParams = ProjectPathParams;
 
-export type ProjectCreateBody = CreateProjectRequestData;
+export type CreateProjectBody = CreateProjectRequestData;
 
-export type ProjectUpdateBody = UpdateProjectRequestData;
-export type ProjectUpdatePathParams = ProjectPathParams;
+export type UpdateProjectBody = UpdateProjectRequestData;
+export type UpdateProjectPathParams = ProjectPathParams;
 
-export type ProjectDeletePathParams = { id: number };
+export type DeleteProjectPathParams = { id: number };
 
 // Endpoint results
 export type EndpointResult<M extends Record<number, unknown>> = {
@@ -120,31 +120,31 @@ export type ArchiveProjectEndpointMap = {
 };
 export type ArchiveProjectResult = EndpointResult<ArchiveProjectEndpointMap>;
 
-export type ProjectIndexEndpointMap = {
+export type ListProjectsEndpointMap = {
   200: ShowProjectResponse;
   422: ValidationErrorResponse;
 };
-export type ProjectIndexResult = EndpointResult<ProjectIndexEndpointMap>;
+export type ListProjectsResult = EndpointResult<ListProjectsEndpointMap>;
 
-export type ProjectShowEndpointMap = {
+export type ShowProjectEndpointMap = {
   200: ShowProjectResponse;
   422: ValidationErrorResponse;
 };
-export type ProjectShowResult = EndpointResult<ProjectShowEndpointMap>;
+export type ShowProjectResult = EndpointResult<ShowProjectEndpointMap>;
 
-export type ProjectCreateEndpointMap = {
+export type CreateProjectEndpointMap = {
   201: CreateProjectResponse;
   422: ValidationErrorResponse;
 };
-export type ProjectCreateResult = EndpointResult<ProjectCreateEndpointMap>;
+export type CreateProjectResult = EndpointResult<CreateProjectEndpointMap>;
 
-export type ProjectUpdateEndpointMap = {
+export type UpdateProjectEndpointMap = {
   200: UpdateProjectResponse;
   422: ValidationErrorResponse;
 };
-export type ProjectUpdateResult = EndpointResult<ProjectUpdateEndpointMap>;
+export type UpdateProjectResult = EndpointResult<UpdateProjectEndpointMap>;
 
-export type ProjectDeleteEndpointMap = {
+export type DeleteProjectEndpointMap = {
   204: DeleteProjectResponse;
 };
-export type ProjectDeleteResult = EndpointResult<ProjectDeleteEndpointMap>;
+export type DeleteProjectResult = EndpointResult<DeleteProjectEndpointMap>;

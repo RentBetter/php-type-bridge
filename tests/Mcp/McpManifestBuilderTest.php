@@ -87,24 +87,24 @@ final class McpManifestBuilderTest extends TestCase
         }
 
         // Opt-in: only the two #[McpTool]-annotated endpoints become tools.
-        self::assertSame(['ProjectCreate', 'ProjectDelete'], array_keys($byName));
+        self::assertSame(['CreateProject', 'DeleteProject'], array_keys($byName));
 
-        self::assertSame('POST', $byName['ProjectCreate']['method']);
-        self::assertSame('/api/projects', $byName['ProjectCreate']['path']);
-        self::assertArrayHasKey('inputSchema', $byName['ProjectCreate']);
+        self::assertSame('POST', $byName['CreateProject']['method']);
+        self::assertSame('/api/projects', $byName['CreateProject']['path']);
+        self::assertArrayHasKey('inputSchema', $byName['CreateProject']);
 
         // Delete's {id} path param is route-derived: Requirement::POSITIVE_INT -> number.
-        self::assertSame('DELETE', $byName['ProjectDelete']['method']);
-        self::assertSame('/api/projects/{id}', $byName['ProjectDelete']['path']);
-        self::assertSame(true, $byName['ProjectDelete']['destructive']);
+        self::assertSame('DELETE', $byName['DeleteProject']['method']);
+        self::assertSame('/api/projects/{id}', $byName['DeleteProject']['path']);
+        self::assertSame(true, $byName['DeleteProject']['destructive']);
         self::assertSame([
             'type' => 'object',
             'properties' => ['id' => ['type' => 'number']],
             'required' => ['id'],
-        ], $byName['ProjectDelete']['inputSchema']);
+        ], $byName['DeleteProject']['inputSchema']);
 
         // Without a configured scope attribute the fixture scopes are not collected.
-        self::assertArrayNotHasKey('scopes', $byName['ProjectCreate']);
+        self::assertArrayNotHasKey('scopes', $byName['CreateProject']);
     }
 
     public function testCollectsScopesFromConfiguredScopeAttribute(): void
@@ -127,11 +127,11 @@ final class McpManifestBuilderTest extends TestCase
         // backed strings, raw strings pass through, duplicates collapse.
         self::assertSame(
             ['projects:read', 'projects:write', 'projects:publish'],
-            $byName['ProjectCreate']['scopes'],
+            $byName['CreateProject']['scopes'],
         );
 
         // Delete has no method-level attribute — the class-level scope alone applies.
-        self::assertSame(['projects:read'], $byName['ProjectDelete']['scopes']);
+        self::assertSame(['projects:read'], $byName['DeleteProject']['scopes']);
     }
 
     public function testFailsWhenAnMcpToolEndpointLacksTheScopeAttribute(): void

@@ -77,19 +77,19 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface UpdateProjectResponse {', $projects);
         self::assertStringContainsString('project: ProjectView;', $projects);
         self::assertStringContainsString('export type DeleteProjectResponse = null;', $projects);
-        self::assertStringContainsString('export type ProjectIndexQuery = ProjectFiltersData;', $projects);
-        self::assertStringContainsString('export type ProjectShowPathParams = ProjectPathParams;', $projects);
-        self::assertStringContainsString('export type ProjectCreateBody = CreateProjectRequestData;', $projects);
-        self::assertStringContainsString('export type ProjectUpdateBody = UpdateProjectRequestData;', $projects);
-        self::assertStringContainsString('export type ProjectUpdatePathParams = ProjectPathParams;', $projects);
-        self::assertStringContainsString('export type ProjectShowEndpointMap = {', $projects);
+        self::assertStringContainsString('export type ListProjectsQuery = ProjectFiltersData;', $projects);
+        self::assertStringContainsString('export type ShowProjectPathParams = ProjectPathParams;', $projects);
+        self::assertStringContainsString('export type CreateProjectBody = CreateProjectRequestData;', $projects);
+        self::assertStringContainsString('export type UpdateProjectBody = UpdateProjectRequestData;', $projects);
+        self::assertStringContainsString('export type UpdateProjectPathParams = ProjectPathParams;', $projects);
+        self::assertStringContainsString('export type ShowProjectEndpointMap = {', $projects);
         self::assertStringContainsString('  200: ShowProjectResponse;', $projects);
         self::assertStringContainsString('  422: ValidationErrorResponse;', $projects);
-        self::assertStringContainsString('export type ProjectShowResult = EndpointResult<ProjectShowEndpointMap>;', $projects);
-        self::assertStringContainsString('export type ProjectUpdateEndpointMap = {', $projects);
+        self::assertStringContainsString('export type ShowProjectResult = EndpointResult<ShowProjectEndpointMap>;', $projects);
+        self::assertStringContainsString('export type UpdateProjectEndpointMap = {', $projects);
         self::assertStringContainsString('  200: UpdateProjectResponse;', $projects);
         self::assertStringContainsString('  422: ValidationErrorResponse;', $projects);
-        self::assertStringContainsString('export type ProjectUpdateResult = EndpointResult<ProjectUpdateEndpointMap>;', $projects);
+        self::assertStringContainsString('export type UpdateProjectResult = EndpointResult<UpdateProjectEndpointMap>;', $projects);
 
         $common = $output['Common'];
         self::assertStringContainsString('export interface TimestampedView {', $common);
@@ -138,13 +138,13 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface ICreateProjectRequestData {', $projects);
         self::assertStringContainsString('export interface IUpdateProjectRequestData {', $projects);
         self::assertStringContainsString('export interface IShowProjectResponse {', $projects);
-        self::assertStringContainsString('export type ProjectIndexQueryParams = IProjectFiltersData;', $projects);
-        self::assertStringContainsString('export type ProjectShowRouteParams = IProjectPathParams;', $projects);
-        self::assertStringContainsString('export type ProjectCreatePayload = ICreateProjectRequestData;', $projects);
-        self::assertStringContainsString('export type ProjectUpdatePayload = IUpdateProjectRequestData;', $projects);
-        self::assertStringContainsString('export type ProjectShowResponses = {', $projects);
+        self::assertStringContainsString('export type ListProjectsQueryParams = IProjectFiltersData;', $projects);
+        self::assertStringContainsString('export type ShowProjectRouteParams = IProjectPathParams;', $projects);
+        self::assertStringContainsString('export type CreateProjectPayload = ICreateProjectRequestData;', $projects);
+        self::assertStringContainsString('export type UpdateProjectPayload = IUpdateProjectRequestData;', $projects);
+        self::assertStringContainsString('export type ShowProjectResponses = {', $projects);
         self::assertStringContainsString('  200: IShowProjectResponse;', $projects);
-        self::assertStringContainsString('export type ProjectShowOutcome = EndpointResult<ProjectShowResponses>;', $projects);
+        self::assertStringContainsString('export type ShowProjectOutcome = EndpointResult<ShowProjectResponses>;', $projects);
 
         $common = $output['Common'];
         self::assertStringContainsString('export interface ITimestampedView {', $common);

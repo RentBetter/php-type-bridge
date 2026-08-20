@@ -27,7 +27,7 @@ final class ProjectController
     #[Route('/api/projects', methods: ['GET'])]
     #[ApiRequest(query: ProjectFiltersType::class)]
     #[ApiResponses([ShowProjectResponse::class, ValidationErrorResponse::class])]
-    public function index(): ShowProjectResponse
+    public function listProjectsAction(): ShowProjectResponse
     {
         throw new \LogicException('Fixture only.');
     }
@@ -35,7 +35,7 @@ final class ProjectController
     #[Route('/api/projects/{id}', methods: ['GET'])]
     #[ApiRequest(path: ProjectPathParams::class)]
     #[ApiResponses([ShowProjectResponse::class, ValidationErrorResponse::class])]
-    public function show(): ShowProjectResponse
+    public function showProject(): ShowProjectResponse
     {
         throw new \LogicException('Fixture only.');
     }
@@ -45,7 +45,7 @@ final class ProjectController
     #[ApiResponses([CreateProjectResponse::class, ValidationErrorResponse::class])]
     #[McpTool(description: 'Create a project.')]
     #[RequiresScope([FixtureScope::PROJECTS_WRITE, 'projects:publish'])]
-    public function create(): CreateProjectResponse
+    public function createProject(): CreateProjectResponse
     {
         throw new \LogicException('Fixture only.');
     }
@@ -56,7 +56,7 @@ final class ProjectController
         path: ProjectPathParams::class,
     )]
     #[ApiResponses([UpdateProjectResponse::class, ValidationErrorResponse::class])]
-    public function update(): UpdateProjectResponse
+    public function updateProject(): UpdateProjectResponse
     {
         throw new \LogicException('Fixture only.');
     }
@@ -64,7 +64,7 @@ final class ProjectController
     #[Route('/api/projects/{id}', methods: ['DELETE'], requirements: ['id' => Requirement::POSITIVE_INT])]
     #[ApiResponses([DeleteProjectResponse::class])]
     #[McpTool(description: 'Delete a project.')]
-    public function delete(): DeleteProjectResponse
+    public function deleteProject(): DeleteProjectResponse
     {
         throw new \LogicException('Fixture only.');
     }

@@ -53,6 +53,8 @@ final class EndpointContractCollector
     {
         $classFiles = $this->classLocator->classesIn($srcDir);
         $contracts = [];
+        /** @var array<string, string> derived endpoint name => Class::method that claimed it */
+        $seenNames = [];
 
         foreach ($classFiles as $className => $file) {
             if (!class_exists($className)) {
@@ -85,6 +87,19 @@ final class EndpointContractCollector
 
                     $domain = $this->domainGuesser->guess($srcDir, $file);
                     $endpointName = $this->endpointName($reflection->getShortName(), $method->getName());
+                    $claimant = $className . '::' . $method->getName();
+                    if (isset($seenNames[$endpointName])) {
+                        throw new RuntimeException(\sprintf(
+                            'Endpoint name "%s" is derived for both "%s" and "%s". Endpoint names must be'
+                            . ' unique — they become TS aliases and MCP tool names. Rename one method'
+                            . ' (a named action contributes its name minus any "Action" suffix; an __invoke'
+                            . ' controller contributes its class name minus "Controller").',
+                            $endpointName,
+                            $seenNames[$endpointName],
+                            $claimant,
+                        ));
+                    }
+                    $seenNames[$endpointName] = $claimant;
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
                         name: $endpointName,
@@ -104,15 +119,22 @@ final class EndpointContractCollector
         return $contracts;
     }
 
+    /**
+     * A named action is the endpoint's identity: its name minus any "Action" suffix,
+     * PascalCased ("listAccountFeaturesAction" => "ListAccountFeatures"). Grouping
+     * actions on one controller therefore never leaks the class name into contract
+     * names. An __invoke controller has no method-derived name, so the class base
+     * ("ArchiveProjectController" => "ArchiveProject") stands in.
+     */
     private function endpointName(string $controllerShortName, string $methodName): string
     {
-        $base = preg_replace('/Controller$/', '', $controllerShortName) ?: $controllerShortName;
-
         if ('__invoke' === $methodName) {
-            return $base;
+            return preg_replace('/Controller$/', '', $controllerShortName) ?: $controllerShortName;
         }
 
-        return $base . ucfirst($methodName);
+        $base = str_ends_with($methodName, 'Action') ? substr($methodName, 0, -6) : $methodName;
+
+        return ucfirst('' !== $base ? $base : $methodName);
     }
 
     private function resolveMcpTool(ReflectionMethod $method, string $endpointName): ?CollectedMcpTool

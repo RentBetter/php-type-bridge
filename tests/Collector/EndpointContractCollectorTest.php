@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestTyp
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectFiltersType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\UpdateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\FixtureProject;
+use PTGS\TypeBridge\Tests\Fixture\DuplicateNameFixtureProject;
 use Symfony\Component\Form\Extension\Core\Type\EnumType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 
@@ -35,7 +36,7 @@ final class EndpointContractCollectorTest extends TestCase
 
         $index = current(array_filter(
             $contracts['Projects'],
-            static fn($contract): bool => 'index' === $contract->methodName,
+            static fn($contract): bool => 'listProjectsAction' === $contract->methodName,
         ));
 
         self::assertNotFalse($index);
@@ -50,11 +51,11 @@ final class EndpointContractCollectorTest extends TestCase
 
         $show = current(array_filter(
             $contracts['Projects'],
-            static fn($contract): bool => 'show' === $contract->methodName,
+            static fn($contract): bool => 'showProject' === $contract->methodName,
         ));
 
         self::assertNotFalse($show);
-        self::assertSame('ProjectShow', $show->name);
+        self::assertSame('ShowProject', $show->name);
         self::assertNotNull($show->request);
         self::assertNotNull($show->request->path);
         self::assertSame('ProjectPathParams', $show->request->path->typeName);
@@ -65,7 +66,7 @@ final class EndpointContractCollectorTest extends TestCase
 
         $create = current(array_filter(
             $contracts['Projects'],
-            static fn($contract): bool => 'create' === $contract->methodName,
+            static fn($contract): bool => 'createProject' === $contract->methodName,
         ));
 
         self::assertNotFalse($create);
@@ -85,7 +86,7 @@ final class EndpointContractCollectorTest extends TestCase
 
         $update = current(array_filter(
             $contracts['Projects'],
-            static fn($contract): bool => 'update' === $contract->methodName,
+            static fn($contract): bool => 'updateProject' === $contract->methodName,
         ));
 
         self::assertNotFalse($update);
@@ -100,5 +101,17 @@ final class EndpointContractCollectorTest extends TestCase
         self::assertCount(5, $update->request->body->fields[0]->children);
         self::assertSame('changeSummary', $update->request->body->fields[0]->children[4]->name);
         self::assertSame(TextType::class, $update->request->body->fields[0]->children[4]->formTypeClass);
+    }
+
+    public function test_it_rejects_endpoints_whose_derived_names_collide(): void
+    {
+        $srcDir = DuplicateNameFixtureProject::srcDir();
+        $responses = (new ResponseClassCollector())->collectIndex($srcDir);
+
+        // pingAction() and ping() both derive "Ping" — the Action suffix carries no identity.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Endpoint name "Ping" is derived for both');
+
+        (new EndpointContractCollector())->collect($srcDir, $responses);
     }
 }

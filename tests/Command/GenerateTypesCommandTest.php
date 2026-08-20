@@ -48,6 +48,6 @@ PHP);
         self::assertNotFalse($projects);
         self::assertStringContainsString("export type ProjectStatusId = 'draft' | 'active';", $projects);
         self::assertStringContainsString('export interface IProjectStatus {', $projects);
-        self::assertStringContainsString('export type ProjectCreatePayload = ICreateProjectRequestData;', $projects);
+        self::assertStringContainsString('export type CreateProjectPayload = ICreateProjectRequestData;', $projects);
     }
 }
