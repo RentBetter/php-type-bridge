@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Command;
 
-use PTGS\TypeBridge\Collector\EndpointContractCollector;
-use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
-use PTGS\TypeBridge\Mcp\McpManifestBuilder;
+use PTGS\TypeBridge\Mcp\McpManifestGenerator;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -43,14 +41,7 @@ final class GenerateMcpManifestCommand extends Command
 
         $config = null !== $configFile ? TypeBridgeConfig::fromFile($configFile) : new TypeBridgeConfig();
 
-        $responseCollector = new ResponseClassCollector();
-        $collector = new EndpointContractCollector(
-            requirementTypes: $config->requirementTypes,
-            mcpScopeAttribute: $config->mcpScopeAttribute,
-        );
-        $contracts = $collector->collect($sourceDir, $responseCollector->collectIndex($sourceDir));
-
-        $manifest = (new McpManifestBuilder())->build($contracts);
+        $manifest = (new McpManifestGenerator())->generate($sourceDir, $config);
 
         $json = json_encode($manifest, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_THROW_ON_ERROR);
 
