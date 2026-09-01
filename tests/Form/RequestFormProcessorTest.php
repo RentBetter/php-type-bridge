@@ -49,6 +49,31 @@ final class RequestFormProcessorTest extends TestCase
         }
     }
 
+    public function test_a_flat_body_populates_the_dto_without_a_block_prefix(): void
+    {
+        $processor = new RequestFormProcessor($this->formFactory(), new DefaultValidationErrorResponseFactory());
+
+        $data = $processor->processFlatForm(SampleType::class, $this->jsonRequest(['name' => 'Acme', 'count' => '7']));
+
+        self::assertInstanceOf(SampleData::class, $data);
+        self::assertSame('Acme', $data->name);
+        self::assertSame(7, $data->count);
+    }
+
+    public function test_flat_body_errors_are_addressed_by_field(): void
+    {
+        $processor = new RequestFormProcessor($this->formFactory(), new DefaultValidationErrorResponseFactory());
+
+        try {
+            $processor->processFlatForm(SampleType::class, $this->jsonRequest(['name' => 'Acme', 'count' => 'not-a-number']));
+            self::fail('Expected a validation error to be thrown.');
+        } catch (ValidationErrorResponse $error) {
+            // The body had no block prefix, so neither does the path: the root form is
+            // unnamed, as Symfony makes any form bound straight to the request body.
+            self::assertSame('count', $error->errors[0]['path']);
+        }
+    }
+
     public function test_the_thrown_response_is_pluggable_via_the_factory(): void
     {
         $processor = new RequestFormProcessor($this->formFactory(), new CustomValidationErrorResponseFactory());

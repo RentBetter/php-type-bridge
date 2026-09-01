@@ -42,11 +42,23 @@ final class StatusCodeResolver
      */
     public function resolve(ReflectionClass $class): int
     {
-        $matches = $this->matchingInterfaces($class);
+        return self::statusCodeOf($class->getName());
+    }
+
+    /**
+     * The status a response class declares through its HTTP marker interface. Static, and
+     * keyed by class name, so a thrown response can answer
+     * HttpExceptionInterface::getStatusCode() for itself.
+     *
+     * @param class-string $class
+     */
+    public static function statusCodeOf(string $class): int
+    {
+        $matches = self::matchingInterfaces(new ReflectionClass($class));
         if (1 !== \count($matches)) {
             throw new RuntimeException(\sprintf(
                 'Response class "%s" must implement exactly one known HTTP status interface, found %d.',
-                $class->getName(),
+                $class,
                 \count($matches),
             ));
         }
@@ -78,7 +90,7 @@ final class StatusCodeResolver
      * @param ReflectionClass<object> $class
      * @return list<class-string>
      */
-    private function matchingInterfaces(ReflectionClass $class): array
+    private static function matchingInterfaces(ReflectionClass $class): array
     {
         $matches = [];
 

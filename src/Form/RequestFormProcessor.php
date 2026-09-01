@@ -104,7 +104,10 @@ final readonly class RequestFormProcessor
      */
     public function processFlatForm(string $type, Request $request, ?object $data = null, array $options = []): object
     {
-        $form = $this->formFactory->create($type, $data, $options);
+        // Unnamed, as Symfony makes any root form bound straight to the request body: the
+        // errors are then addressed by field (`enabled`), not under a block prefix the body
+        // never had.
+        $form = $this->formFactory->createNamed('', $type, $data, $options);
         $submitted = $this->parseJsonObject($request);
 
         /** @var T $processedData */
