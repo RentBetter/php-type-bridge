@@ -46,6 +46,26 @@ final class PhpFileClassLocator
     }
 
     /**
+     * Whether a class this locator found can actually be loaded in the current install.
+     *
+     * A source tree carries classes that only exist for some installs: a PHPStan rule or
+     * extension kept under src/ implements interfaces from a require-dev package, so in a
+     * --no-dev image its declaration throws (`Interface "PHPStan\..." not found`). Such a
+     * class cannot be part of the running application, so it cannot carry a contract
+     * either — skipping it is what Symfony's own DI resource scan does with the same class.
+     *
+     * @phpstan-assert-if-true class-string $className
+     */
+    public function isLoadable(string $className): bool
+    {
+        try {
+            return class_exists($className);
+        } catch (\Error) {
+            return false;
+        }
+    }
+
+    /**
      * Extracts the first declared class-like's fully-qualified name via the PHP
      * tokenizer, so keywords appearing in comments, docblocks, or strings (e.g.
      * "the enum Foo convention") never get misread as a declaration.

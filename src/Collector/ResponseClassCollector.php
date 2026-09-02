@@ -53,7 +53,7 @@ final class ResponseClassCollector
         $responses = [];
 
         foreach ($classFiles as $className => $file) {
-            if (!class_exists($className)) {
+            if (!$this->classLocator->isLoadable($className)) {
                 continue;
             }
 

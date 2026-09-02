@@ -146,6 +146,22 @@ final class McpManifestBuilderTest extends TestCase
         $collector->collect($srcDir, $responseIndex);
     }
 
+    public function testSkipsClassesThatCannotLoadInThisInstall(): void
+    {
+        // A project keeps tooling-only classes under src/ — PHPStan rules whose interfaces
+        // come from a require-dev package. In a --no-dev image their declaration throws,
+        // and a whole-tree scan that let that escape would take the container build down.
+        $srcDir = __DIR__ . '/../Fixture/UnloadableFixtures';
+        $responseIndex = (new ResponseClassCollector())->collectIndex($srcDir);
+        $contracts = (new EndpointContractCollector(mcpScopeAttribute: RequiresScope::class))
+            ->collect($srcDir, $responseIndex);
+
+        $manifest = (new McpManifestBuilder())->build($contracts);
+
+        self::assertSame(['Ping'], array_column($manifest['tools'], 'name'));
+        self::assertSame(['ping:read'], $manifest['tools'][0]['scopes']);
+    }
+
     private function setFeatureContract(): CollectedEndpointContract
     {
         return new CollectedEndpointContract(
