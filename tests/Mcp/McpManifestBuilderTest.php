@@ -162,6 +162,15 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['ping:read'], $manifest['tools'][0]['scopes']);
     }
 
+    public function testAnEndpointWithNoInputEmitsABareObjectSchema(): void
+    {
+        // `properties` is omitted rather than emitted empty: a PHP [] encodes as a JSON
+        // array, and JSON Schema requires `properties` to be an object.
+        $manifest = (new McpManifestBuilder())->build(['misc' => [$this->toolContract('ping')]]);
+
+        self::assertSame(['type' => 'object'], $manifest['tools'][0]['inputSchema']);
+    }
+
     private function setFeatureContract(): CollectedEndpointContract
     {
         return new CollectedEndpointContract(

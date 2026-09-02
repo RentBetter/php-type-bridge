@@ -93,7 +93,12 @@ final class McpManifestBuilder
             $this->addFields($request->body, $properties, $required);
         }
 
-        $schema = ['type' => 'object', 'properties' => $properties];
+        // An endpoint with no inputs is a bare `{type: object}`: an empty PHP array would
+        // encode as a JSON array, and JSON Schema requires `properties` to be an object.
+        $schema = ['type' => 'object'];
+        if ([] !== $properties) {
+            $schema['properties'] = $properties;
+        }
         if ([] !== $required) {
             $schema['required'] = $required;
         }
