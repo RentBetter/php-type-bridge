@@ -603,6 +603,7 @@ The current implementation does not generate request TS by inferring the full fo
 - record query/body/path separately
 - resolve query/body forms through their configured `data_class`
 - require request `data_class` types to declare `_self`
+- accept a bare `#[ApiRequest]` on a mutating route that takes no input, recording no request contract for it
 - generate endpoint-local TypeScript aliases such as `<Endpoint>Query`, `<Endpoint>Body`, and `<Endpoint>PathParams`
 - validate analyzable contract forms with PHPStan against `data_class`, mapped fields, `property_path`, nested custom forms, enums, dates, collections, and common scalar leaf types
 

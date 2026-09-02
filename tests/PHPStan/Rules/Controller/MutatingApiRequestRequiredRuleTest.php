@@ -24,6 +24,15 @@ final class MutatingApiRequestRequiredRuleTest extends RuleTestCase
         ], []);
     }
 
+    public function testAcceptsABareApiRequestOnAMutatingMethodWithNoInput(): void
+    {
+        // A mutating route that takes nothing still declares #[ApiRequest], bare, so the
+        // absence of input is stated rather than an omission for the rule to catch.
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Controller/Positive/NoInputMutatingController.php',
+        ], []);
+    }
+
     public function testRejectsMutatingEndpointsWithoutApiRequest(): void
     {
         $this->analyse([

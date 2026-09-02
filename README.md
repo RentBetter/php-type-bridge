@@ -170,6 +170,8 @@ This first cut is focused on contract collection and code generation:
 For request contracts, `query` and `body` point at Symfony form types directly. TypeBridge resolves the form's `data_class` and uses that class's `_self` definition as the generated wire contract.
 Custom forms participating in request contracts must implement `PTGS\TypeBridge\Contract\ContractFormType`.
 
+A mutating route that takes no input — a `POST` that only triggers work — still carries `#[ApiRequest]`, bare. The collector records no request contract for it (the generated input schema is an empty object) and `MutatingApiRequestRequiredRule` reads the bare attribute as the explicit declaration it asks for, so the absence of input is stated rather than flagged.
+
 The application remains responsible for runtime HTTP emission.
 
 ## PHPStan
