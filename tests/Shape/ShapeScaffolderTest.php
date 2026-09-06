@@ -41,8 +41,8 @@ final class ShapeScaffolderTest extends TestCase
                  *     description?: string,
                  *     status?: value-of<ScaffoldStatus>,
                  *     dueDate?: string,
-                 *     archived: bool,
-                 *     order: int,
+                 *     archived?: bool,
+                 *     order?: int,
                  * }
                  */
                 DOC,

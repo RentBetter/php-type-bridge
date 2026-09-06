@@ -69,11 +69,14 @@ final class ShapeScaffolder
             // demands it. Where either says otherwise the field is optional — a contract that is
             // too permissive costs a 422, while one that wrongly marks a field mandatory sends
             // clients hunting for a value they do not have.
-            $nullable = $properties[$field->name]['nullable'] ?? true;
+            $property = $properties[$field->name] ?? null;
             $shapeFields[] = new ShapeField(
                 name: $field->name,
                 type: $type,
-                optional: $nullable || !$field->required,
+                // A default is as good as nullability for omitting a key — `status` defaulting to
+                // Todo is not something a client must send. Only a property that can represent
+                // neither absence nor a default, on a field the form insists on, is required.
+                optional: ($property['nullable'] ?? true) || ($property['hasDefault'] ?? true) || !$field->required,
             );
         }
 
@@ -81,7 +84,7 @@ final class ShapeScaffolder
     }
 
     /**
-     * @param array{type: ?ParsedType, nullable: bool}|null $property the DTO's own declaration
+     * @param array{type: ?ParsedType, nullable: bool, hasDefault: bool}|null $property the DTO's own declaration
      */
     private function fieldType(CollectedFormField $field, ?array $property): ?ParsedType
     {
@@ -134,7 +137,7 @@ final class ShapeScaffolder
     }
 
     /**
-     * @return array<string, array{type: ?ParsedType, nullable: bool}>
+     * @return array<string, array{type: ?ParsedType, nullable: bool, hasDefault: bool}>
      */
     private function propertyTypes(string $dataClass): array
     {
@@ -152,6 +155,7 @@ final class ShapeScaffolder
             $types[$property->getName()] = [
                 'type' => $type instanceof ReflectionNamedType ? $this->fromNamedType($type) : null,
                 'nullable' => $type?->allowsNull() ?? true,
+                'hasDefault' => $property->hasDefaultValue(),
             ];
         }
 

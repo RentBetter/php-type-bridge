@@ -14,7 +14,9 @@ enum ScaffoldStatus: string
 
 final class ScaffoldDto
 {
-    public string $title = '';
+    // No default: the property cannot represent its own absence, so a form field that
+    // requires it is genuinely a required key.
+    public string $title;
     public ?string $description = null;
     public ?ScaffoldStatus $status = null;
     public ?DateTimeImmutable $dueDate = null;
