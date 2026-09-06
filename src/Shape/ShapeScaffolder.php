@@ -7,7 +7,6 @@ namespace PTGS\TypeBridge\Shape;
 use DateTimeInterface;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Parser\ListType;
-use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
@@ -61,13 +60,20 @@ final class ShapeScaffolder
                 continue;
             }
 
-            // Nullable in PHP is the signal, not the form's `required`: a field can be optional on
-            // the wire while the DTO still guarantees a value via a default.
-            $nullable = $properties[$field->name]['nullable'] ?? !$field->required;
+            // An absent key and a null value are different claims, and for a request they are not
+            // interchangeable: forms bind with clearMissing disabled, so omitting a key means
+            // "leave this alone". `name?: string` says that; `name: ?string` would say the key is
+            // always present and merely nullable, which is false for any partial update.
+            //
+            // A key is required only when the DTO cannot represent its absence *and* the form
+            // demands it. Where either says otherwise the field is optional — a contract that is
+            // too permissive costs a 422, while one that wrongly marks a field mandatory sends
+            // clients hunting for a value they do not have.
+            $nullable = $properties[$field->name]['nullable'] ?? true;
             $shapeFields[] = new ShapeField(
                 name: $field->name,
-                type: $nullable ? new NullableType($type, optional: true) : $type,
-                optional: false,
+                type: $type,
+                optional: $nullable || !$field->required,
             );
         }
 

@@ -38,9 +38,9 @@ final class ShapeScaffolderTest extends TestCase
                 /**
                  * @phpstan-type _self = array{
                  *     title: string,
-                 *     description: ?string,
-                 *     status: ?value-of<ScaffoldStatus>,
-                 *     dueDate: ?string,
+                 *     description?: string,
+                 *     status?: value-of<ScaffoldStatus>,
+                 *     dueDate?: string,
                  *     archived: bool,
                  *     order: int,
                  * }
