@@ -56,6 +56,11 @@ services:
             - phpstan.rules.rule
 
     -
+        class: PTGS\TypeBridge\PHPStan\Rules\Enum\NoEnumParseOfDtoPropertyRule
+        tags:
+            - phpstan.rules.rule
+
+    -
         class: PTGS\TypeBridge\PHPStan\Rules\Form\ContractFormTypeRule
         tags:
             - phpstan.rules.rule
