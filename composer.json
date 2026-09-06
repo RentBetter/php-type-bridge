@@ -3,7 +3,13 @@
     "description": "Static API contract collection and TypeScript generation for PHP APIs",
     "type": "library",
     "license": "MIT",
-    "keywords": ["php", "typescript", "api", "static-analysis", "symfony"],
+    "keywords": [
+        "php",
+        "typescript",
+        "api",
+        "static-analysis",
+        "symfony"
+    ],
     "homepage": "https://github.com/RentBetter/php-type-bridge",
     "repositories": [
         {
@@ -21,7 +27,8 @@
         "symfony/http-foundation": "^7.3 || ^8.0",
         "symfony/http-kernel": "^7.3 || ^8.0",
         "symfony/routing": "^7.3 || ^8.0",
-        "symfony/validator": "^7.3 || ^8.0"
+        "symfony/validator": "^7.3 || ^8.0",
+        "symfony/yaml": "^7.3 || ^8.0"
     },
     "require-dev": {
         "phpstan/extension-installer": "^1.4",
@@ -38,10 +45,7 @@
     "autoload-dev": {
         "psr-4": {
             "PTGS\\TypeBridge\\Tests\\": "tests/"
-        },
-        "classmap": [
-            "tests/Stubs/"
-        ]
+        }
     },
     "scripts": {
         "phpstan": "phpstan analyse --memory-limit=1G",

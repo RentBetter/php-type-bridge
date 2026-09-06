@@ -6,11 +6,22 @@ namespace PTGS\TypeBridge\PHPStan\Support;
 
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Routing\RoutePathResolver;
 use ReflectionAttribute;
 use ReflectionMethod;
 
 final class ApiMethodInspector
 {
+    /**
+     * @param RoutePathResolver|null $routePathResolver resolves the *served* path, which the
+     *        method attribute alone does not give: a routing-config `prefix` and any class-level
+     *        #[Route] are part of it too. Without one, only the attribute's own path is known, so
+     *        an application that prefixes in routing config will look like it has no API routes.
+     */
+    public function __construct(
+        private readonly ?RoutePathResolver $routePathResolver = null,
+    ) {}
+
     /**
      * @param class-string $className
      */
@@ -60,8 +71,12 @@ final class ApiMethodInspector
             }
         }
 
+        // The router's answer wins where it has one: it already accounts for the routing-config
+        // prefix and any class-level #[Route], which the attribute read above cannot see.
+        $resolvedPath = $this->routePathResolver?->pathFor($className, $methodName);
+
         return new InspectedApiMethod(
-            path: $path,
+            path: $resolvedPath ?? $path,
             httpMethods: $httpMethods,
             hasApiRequest: [] !== $method->getAttributes(ApiRequest::class),
             hasApiResponses: [] !== $responsesAttributes,

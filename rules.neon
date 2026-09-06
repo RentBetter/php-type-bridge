@@ -12,16 +12,30 @@ parameters:
         preserveNull: []
         shapeNaming:
             allowIdSuffix: []
+        # Routing entrypoint, relative to the analysed project. Route paths are assembled from a
+        # config `prefix`, an optional class-level #[Route] and the method attribute — only the
+        # last of which is visible to static analysis. Point this at the real routing file and the
+        # rules see the served path instead. Left null, any rule keyed on the full path (e.g.
+        # "is this under /api") falls back to the method attribute alone, which in an application
+        # that prefixes in routing config means those rules match nothing.
+        routing: null
 
 parametersSchema:
     typeBridge: structure([
         preserveNull: listOf(string()),
         shapeNaming: structure([
             allowIdSuffix: listOf(string())
-        ])
+        ]),
+        routing: schema(string(), nullable())
     ])
 
 services:
+    -
+        class: PTGS\TypeBridge\Routing\RoutePathResolver
+        arguments:
+            projectDirectory: %currentWorkingDirectory%
+            routingFile: %typeBridge.routing%
+
     -
         class: PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector
 

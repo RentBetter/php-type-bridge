@@ -1,0 +1,12 @@
+health_controllers:
+    resource:
+        path: ../Health/
+        namespace: PTGS\TypeBridge\Tests\Fixture\RoutingApp\Health
+    type: attribute
+
+projects_controllers:
+    resource:
+        path: ../Projects/Controller/
+        namespace: PTGS\TypeBridge\Tests\Fixture\RoutingApp\Projects\Controller
+    type: attribute
+    prefix: '/api'
