@@ -29,6 +29,8 @@ final class ShapeScaffolderTest extends TestCase
                 $this->field('dueDate', DateType::class, required: false),
                 $this->field('archived', CheckboxType::class, required: true),
                 $this->field('order', IntegerType::class, required: true),
+                // A multi-select: the form knows the enum, the DTO's array says it is a list.
+                $this->field('tags', EnumType::class, required: false, enumClass: ScaffoldStatus::class),
             ],
         );
 
@@ -43,6 +45,7 @@ final class ShapeScaffolderTest extends TestCase
                  *     dueDate?: string,
                  *     archived?: bool,
                  *     order?: int,
+                 *     tags?: list<value-of<ScaffoldStatus>>,
                  * }
                  */
                 DOC,

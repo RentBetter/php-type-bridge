@@ -84,12 +84,17 @@ final class ShapeScaffolder
     }
 
     /**
-     * @param array{type: ?ParsedType, nullable: bool, hasDefault: bool}|null $property the DTO's own declaration
+     * @param array{type: ?ParsedType, nullable: bool, hasDefault: bool, isArray: bool}|null $property the DTO's own declaration
      */
     private function fieldType(CollectedFormField $field, ?array $property): ?ParsedType
     {
         if (null !== $field->enumClass) {
-            return new ValueOfType($this->shortName($field->enumClass));
+            $enum = new ValueOfType($this->shortName($field->enumClass));
+
+            // A multi-select EnumType binds a list, and CollectedFormField carries no `multiple`
+            // flag — the DTO holding an array is the signal. Without this a `status[]=todo&
+            // status[]=done` filter is published as a single value.
+            return ($property['isArray'] ?? false) ? new ListType($enum) : $enum;
         }
 
         if ($field->compound && [] !== $field->children) {
@@ -137,7 +142,7 @@ final class ShapeScaffolder
     }
 
     /**
-     * @return array<string, array{type: ?ParsedType, nullable: bool, hasDefault: bool}>
+     * @return array<string, array{type: ?ParsedType, nullable: bool, hasDefault: bool, isArray: bool}>
      */
     private function propertyTypes(string $dataClass): array
     {
@@ -156,6 +161,7 @@ final class ShapeScaffolder
                 'type' => $type instanceof ReflectionNamedType ? $this->fromNamedType($type) : null,
                 'nullable' => $type?->allowsNull() ?? true,
                 'hasDefault' => $property->hasDefaultValue(),
+                'isArray' => $type instanceof ReflectionNamedType && 'array' === $type->getName(),
             ];
         }
 
