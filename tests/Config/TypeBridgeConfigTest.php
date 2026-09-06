@@ -99,6 +99,39 @@ final class TypeBridgeConfigTest extends TestCase
         TypeBridgeConfig::fromArray(['mcpScopeAttribute' => '']);
     }
 
+    public function test_parses_mcp_scope_property(): void
+    {
+        self::assertNull(TypeBridgeConfig::fromArray([])->mcpScopeProperty);
+
+        $config = TypeBridgeConfig::fromArray([
+            'mcpScopeAttribute' => 'App\\Security\\Authorize',
+            'mcpScopeProperty' => 'scope',
+        ]);
+
+        self::assertSame('scope', $config->mcpScopeProperty);
+    }
+
+    public function test_rejects_non_string_mcp_scope_property(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('mcpScopeProperty');
+
+        TypeBridgeConfig::fromArray([
+            'mcpScopeAttribute' => 'App\\Security\\Authorize',
+            'mcpScopeProperty' => '',
+        ]);
+    }
+
+    public function test_rejects_mcp_scope_property_without_an_attribute(): void
+    {
+        // Naming a property on an attribute that was never configured is a config mistake, not
+        // a no-op — silently ignoring it would leave scopes uncollected.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('which is not set');
+
+        TypeBridgeConfig::fromArray(['mcpScopeProperty' => 'scope']);
+    }
+
     public function test_from_file_loads_php_array(): void
     {
         $path = sys_get_temp_dir() . '/type-bridge-config-' . bin2hex(random_bytes(6)) . '.php';

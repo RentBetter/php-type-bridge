@@ -15,6 +15,8 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
+use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Authorize;
+use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
 
 final class McpManifestBuilderTest extends TestCase
 {
@@ -142,6 +144,53 @@ final class McpManifestBuilderTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('is exposed as an MCP tool but does not declare');
+
+        $collector->collect($srcDir, $responseIndex);
+    }
+
+    public function testReadsEveryPublicPropertyWhenNoScopePropertyIsNamed(): void
+    {
+        // The permissive default, and why mcpScopeProperty exists: a scope attribute that also
+        // carries an entity map contributes those class names as scopes, producing a tool gated
+        // on a scope no token can ever hold.
+        $srcDir = __DIR__ . '/../Fixture/MultiPropertyScopeFixtures';
+        $responseIndex = (new ResponseClassCollector())->collectIndex($srcDir);
+        $contracts = (new EndpointContractCollector(mcpScopeAttribute: Authorize::class))
+            ->collect($srcDir, $responseIndex);
+
+        $manifest = (new McpManifestBuilder())->build($contracts);
+
+        self::assertSame([
+            'projects:read',
+            PingResponse::class,
+        ], $manifest['tools'][0]['scopes']);
+    }
+
+    public function testNamingTheScopePropertyReadsOnlyThatProperty(): void
+    {
+        $srcDir = __DIR__ . '/../Fixture/MultiPropertyScopeFixtures';
+        $responseIndex = (new ResponseClassCollector())->collectIndex($srcDir);
+        $contracts = (new EndpointContractCollector(
+            mcpScopeAttribute: Authorize::class,
+            mcpScopeProperty: 'scope',
+        ))->collect($srcDir, $responseIndex);
+
+        $manifest = (new McpManifestBuilder())->build($contracts);
+
+        self::assertSame(['projects:read'], $manifest['tools'][0]['scopes']);
+    }
+
+    public function testFailsWhenTheNamedScopePropertyDoesNotExist(): void
+    {
+        $srcDir = __DIR__ . '/../Fixture/MultiPropertyScopeFixtures';
+        $responseIndex = (new ResponseClassCollector())->collectIndex($srcDir);
+        $collector = new EndpointContractCollector(
+            mcpScopeAttribute: Authorize::class,
+            mcpScopeProperty: 'permissions',
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('has no property "permissions"');
 
         $collector->collect($srcDir, $responseIndex);
     }

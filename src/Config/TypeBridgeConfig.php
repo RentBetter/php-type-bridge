@@ -26,6 +26,11 @@ final readonly class TypeBridgeConfig
      *   string-backed-enum values are collected into the tool's `scopes` in the MCP manifest,
      *   and generation fails for a tool without one (an unguessable-scope tool would be
      *   uncallable or ungated).
+     * @param string|null $mcpScopeProperty name of the one property on that attribute holding the
+     *   scopes. Omitted, every public property is read — safe only for an attribute whose
+     *   properties are all scopes. Name it when the attribute carries anything else, or those
+     *   values are silently collected as scopes too: an `entities` map of route param => entity
+     *   class would contribute the class names, producing tools gated on scopes that cannot exist.
      */
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),
@@ -33,6 +38,7 @@ final readonly class TypeBridgeConfig
         public OutputStructure $output = new OutputStructure(),
         public array $requirementTypes = [],
         public ?string $mcpScopeAttribute = null,
+        public ?string $mcpScopeProperty = null,
     ) {}
 
     public static function fromFile(string $path): self
@@ -54,7 +60,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -74,8 +80,9 @@ final readonly class TypeBridgeConfig
         $output = OutputStructure::fromArray(self::stringKeyedArray($config['output'] ?? [], 'output'));
         $requirementTypes = self::requirementTypesMap($config['requirementTypes'] ?? []);
         $mcpScopeAttribute = self::mcpScopeAttributeName($config['mcpScopeAttribute'] ?? null);
+        $mcpScopeProperty = self::mcpScopePropertyName($config['mcpScopeProperty'] ?? null, $mcpScopeAttribute);
 
-        return new self($typescript, $preserveNull, $output, $requirementTypes, $mcpScopeAttribute);
+        return new self($typescript, $preserveNull, $output, $requirementTypes, $mcpScopeAttribute, $mcpScopeProperty);
     }
 
     public function isPreserveNull(string $shapeName, string $fieldName): bool
@@ -125,6 +132,23 @@ final readonly class TypeBridgeConfig
 
         if (!is_string($value) || '' === $value) {
             throw new RuntimeException('TypeBridge config key "mcpScopeAttribute" must be an attribute class name.');
+        }
+
+        return $value;
+    }
+
+    private static function mcpScopePropertyName(mixed $value, ?string $mcpScopeAttribute): ?string
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        if (!is_string($value) || '' === $value) {
+            throw new RuntimeException('TypeBridge config key "mcpScopeProperty" must be a property name.');
+        }
+
+        if (null === $mcpScopeAttribute) {
+            throw new RuntimeException('TypeBridge config key "mcpScopeProperty" names a property on "mcpScopeAttribute", which is not set.');
         }
 
         return $value;

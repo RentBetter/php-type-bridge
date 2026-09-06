@@ -26,6 +26,7 @@ final class McpManifestGenerator
         $collector = new EndpointContractCollector(
             requirementTypes: $config->requirementTypes,
             mcpScopeAttribute: $config->mcpScopeAttribute,
+            mcpScopeProperty: $config->mcpScopeProperty,
         );
         $contracts = $collector->collect($sourceDir, (new ResponseClassCollector())->collectIndex($sourceDir));
 

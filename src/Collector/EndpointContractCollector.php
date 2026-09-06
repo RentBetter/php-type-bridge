@@ -33,6 +33,9 @@ final class EndpointContractCollector
      * @param string|null $mcpScopeAttribute FQCN of the project's auth-scope attribute; when set,
      *        every #[McpTool] endpoint must carry it (method- or class-level) and its string /
      *        string-backed-enum values become the tool's scopes
+     * @param string|null $mcpScopeProperty the one property on that attribute holding the scopes;
+     *        without it every public property is read, so an attribute carrying anything else
+     *        (a route param => entity class map, say) contributes those values as scopes too
      */
     public function __construct(
         private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
@@ -41,6 +44,7 @@ final class EndpointContractCollector
         private readonly FormTypeInspector $formTypeInspector = new FormTypeInspector(),
         array $requirementTypes = [],
         private readonly ?string $mcpScopeAttribute = null,
+        private readonly ?string $mcpScopeProperty = null,
     ) {
         $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
     }
@@ -161,9 +165,10 @@ final class EndpointContractCollector
     /**
      * Reads the tool's required auth scopes from the configured scope attribute (class-level
      * declarations first, then method-level, matching gate semantics where both apply). Scope
-     * values are the attribute instance's public string / string-backed-enum values. Fails when
-     * an #[McpTool] endpoint carries no scope attribute: an ungated generated tool would bypass
-     * the project's whitelist-by-default token model.
+     * values are the attribute instance's string / string-backed-enum values — from the one
+     * property named by $mcpScopeProperty, or from every public property when none is named.
+     * Fails when an #[McpTool] endpoint carries no scope attribute: an ungated generated tool
+     * would bypass the project's whitelist-by-default token model.
      *
      * @return list<string>
      */
@@ -188,7 +193,25 @@ final class EndpointContractCollector
 
         $scopes = [];
         foreach ($attributes as $attribute) {
-            foreach ((new \ReflectionObject($instance = $attribute->newInstance()))->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+            $reflection = new \ReflectionObject($instance = $attribute->newInstance());
+
+            if (null !== $this->mcpScopeProperty) {
+                if (!$reflection->hasProperty($this->mcpScopeProperty)) {
+                    throw new RuntimeException(\sprintf(
+                        'Attribute #[%s] on "%s::%s" has no property "%s" (named by the mcpScopeProperty config).',
+                        $this->mcpScopeAttribute,
+                        $method->getDeclaringClass()->getName(),
+                        $method->getName(),
+                        $this->mcpScopeProperty,
+                    ));
+                }
+
+                $properties = [$reflection->getProperty($this->mcpScopeProperty)];
+            } else {
+                $properties = $reflection->getProperties(\ReflectionProperty::IS_PUBLIC);
+            }
+
+            foreach ($properties as $property) {
                 foreach ($this->scopeValues($property->getValue($instance)) as $scope) {
                     if (!\in_array($scope, $scopes, strict: true)) {
                         $scopes[] = $scope;
