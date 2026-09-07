@@ -97,6 +97,11 @@ services:
             - phpstan.rules.rule
 
     -
+        class: PTGS\TypeBridge\PHPStan\Rules\Shape\SelfImportMustBeAliasedRule
+        tags:
+            - phpstan.rules.rule
+
+    -
         class: PTGS\TypeBridge\PHPStan\Rules\Shape\PreserveNullConsistencyRule
         arguments:
             preserveNull: %typeBridge.preserveNull%
