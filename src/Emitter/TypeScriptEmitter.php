@@ -58,6 +58,11 @@ final class TypeScriptEmitter
      *   Fields listed here must use `T|null` in their @phpstan-type annotation
      *   and emit as `field: T | null`. All other nullable fields must use `?T`
      *   and emit as `field?: T`. A mismatch raises RuntimeException at emit time.
+     * @param array<string, string> $typeAliases project-wide aliases, name => TypeScript type
+     *   (e.g. `UuidStr` => `string`). Declared once in config rather than on a class, so a
+     *   shape can name a primitive without every file importing it. Emitted into each domain
+     *   that references one, and registered in that domain's symbol map so a class-declared
+     *   `@phpstan-type` of the same name collides loudly instead of shadowing it.
      */
     public function __construct(
         private readonly EnumResolver $enumResolver,
@@ -67,6 +72,7 @@ final class TypeScriptEmitter
         ?EmitterRegistry $registry = null,
         ?DomainAssembler $assembler = null,
         private readonly SortStrategy $importSort = new AlphabeticalOrder(),
+        private readonly array $typeAliases = [],
     ) {
         $this->naming = $naming ?? new TypeScriptNaming();
         $this->preserveNullIndex = array_fill_keys($preserveNull, true);
@@ -301,7 +307,40 @@ final class TypeScriptEmitter
             }
         }
 
+        $blocks = array_merge($this->typeAliasBlocks($blocks), $blocks);
+
         return $this->assembler->assemble($this->renderImportLines($domain, $imports, $foreignAliases), $blocks);
+    }
+
+    /**
+     * Declarations for the config type aliases this domain's code actually mentions.
+     *
+     * Emitted per domain rather than into a shared module so each domain's file stays
+     * self-contained under the default relative-sibling import strategy. Two domains
+     * declaring `UuidStr = string` are structurally identical in TypeScript, so values
+     * still cross module boundaries freely.
+     *
+     * @param list<EmittedBlock> $blocks
+     * @return list<EmittedBlock>
+     */
+    private function typeAliasBlocks(array $blocks): array
+    {
+        if ([] === $this->typeAliases) {
+            return [];
+        }
+
+        $code = implode("\n", array_map(static fn (EmittedBlock $block): string => $block->code, $blocks));
+
+        $aliasBlocks = [];
+        foreach ($this->typeAliases as $aliasName => $tsType) {
+            if (1 !== preg_match('/\\b' . preg_quote($aliasName, '/') . '\\b/', $code)) {
+                continue;
+            }
+
+            $aliasBlocks[] = new EmittedBlock(10, '// Aliases', \sprintf('export type %s = %s;', $aliasName, $tsType), $aliasName);
+        }
+
+        return $aliasBlocks;
     }
 
     /**
@@ -515,6 +554,17 @@ final class TypeScriptEmitter
         foreach ($allDomains as $domain) {
             $maps[$domain] = [];
             $registrations[$domain] = [];
+
+            foreach (array_keys($this->typeAliases) as $aliasName) {
+                $this->registerSymbol(
+                    domain: $domain,
+                    logicalName: $aliasName,
+                    emittedName: $aliasName,
+                    descriptor: 'config type alias ' . $aliasName,
+                    maps: $maps,
+                    registrations: $registrations,
+                );
+            }
 
             foreach (($domains[$domain] ?? new CollectedDomain($domain))->types as $type) {
                 $this->registerSymbol(

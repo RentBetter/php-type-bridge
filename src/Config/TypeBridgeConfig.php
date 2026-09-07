@@ -31,6 +31,9 @@ final readonly class TypeBridgeConfig
      *   properties are all scopes. Name it when the attribute carries anything else, or those
      *   values are silently collected as scopes too: an `entities` map of route param => entity
      *   class would contribute the class names, producing tools gated on scopes that cannot exist.
+     * @param array<string, string> $typeAliases project-wide alias name => TypeScript type (e.g.
+     *   "UuidStr" => "string"). Declared here rather than as a @phpstan-type on a class, so a
+     *   shape can reference the name without every file importing it.
      */
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),
@@ -39,6 +42,7 @@ final readonly class TypeBridgeConfig
         public array $requirementTypes = [],
         public ?string $mcpScopeAttribute = null,
         public ?string $mcpScopeProperty = null,
+        public array $typeAliases = [],
     ) {}
 
     public static function fromFile(string $path): self
@@ -60,7 +64,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'typeAliases'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -81,8 +85,9 @@ final readonly class TypeBridgeConfig
         $requirementTypes = self::requirementTypesMap($config['requirementTypes'] ?? []);
         $mcpScopeAttribute = self::mcpScopeAttributeName($config['mcpScopeAttribute'] ?? null);
         $mcpScopeProperty = self::mcpScopePropertyName($config['mcpScopeProperty'] ?? null, $mcpScopeAttribute);
+        $typeAliases = self::typeAliasesMap($config['typeAliases'] ?? []);
 
-        return new self($typescript, $preserveNull, $output, $requirementTypes, $mcpScopeAttribute, $mcpScopeProperty);
+        return new self($typescript, $preserveNull, $output, $requirementTypes, $mcpScopeAttribute, $mcpScopeProperty, $typeAliases);
     }
 
     public function isPreserveNull(string $shapeName, string $fieldName): bool
@@ -169,6 +174,34 @@ final readonly class TypeBridgeConfig
                 throw new RuntimeException('TypeBridge config key "requirementTypes" must map requirement-regex strings to TS type strings.');
             }
             $result[$regex] = $tsType;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Project-wide type aliases: name => TypeScript type. Declared here rather than as a
+     * `@phpstan-type` on a class, so a shape can reference a primitive such as `UuidStr`
+     * without every file importing it. PHPStan resolves the same names from its own
+     * `parameters.typeAliases`; this key is what makes them exist for generation too.
+     *
+     * @return array<string, string>
+     */
+    private static function typeAliasesMap(mixed $value): array
+    {
+        if (!is_array($value)) {
+            throw new RuntimeException('TypeBridge config key "typeAliases" must be a map of alias name => TS type.');
+        }
+
+        $result = [];
+        foreach ($value as $name => $tsType) {
+            if (!is_string($name) || !is_string($tsType)) {
+                throw new RuntimeException('TypeBridge config key "typeAliases" must map alias-name strings to TS type strings.');
+            }
+            if (1 !== preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name)) {
+                throw new RuntimeException(\sprintf('TypeBridge type alias "%s" is not a valid TypeScript identifier.', $name));
+            }
+            $result[$name] = $tsType;
         }
 
         return $result;
