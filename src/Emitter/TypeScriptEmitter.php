@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\ImportedType;
+use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\MapType;
@@ -99,7 +100,7 @@ final class TypeScriptEmitter
     {
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses));
-        $this->converter = new TypeToTsConverter($this->names, $this->symbols);
+        $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds());
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
         sort($allDomains);
@@ -135,7 +136,7 @@ final class TypeScriptEmitter
 
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->symbols = new SymbolRegistry([]);
-        $this->converter = new TypeToTsConverter($this->names, $this->symbols);
+        $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds());
 
         $context = new EmitContext(
             domain: '',
@@ -469,6 +470,11 @@ final class TypeScriptEmitter
         $imports[$input->domain][] = $this->symbolFor($input->domain, $input->typeName);
     }
 
+    private function enumIds(): EnumIdSymbolResolver
+    {
+        return new EnumIdSymbolResolver($this->enumResolver, $this->registry);
+    }
+
     /**
      * @param array<string, list<string>> $imports
      */
@@ -478,6 +484,18 @@ final class TypeScriptEmitter
             $enumDomain = $this->enumResolver->getDomain($type->enumClass);
             if ($enumDomain !== $domain) {
                 $imports[$enumDomain][] = $this->names->enumName($type->enumClass);
+            }
+
+            return;
+        }
+
+        // The id union is emitted by whichever emitter publishes it — usually in another
+        // pass and so another module — so this only ever needs the import, never a local
+        // declaration. appendLocalEnums has no id-of arm for that reason.
+        if ($type instanceof IdOfType) {
+            $symbol = $this->enumIds()->resolve($type->enumClass);
+            if ($symbol->targetDomain !== $domain) {
+                $imports[$symbol->targetDomain][] = $symbol->canonicalName;
             }
 
             return;

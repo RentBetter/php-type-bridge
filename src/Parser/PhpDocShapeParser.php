@@ -15,7 +15,7 @@ use RuntimeException;
  *   Fields     = Field (',' Field)* ','?
  *   Field      = Ident '?'? ':' Type | '?' Ident ':' Type
  *   Type       = SingleType ('|' SingleType)*
- *   SingleType = '?' SingleType | 'value-of<' ClassName '>' | ScalarType | Literal | Shape | 'list<' Type '>' | Map | NameRef
+ *   SingleType = '?' SingleType | 'value-of<' ClassName '>' | 'id-of<' ClassName '>' | ScalarType | Literal | Shape | 'list<' Type '>' | Map | NameRef
  *   Map        = 'array<' Type ',' Type '>'
  *   ScalarType = 'string' | 'int' | 'float' | 'bool' | 'mixed' | 'numeric' | 'null'
  *   Literal    = StringLiteral | NumberLiteral | 'true' | 'false'
@@ -239,6 +239,16 @@ final class PhpDocShapeParser
             $this->expect('>');
 
             return new ValueOfType($className);
+        }
+
+        // id-of<ClassName>
+        if ($this->lookAhead('id-of<')) {
+            $this->expect('id-of<');
+            $className = $this->parseClassName();
+            $this->skipWhitespace();
+            $this->expect('>');
+
+            return new IdOfType($className);
         }
 
         // Quoted string literal: 'draft' or "draft"

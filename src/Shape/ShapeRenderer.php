@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Shape;
 
+use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
@@ -50,6 +51,7 @@ final class ShapeRenderer
             $type instanceof ScalarType => $type->type,
             $type instanceof NameRefType => $type->name,
             $type instanceof ValueOfType => 'value-of<' . $type->enumClass . '>',
+            $type instanceof IdOfType => 'id-of<' . $type->enumClass . '>',
             $type instanceof ListType => 'list<' . $this->render($type->inner) . '>',
             $type instanceof MapType => 'array<' . $this->render($type->key) . ', ' . $this->render($type->value) . '>',
             $type instanceof LiteralType => $this->renderLiteral($type),

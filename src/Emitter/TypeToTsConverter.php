@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Emitter;
 
+use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
@@ -31,6 +32,7 @@ final readonly class TypeToTsConverter
     public function __construct(
         private EmittedNames $names,
         private SymbolRegistry $symbols,
+        private ?EnumIdSymbolResolver $enumIds = null,
     ) {}
 
     public function convert(ParsedType $type, ConversionScope $scope): string
@@ -80,6 +82,18 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof ValueOfType) {
             return $this->enumName($type->enumClass);
+        }
+
+        if ($type instanceof IdOfType) {
+            if (null === $this->enumIds) {
+                throw new RuntimeException(\sprintf(
+                    '`id-of<%s>` needs an %s, which this converter was built without.',
+                    $type->enumClass,
+                    EnumIdSymbolResolver::class,
+                ));
+            }
+
+            return $this->enumIds->resolve($type->enumClass)->canonicalName;
         }
 
         if ($type instanceof NameRefType) {

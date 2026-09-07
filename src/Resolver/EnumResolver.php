@@ -33,16 +33,13 @@ final class EnumResolver
                 continue;
             }
 
+            // Every enum is indexed, not just string-backed ones. The index answers "which
+            // class is this short name, and where does it live"; that is as true of an
+            // int-backed enum as any other, and `id-of<Enum>` needs it for exactly those.
+            // Reading backing *values* still requires a string backing — see resolve().
             $reflection = new ReflectionEnum($className);
-            $backingType = $reflection->getBackingType();
-            if (!$reflection->isBacked() || null === $backingType || 'string' !== $backingType->getName()) {
-                continue;
-            }
 
             $shortName = $reflection->getShortName();
-            if (!is_string($shortName) || '' === $shortName) {
-                continue;
-            }
 
             if (isset($this->classMap[$shortName]) && $this->classMap[$shortName] !== $className) {
                 throw new RuntimeException(\sprintf(

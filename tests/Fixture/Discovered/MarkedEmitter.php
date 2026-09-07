@@ -10,6 +10,7 @@ use PTGS\TypeBridge\Emitter\EmitContext;
 use PTGS\TypeBridge\Emitter\EmittedBlock;
 use PTGS\TypeBridge\Emitter\EmittedType;
 use PTGS\TypeBridge\Emitter\EmitImport;
+use PTGS\TypeBridge\Emitter\EnumIdSymbolEmitter;
 use PTGS\TypeBridge\Emitter\EmitMode;
 use PTGS\TypeBridge\Emitter\TypeEmitter;
 use ReflectionClass;
@@ -20,7 +21,7 @@ use ReflectionClass;
  * a shared Base from the root module, and contributes that Base via emitCommon.
  */
 #[AsTypeBridgeEmitter('marked', priority: 10, mode: EmitMode::Discovered)]
-final class MarkedEmitter implements TypeEmitter, CommonModuleEmitter
+final class MarkedEmitter implements TypeEmitter, CommonModuleEmitter, EnumIdSymbolEmitter
 {
     public function claims(ReflectionClass $class): bool
     {
@@ -43,6 +44,11 @@ final class MarkedEmitter implements TypeEmitter, CommonModuleEmitter
             blocks: [new EmittedBlock(10, null, $code, $shortName)],
             imports: [new EmitImport('', 'Base')],
         );
+    }
+
+    public function idSymbol(ReflectionClass $enum): EmitImport
+    {
+        return new EmitImport('Marked', $enum->getShortName() . 'Id');
     }
 
     public function emitCommon(array $classes, EmitContext $context): EmittedType
