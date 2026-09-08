@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Routing\RequirementType;
+use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
@@ -36,6 +37,11 @@ final class EndpointContractCollector
      * @param string|null $mcpScopeProperty the one property on that attribute holding the scopes;
      *        without it every public property is read, so an attribute carrying anything else
      *        (a route param => entity class map, say) contributes those values as scopes too
+     * @param RoutePathResolver|null $routePathResolver resolves the path Symfony actually serves
+     *        for an #[McpTool] method. A routing-config `prefix` and any class-level #[Route] are
+     *        part of that path, and the method attribute alone cannot see them. Without one a
+     *        tool carries the attribute's own path; with one, a tool the router cannot place
+     *        fails collection rather than shipping a path the application does not serve
      */
     public function __construct(
         private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
@@ -45,6 +51,7 @@ final class EndpointContractCollector
         array $requirementTypes = [],
         private readonly ?string $mcpScopeAttribute = null,
         private readonly ?string $mcpScopeProperty = null,
+        private readonly ?RoutePathResolver $routePathResolver = null,
     ) {
         $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
     }
@@ -151,6 +158,7 @@ final class EndpointContractCollector
         /** @var McpTool $tool */
         $tool = $attributes[0]->newInstance();
         [$httpMethod, $httpPath] = $this->routeMethodAndPath($method);
+        $httpPath = $this->servedPath($method, $httpPath);
 
         return new CollectedMcpTool(
             name: $tool->name ?? $endpointName,
@@ -255,6 +263,35 @@ final class EndpointContractCollector
         }
 
         return [];
+    }
+
+    /**
+     * The path an MCP tool is published with. With a route resolver configured it is the served
+     * path, and both ways the router can fail to supply one are errors rather than fallbacks: a
+     * routing file that will not load, or a method the loaded collection does not route. Either
+     * would otherwise publish the attribute path as if it were served, and a tool pointing at a
+     * path the application answers 404 to is worse than no tool.
+     */
+    private function servedPath(ReflectionMethod $method, string $attributePath): string
+    {
+        if (null === $this->routePathResolver) {
+            return $attributePath;
+        }
+
+        $served = $this->routePathResolver->pathFor($method->getDeclaringClass()->getName(), $method->getName());
+        if (null !== $error = $this->routePathResolver->loadError()) {
+            throw new RuntimeException(\sprintf('Cannot resolve served route paths for MCP tools: %s', $error));
+        }
+
+        if (null === $served) {
+            throw new RuntimeException(\sprintf(
+                'Endpoint "%s::%s" is exposed as an MCP tool but the routing configuration serves no route for it.',
+                $method->getDeclaringClass()->getName(),
+                $method->getName(),
+            ));
+        }
+
+        return $served;
     }
 
     /**

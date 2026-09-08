@@ -34,6 +34,16 @@ final readonly class TypeBridgeConfig
      * @param array<string, string> $typeAliases project-wide alias name => TypeScript type (e.g.
      *   "UuidStr" => "string"). Declared here rather than as a @phpstan-type on a class, so a
      *   shape can reference the name without every file importing it.
+     * @param string|null $routing the application's routing entrypoint (e.g. `config/routes.yaml`),
+     *   relative to $projectDir. When set, an #[McpTool] endpoint's path is the one Symfony
+     *   actually serves — routing-config prefixes and class-level #[Route] included — rather
+     *   than the method attribute's alone, and a tool whose route the router does not know
+     *   fails generation instead of shipping a path the application does not serve. Mirror
+     *   `parameters.typeBridge.routing` in phpstan.neon, which drives the same resolution for
+     *   the rules.
+     * @param string|null $projectDir the directory $routing resolves against. fromFile() sets it
+     *   to the config file's own directory; fromArray() takes it as an argument, and refuses
+     *   `routing` without one.
      */
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),
@@ -43,6 +53,8 @@ final readonly class TypeBridgeConfig
         public ?string $mcpScopeAttribute = null,
         public ?string $mcpScopeProperty = null,
         public array $typeAliases = [],
+        public ?string $routing = null,
+        public ?string $projectDir = null,
     ) {}
 
     public static function fromFile(string $path): self
@@ -56,15 +68,16 @@ final readonly class TypeBridgeConfig
             throw new RuntimeException(\sprintf('TypeBridge config file "%s" must return an array.', $path));
         }
 
-        return self::fromArray($config);
+        return self::fromArray($config, \dirname(realpath($path) ?: $path));
     }
 
     /**
      * @param array<int|string, mixed> $config
+     * @param string|null $projectDir the directory a `routing` entry resolves against
      */
-    public static function fromArray(array $config): self
+    public static function fromArray(array $config, ?string $projectDir = null): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'typeAliases'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'typeAliases', 'routing'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -86,8 +99,9 @@ final readonly class TypeBridgeConfig
         $mcpScopeAttribute = self::mcpScopeAttributeName($config['mcpScopeAttribute'] ?? null);
         $mcpScopeProperty = self::mcpScopePropertyName($config['mcpScopeProperty'] ?? null, $mcpScopeAttribute);
         $typeAliases = self::typeAliasesMap($config['typeAliases'] ?? []);
+        $routing = self::routingPath($config['routing'] ?? null, $projectDir);
 
-        return new self($typescript, $preserveNull, $output, $requirementTypes, $mcpScopeAttribute, $mcpScopeProperty, $typeAliases);
+        return new self($typescript, $preserveNull, $output, $requirementTypes, $mcpScopeAttribute, $mcpScopeProperty, $typeAliases, $routing, $projectDir);
     }
 
     public function isPreserveNull(string $shapeName, string $fieldName): bool
@@ -154,6 +168,25 @@ final readonly class TypeBridgeConfig
 
         if (null === $mcpScopeAttribute) {
             throw new RuntimeException('TypeBridge config key "mcpScopeProperty" names a property on "mcpScopeAttribute", which is not set.');
+        }
+
+        return $value;
+    }
+
+    private static function routingPath(mixed $value, ?string $projectDir): ?string
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        if (!is_string($value) || '' === $value) {
+            throw new RuntimeException('TypeBridge config key "routing" must be a routing entrypoint path relative to the config file (e.g. "config/routes.yaml").');
+        }
+
+        // The path is relative by design — a config file is committed, an absolute path is not
+        // portable — so it means nothing without the directory it is relative to.
+        if (null === $projectDir) {
+            throw new RuntimeException('TypeBridge config key "routing" is relative to the config file, so the config must be loaded with fromFile() or fromArray() given a project directory.');
         }
 
         return $value;

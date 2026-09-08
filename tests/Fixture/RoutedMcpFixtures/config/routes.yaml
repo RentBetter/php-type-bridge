@@ -1,0 +1,6 @@
+ping_controllers:
+    resource:
+        path: ../Ping/Controller/
+        namespace: PTGS\TypeBridge\Tests\Fixture\RoutedMcpFixtures\Ping\Controller
+    type: attribute
+    prefix: '/api'

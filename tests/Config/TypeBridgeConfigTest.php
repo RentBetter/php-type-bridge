@@ -160,4 +160,39 @@ PHP);
 
         TypeBridgeConfig::fromFile('/nonexistent/path/config.php');
     }
+
+    public function test_from_file_records_the_project_directory_the_routing_resolves_against(): void
+    {
+        $dir = sys_get_temp_dir() . '/type-bridge-config-' . bin2hex(random_bytes(6));
+        mkdir($dir);
+        $path = $dir . '/type-bridge.php';
+        file_put_contents($path, "<?php\n\nreturn ['routing' => 'config/routes.yaml'];\n");
+
+        try {
+            $config = TypeBridgeConfig::fromFile($path);
+            self::assertSame('config/routes.yaml', $config->routing);
+            self::assertSame(realpath($dir), $config->projectDir);
+        } finally {
+            unlink($path);
+            rmdir($dir);
+        }
+    }
+
+    public function test_rejects_routing_without_a_project_directory(): void
+    {
+        // A relative path with nothing to be relative to cannot be resolved later — refusing
+        // it here beats a resolver that quietly finds no routing file at generation time.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('project directory');
+
+        TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml']);
+    }
+
+    public function test_rejects_non_string_routing(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('routing');
+
+        TypeBridgeConfig::fromArray(['routing' => ''], sys_get_temp_dir());
+    }
 }

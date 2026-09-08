@@ -1,0 +1,5 @@
+health_controllers:
+    resource:
+        path: ../Health/
+        namespace: PTGS\TypeBridge\Tests\Fixture\UnroutedMcpFixtures\Health
+    type: attribute
