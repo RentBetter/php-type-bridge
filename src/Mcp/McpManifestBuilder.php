@@ -129,6 +129,11 @@ final class McpManifestBuilder
      */
     private function fieldSchema(CollectedFormField $field): array
     {
+        // A collection is compound too, but its shape is its entry's, repeated.
+        if (null !== $field->entryTypeClass) {
+            return ['type' => 'array', 'items' => $this->entrySchema($field)];
+        }
+
         if ($field->compound && [] !== $field->children) {
             $properties = [];
             $required = [];
@@ -150,9 +155,42 @@ final class McpManifestBuilder
         return ['type' => $this->scalarType($field)];
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    private function entrySchema(CollectedFormField $field): array
+    {
+        if ([] === $field->entryChildren) {
+            \assert(null !== $field->entryTypeClass);
+
+            return ['type' => $this->scalarTypeOf($field->entryTypeClass)];
+        }
+
+        $properties = [];
+        $required = [];
+        foreach ($field->entryChildren as $child) {
+            $properties[$child->name] = $this->fieldSchema($child);
+            if ($child->required) {
+                $required[] = $child->name;
+            }
+        }
+
+        $schema = ['type' => 'object', 'properties' => $properties];
+        if ([] !== $required) {
+            $schema['required'] = $required;
+        }
+
+        return $schema;
+    }
+
     private function scalarType(CollectedFormField $field): string
     {
-        $shortName = $this->shortName($field->formTypeClass);
+        return $this->scalarTypeOf($field->formTypeClass);
+    }
+
+    private function scalarTypeOf(string $formTypeClass): string
+    {
+        $shortName = $this->shortName($formTypeClass);
 
         return match (true) {
             str_contains($shortName, 'Boolean') => 'boolean',

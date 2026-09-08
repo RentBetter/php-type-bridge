@@ -6,9 +6,12 @@ namespace PTGS\TypeBridge\Tests\Shape;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Model\CollectedFormField;
+use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Shape\ShapeRenderer;
 use PTGS\TypeBridge\Shape\ShapeScaffolder;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
+use Symfony\Component\Form\Extension\Core\Type\CollectionType;
 use Symfony\Component\Form\Extension\Core\Type\DateType;
 use Symfony\Component\Form\Extension\Core\Type\EnumType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
@@ -51,6 +54,41 @@ final class ShapeScaffolderTest extends TestCase
                 DOC,
             (new ShapeRenderer())->renderSelfDocBlock($shape),
         );
+    }
+
+    public function testACollectionOfACompoundEntryIsAListOfItsShape(): void
+    {
+        // The entry's fields arrive as entryChildren — a collection has none of its own —
+        // and each item is the entry's shape, with the entry's optional keys.
+        ['shape' => $shape, 'unresolved' => $unresolved] = (new ShapeScaffolder())->scaffold(
+            ScaffoldDto::class,
+            [
+                $this->field('title', TextType::class, required: true),
+                new CollectedFormField(
+                    name: 'tags',
+                    formTypeClass: CollectionType::class,
+                    required: false,
+                    mapped: true,
+                    compound: true,
+                    dataClass: null,
+                    entryTypeClass: 'App\\Form\\TagType',
+                    entryChildren: [
+                        $this->field('label', TextType::class, required: true),
+                        $this->field('weight', IntegerType::class, required: false),
+                    ],
+                ),
+            ],
+        );
+
+        self::assertSame([], $unresolved);
+        $tags = $shape->fields[1];
+        self::assertSame('tags', $tags->name);
+        self::assertTrue($tags->optional);
+        self::assertInstanceOf(ListType::class, $tags->type);
+        self::assertInstanceOf(ShapeType::class, $tags->type->inner);
+        self::assertSame(['label', 'weight'], array_map(static fn ($f) => $f->name, $tags->type->inner->fields));
+        self::assertFalse($tags->type->inner->fields[0]->optional);
+        self::assertTrue($tags->type->inner->fields[1]->optional);
     }
 
     public function testReportsFieldsItCannotTypeInsteadOfGuessing(): void

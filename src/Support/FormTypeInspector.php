@@ -85,10 +85,39 @@ final class FormTypeInspector
                 hasModelTransformers: [] !== $config->getModelTransformers(),
                 hasViewTransformers: [] !== $config->getViewTransformers(),
                 children: $this->collectFields($child),
+                entryChildren: $this->collectEntryFields($config),
             );
         }
 
         return $fields;
+    }
+
+    /**
+     * A collection's entries do not exist on the builder — only a prototype does — so a
+     * compound entry type is built on its own and its fields collected, giving the
+     * emitters the shape of each item rather than an opaque entry class.
+     *
+     * @param FormConfigInterface<mixed> $config
+     *
+     * @return list<CollectedFormField>
+     */
+    private function collectEntryFields(FormConfigInterface $config): array
+    {
+        $entryTypeClass = $this->resolveEntryTypeClass($config);
+        if (null === $entryTypeClass) {
+            return [];
+        }
+
+        $entryBuilder = $this->formFactory->createNamedBuilder(
+            name: '__entry__',
+            type: $entryTypeClass,
+        );
+
+        if (!$entryBuilder->getCompound()) {
+            return [];
+        }
+
+        return $this->collectFields($entryBuilder);
     }
 
     /**

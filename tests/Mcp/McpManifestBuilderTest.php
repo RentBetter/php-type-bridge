@@ -220,6 +220,91 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'object'], $manifest['tools'][0]['inputSchema']);
     }
 
+    public function testACollectionFieldIsAnArrayOfItsEntryShape(): void
+    {
+        // A collection has no children of its own at build time, only a prototype: the
+        // entry's fields arrive as entryChildren, and a scalar entry has none.
+        $contract = new CollectedEndpointContract(
+            name: 'recordVerdict',
+            domain: 'checks',
+            controllerClass: 'App\\RecordController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                body: new CollectedInputReference(
+                    formClass: null,
+                    ownerClass: 'App\\RecordVerdictData',
+                    typeName: 'RecordVerdictData',
+                    domain: 'checks',
+                    fields: [
+                        $this->collectionField('readings', 'App\\Form\\ReadingType', required: false, entryChildren: [
+                            $this->scalarField('label', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true),
+                            $this->scalarField('baseline', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false),
+                        ]),
+                        $this->collectionField('tags', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true),
+                    ],
+                ),
+            ),
+            mcp: new CollectedMcpTool(
+                name: 'recordVerdict',
+                description: null,
+                httpMethod: 'POST',
+                httpPath: '/checks/verdicts',
+                destructive: true,
+            ),
+        );
+
+        $manifest = (new McpManifestBuilder())->build(['checks' => [$contract]]);
+
+        self::assertSame([
+            'type' => 'object',
+            'properties' => [
+                'readings' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'label' => ['type' => 'string'],
+                            'baseline' => ['type' => 'string'],
+                        ],
+                        'required' => ['label'],
+                    ],
+                ],
+                'tags' => ['type' => 'array', 'items' => ['type' => 'string']],
+            ],
+            'required' => ['tags'],
+        ], $manifest['tools'][0]['inputSchema']);
+    }
+
+    /**
+     * @param list<CollectedFormField> $entryChildren
+     */
+    private function collectionField(string $name, string $entryTypeClass, bool $required, array $entryChildren = []): CollectedFormField
+    {
+        return new CollectedFormField(
+            name: $name,
+            formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType',
+            required: $required,
+            mapped: true,
+            compound: true,
+            dataClass: null,
+            entryTypeClass: $entryTypeClass,
+            entryChildren: $entryChildren,
+        );
+    }
+
+    private function scalarField(string $name, string $formTypeClass, bool $required): CollectedFormField
+    {
+        return new CollectedFormField(
+            name: $name,
+            formTypeClass: $formTypeClass,
+            required: $required,
+            mapped: true,
+            compound: false,
+            dataClass: null,
+        );
+    }
+
     private function setFeatureContract(): CollectedEndpointContract
     {
         return new CollectedEndpointContract(

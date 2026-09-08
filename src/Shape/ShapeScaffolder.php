@@ -111,6 +111,19 @@ final class ShapeScaffolder
         }
 
         if (null !== $field->entryTypeClass) {
+            if ([] !== $field->entryChildren) {
+                $children = [];
+                foreach ($field->entryChildren as $child) {
+                    $childType = $this->fieldType($child, null);
+                    if (null === $childType) {
+                        return null;
+                    }
+                    $children[] = new ShapeField($child->name, $childType, optional: !$child->required);
+                }
+
+                return new ListType(new ShapeType($children));
+            }
+
             $entry = $this->scalarFromFormType($field->entryTypeClass);
 
             return null === $entry ? null : new ListType($entry);

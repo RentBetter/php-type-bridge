@@ -7,7 +7,10 @@ namespace PTGS\TypeBridge\Model;
 final readonly class CollectedFormField
 {
     /**
-     * @param list<CollectedFormField> $children
+     * @param list<CollectedFormField> $children      the fields of a compound field
+     * @param list<CollectedFormField> $entryChildren the fields of a collection field's compound entry type —
+     *                                                collections have no children of their own at build time,
+     *                                                only a prototype, so the entry's shape is inspected separately
      */
     public function __construct(
         public string $name,
@@ -24,5 +27,6 @@ final readonly class CollectedFormField
         public bool $hasModelTransformers = false,
         public bool $hasViewTransformers = false,
         public array $children = [],
+        public array $entryChildren = [],
     ) {}
 }
