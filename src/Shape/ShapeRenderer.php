@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Parser\ValueOfType;
 use RuntimeException;
@@ -58,6 +59,7 @@ final class ShapeRenderer
             $type instanceof NullableType => $this->renderNullable($type),
             $type instanceof UnionType => $this->renderUnion($type),
             $type instanceof IntersectionType => $this->render($type->base) . ' & ' . $this->render($type->extra),
+            $type instanceof TupleType => 'array{' . implode(', ', array_map($this->render(...), $type->elements)) . '}',
             $type instanceof ShapeType => $this->renderInlineShape($type),
             default => throw new RuntimeException(\sprintf('Cannot render type "%s".', $type::class)),
         };

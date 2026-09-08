@@ -15,6 +15,7 @@ use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Parser\ValueOfType;
 use RuntimeException;
@@ -102,6 +103,13 @@ final readonly class TypeToTsConverter
             }
 
             return $this->symbols->resolve($scope->domain, $type->name);
+        }
+
+        if ($type instanceof TupleType) {
+            return '[' . implode(', ', array_map(
+                fn (ParsedType $element): string => $this->convert($element, $scope),
+                $type->elements,
+            )) . ']';
         }
 
         if ($type instanceof ShapeType) {

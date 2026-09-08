@@ -13,6 +13,7 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
 use RuntimeException;
 
@@ -117,6 +118,13 @@ final class PhpDocTypeHelper
                 key: $this->resolveImportedNames($type->key, $imports),
                 value: $this->resolveImportedNames($type->value, $imports),
             );
+        }
+
+        if ($type instanceof TupleType) {
+            return new TupleType(array_map(
+                fn (ParsedType $element): ParsedType => $this->resolveImportedNames($element, $imports),
+                $type->elements,
+            ));
         }
 
         if ($type instanceof ShapeType) {

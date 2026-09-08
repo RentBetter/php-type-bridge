@@ -11,10 +11,11 @@ use RuntimeException;
  *
  * Grammar:
  *   TypeDef    = Shape | NameRef '&' Shape | NameRef
- *   Shape      = 'array{' Fields '}'
+ *   Shape      = 'array{' Fields '}' | 'array{' Type (',' Type)* ','? '}'   (keyed, or a positional tuple)
  *   Fields     = Field (',' Field)* ','?
  *   Field      = Ident '?'? ':' Type | '?' Ident ':' Type
- *   Type       = SingleType ('|' SingleType)*
+ *   Type       = Suffixed ('|' Suffixed)*
+ *   Suffixed   = SingleType '[]'*
  *   SingleType = '?' SingleType | 'value-of<' ClassName '>' | 'id-of<' ClassName '>' | ScalarType | Literal | Shape | 'list<' Type '>' | Map | NameRef
  *   Map        = 'array<' Type ',' Type '>'
  *   ScalarType = 'string' | 'int' | 'float' | 'bool' | 'mixed' | 'numeric' | 'null'
@@ -52,7 +53,7 @@ final class PhpDocShapeParser
         $this->skipWhitespace();
 
         if ($this->lookAhead('array{')) {
-            return $this->parseShape();
+            return $this->parseShapeOrTuple();
         }
 
         // Could be NameRef, NameRef & Shape, or a simple type
@@ -75,14 +76,39 @@ final class PhpDocShapeParser
         return $type;
     }
 
+    /**
+     * The right-hand side of an intersection, which must be keyed — `Foo & array{int, int}`
+     * has no meaning.
+     */
     private function parseShape(): ShapeType
+    {
+        $shape = $this->parseShapeOrTuple();
+        if (!$shape instanceof ShapeType) {
+            throw new RuntimeException('Intersection right-hand side must be a keyed shape, not a tuple');
+        }
+
+        return $shape;
+    }
+
+    /**
+     * `array{a: int}` is a keyed shape; `array{int, string}` is a positional tuple. Which one is
+     * decided per entry by whether a key precedes the type, and the two cannot be mixed: a
+     * partly-keyed array has no TypeScript equivalent.
+     */
+    private function parseShapeOrTuple(): ShapeType|TupleType
     {
         $this->expect('array{');
         $fields = [];
+        $elements = [];
 
         $this->skipWhitespace();
         while ($this->pos < $this->len && '}' !== $this->input[$this->pos]) {
-            $fields[] = $this->parseField();
+            if ($this->atKeyedField()) {
+                $fields[] = $this->parseField();
+            } else {
+                $elements[] = $this->parseType();
+            }
+
             $this->skipWhitespace();
             if ($this->pos < $this->len && ',' === $this->input[$this->pos]) {
                 $this->pos++;
@@ -92,7 +118,41 @@ final class PhpDocShapeParser
 
         $this->expect('}');
 
-        return new ShapeType($fields);
+        if ([] !== $fields && [] !== $elements) {
+            throw new RuntimeException('array{} entries must be all keyed or all positional, not a mix');
+        }
+
+        return [] !== $elements ? new TupleType($elements) : new ShapeType($fields);
+    }
+
+    /**
+     * Whether the next entry carries a key. Pure lookahead — the position is always restored,
+     * so a malformed value still fails inside parseField() with its own message rather than
+     * being mistaken for a positional element.
+     */
+    private function atKeyedField(): bool
+    {
+        $saved = $this->pos;
+
+        $this->skipWhitespace();
+        if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
+            $this->pos++;
+            $this->skipWhitespace();
+        }
+
+        $keyed = false;
+        if (null !== $this->tryParseIdent()) {
+            $this->skipWhitespace();
+            if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
+                $this->pos++;
+                $this->skipWhitespace();
+            }
+            $keyed = $this->pos < $this->len && ':' === $this->input[$this->pos];
+        }
+
+        $this->pos = $saved;
+
+        return $keyed;
     }
 
     private function parseField(): ShapeField
@@ -141,7 +201,7 @@ final class PhpDocShapeParser
     {
         $this->skipWhitespace();
 
-        $type = $this->parseSingleType();
+        $type = $this->parseSuffixedType();
 
         // Check for union: type|null or type|type
         $this->skipWhitespace();
@@ -150,7 +210,7 @@ final class PhpDocShapeParser
             while ($this->pos < $this->len && '|' === $this->input[$this->pos]) {
                 $this->pos++;
                 $this->skipWhitespace();
-                $types[] = $this->parseSingleType();
+                $types[] = $this->parseSuffixedType();
                 $this->skipWhitespace();
             }
 
@@ -177,6 +237,22 @@ final class PhpDocShapeParser
         return $type;
     }
 
+    /**
+     * `T[]` is PHPStan's suffix spelling of `list<T>`, and it stacks — `T[][]` is a list of
+     * lists. Handled here rather than in parseSingleType so it applies to every branch.
+     */
+    private function parseSuffixedType(): ParsedType
+    {
+        $type = $this->parseSingleType();
+
+        while ($this->pos + 1 < $this->len && '[' === $this->input[$this->pos] && ']' === $this->input[$this->pos + 1]) {
+            $this->pos += 2;
+            $type = new ListType($type);
+        }
+
+        return $type;
+    }
+
     private function parseSingleType(): ParsedType
     {
         $this->skipWhitespace();
@@ -189,9 +265,9 @@ final class PhpDocShapeParser
             return new NullableType($inner, optional: true);
         }
 
-        // array{...} → ShapeType
+        // array{...} → ShapeType, or TupleType when its entries are positional
         if ($this->lookAhead('array{')) {
-            return $this->parseShape();
+            return $this->parseShapeOrTuple();
         }
 
         // list<T>

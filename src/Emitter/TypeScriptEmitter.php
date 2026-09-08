@@ -19,6 +19,7 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
@@ -538,6 +539,10 @@ final class TypeScriptEmitter
         // the emitted file.
         if ($type instanceof MapType) {
             return [$type->key, $type->value];
+        }
+
+        if ($type instanceof TupleType) {
+            return $type->elements;
         }
 
         if ($type instanceof ShapeType) {
