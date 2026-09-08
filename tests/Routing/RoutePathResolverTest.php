@@ -45,6 +45,13 @@ final class RoutePathResolverTest extends TestCase
         self::assertNull($this->resolver()->pathFor(ProjectController::class, 'notARoute'));
     }
 
+    public function testOnlyInvokeInheritsAnInvokableControllersRoute(): void
+    {
+        // The bare-class key is how Symfony records an invokable controller. Letting every
+        // method fall back to it made a constructor look like a routed API method.
+        self::assertNull($this->resolver()->pathFor(HealthController::class, '__construct'));
+    }
+
     public function testResolutionIsDisabledWithoutARoutingFile(): void
     {
         $resolver = $this->resolver(null);

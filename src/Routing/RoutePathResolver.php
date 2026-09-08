@@ -58,7 +58,14 @@ final class RoutePathResolver
     {
         $paths = $this->paths();
 
-        return $paths[$className . '::' . $methodName] ?? $paths[$className] ?? null;
+        // Symfony keys an invokable controller's route by the bare class name, so that key
+        // answers for __invoke and nothing else — a constructor or helper on the same class
+        // has no route, and must not inherit one.
+        if ('__invoke' === $methodName) {
+            return $paths[$className . '::__invoke'] ?? $paths[$className] ?? null;
+        }
+
+        return $paths[$className . '::' . $methodName] ?? null;
     }
 
     /**
