@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\PHPStan\Rules\Shape;
 
 use PhpParser\Node;
-use PhpParser\Node\Stmt\ClassLike;
 use PHPStan\Analyser\Scope;
+use PHPStan\Node\InClassNode;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
 
@@ -25,45 +25,53 @@ use PHPStan\Rules\RuleErrorBuilder;
  * Fires only where `_self` is imported, so it cannot reach code that has not adopted the
  * contract conventions.
  *
- * @implements Rule<ClassLike>
+ * The import tags come from PHPStan's resolved PHPDoc rather than a regex over raw docblock
+ * text: the tag is parsed properly and its source class resolved against the file's imports,
+ * so a docblock wrapped across lines, or one naming its source by short name, alias or
+ * fully-qualified name, all read the same way here.
+ *
+ * @implements Rule<InClassNode>
  */
 final class SelfImportMustBeAliasedRule implements Rule
 {
-    private const string PATTERN = '/@phpstan-import-type\s+_self\s+from\s+(?P<source>[\\\\\w]+)(?P<alias>\s+as\s+\w+)?/';
-
     public function getNodeType(): string
     {
-        return ClassLike::class;
+        return InClassNode::class;
     }
 
     public function processNode(Node $node, Scope $scope): array
     {
-        if (null === $docComment = $node->getDocComment()) {
-            return [];
-        }
-
-        if (0 === preg_match_all(self::PATTERN, $docComment->getText(), $matches, \PREG_SET_ORDER)) {
-            return [];
-        }
-
         $errors = [];
-        foreach ($matches as $match) {
-            if ('' !== ($match['alias'] ?? '')) {
+        $line = $node->getOriginalNode()->getStartLine();
+
+        foreach ($node->getClassReflection()->getResolvedPhpDoc()?->getTypeAliasImportTags() ?? [] as $tag) {
+            if ('_self' !== $tag->getImportedAlias() || null !== $tag->getImportedAs()) {
                 continue;
             }
+
+            // The short name is what the author wrote and what the suggested fix has to echo
+            // back; the resolved name is correct but unreadable in a message.
+            $source = self::shortName($tag->getImportedFrom());
 
             $errors[] = RuleErrorBuilder::message(\sprintf(
                 'Import of `_self` from %s must be aliased — `@phpstan-import-type _self from %s as <Something>Data`. '
                     . 'Unaliased it is imported under the name `_self`, which in this class reads as its own shape '
                     . 'while meaning another class\'s. The alias may not match a class already in scope.',
-                $match['source'],
-                $match['source'],
+                $source,
+                $source,
             ))
                 ->identifier('typeBridge.shape.selfImportMustBeAliased')
-                ->line($node->getStartLine())
+                ->line($line)
                 ->build();
         }
 
         return $errors;
+    }
+
+    private static function shortName(string $className): string
+    {
+        $position = strrpos($className, '\\');
+
+        return false === $position ? $className : substr($className, $position + 1);
     }
 }
