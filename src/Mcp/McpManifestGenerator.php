@@ -28,6 +28,8 @@ final class McpManifestGenerator
             requirementTypes: $config->requirementTypes,
             mcpScopeAttribute: $config->mcpScopeAttribute,
             mcpScopeProperty: $config->mcpScopeProperty,
+            mcpDescriptionAttribute: $config->mcpDescriptionAttribute,
+            mcpDescriptionProperty: $config->mcpDescriptionProperty,
             routePathResolver: $this->routePathResolver($config),
         );
         $contracts = $collector->collect($sourceDir, (new ResponseClassCollector())->collectIndex($sourceDir));

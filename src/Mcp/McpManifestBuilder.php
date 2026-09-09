@@ -58,9 +58,7 @@ final class McpManifestBuilder
         \assert(null !== $mcp);
 
         $tool = ['name' => $mcp->name];
-        if (null !== $mcp->description) {
-            $tool['description'] = $mcp->description;
-        }
+        $tool['description'] = $mcp->description;
         $tool['method'] = $mcp->httpMethod;
         $tool['path'] = $mcp->httpPath;
         $tool['destructive'] = $mcp->destructive;

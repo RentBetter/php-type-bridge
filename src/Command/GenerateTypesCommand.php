@@ -74,7 +74,11 @@ final class GenerateTypesCommand extends Command
             $files = $emitter->emit(
                 (new PhpDocTypeCollector())->collect($sourceDir),
                 $responseCollector->collect($sourceDir),
-                (new EndpointContractCollector(requirementTypes: $config->requirementTypes))->collect($sourceDir, $responseCollector->collectIndex($sourceDir)),
+                (new EndpointContractCollector(
+                    requirementTypes: $config->requirementTypes,
+                    mcpDescriptionAttribute: $config->mcpDescriptionAttribute,
+                    mcpDescriptionProperty: $config->mcpDescriptionProperty,
+                ))->collect($sourceDir, $responseCollector->collectIndex($sourceDir)),
             );
         }
 

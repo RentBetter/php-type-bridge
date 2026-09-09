@@ -31,6 +31,14 @@ final readonly class TypeBridgeConfig
      *   properties are all scopes. Name it when the attribute carries anything else, or those
      *   values are silently collected as scopes too: an `entities` map of route param => entity
      *   class would contribute the class names, producing tools gated on scopes that cannot exist.
+     * @param string|null $mcpDescriptionAttribute FQCN of the project's endpoint-documentation
+     *   attribute (e.g. a Spec\Api attribute). When set, an #[McpTool] that omits its own
+     *   `description` inherits this attribute's text from the same method, so an endpoint's
+     *   description is authored once. A tool resolves its description from its own attribute
+     *   first, then this one, then the method's docblock summary — and fails generation when
+     *   none of the three has text.
+     * @param string|null $mcpDescriptionProperty name of the property on that attribute holding
+     *   the text: a string, or a list of strings joined with a space. `description` when omitted.
      * @param array<string, string> $typeAliases project-wide alias name => TypeScript type (e.g.
      *   "UuidStr" => "string"). Declared here rather than as a @phpstan-type on a class, so a
      *   shape can reference the name without every file importing it.
@@ -52,6 +60,8 @@ final readonly class TypeBridgeConfig
         public array $requirementTypes = [],
         public ?string $mcpScopeAttribute = null,
         public ?string $mcpScopeProperty = null,
+        public ?string $mcpDescriptionAttribute = null,
+        public ?string $mcpDescriptionProperty = null,
         public array $typeAliases = [],
         public ?string $routing = null,
         public ?string $projectDir = null,
@@ -77,7 +87,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config, ?string $projectDir = null): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'typeAliases', 'routing'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'typeAliases', 'routing'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -96,12 +106,26 @@ final readonly class TypeBridgeConfig
         $preserveNull = self::preserveNullList($config['preserveNull'] ?? []);
         $output = OutputStructure::fromArray(self::stringKeyedArray($config['output'] ?? [], 'output'));
         $requirementTypes = self::requirementTypesMap($config['requirementTypes'] ?? []);
-        $mcpScopeAttribute = self::mcpScopeAttributeName($config['mcpScopeAttribute'] ?? null);
-        $mcpScopeProperty = self::mcpScopePropertyName($config['mcpScopeProperty'] ?? null, $mcpScopeAttribute);
+        $mcpScopeAttribute = self::attributeClassName($config['mcpScopeAttribute'] ?? null, 'mcpScopeAttribute');
+        $mcpScopeProperty = self::attributePropertyName($config['mcpScopeProperty'] ?? null, 'mcpScopeProperty', $mcpScopeAttribute, 'mcpScopeAttribute');
+        $mcpDescriptionAttribute = self::attributeClassName($config['mcpDescriptionAttribute'] ?? null, 'mcpDescriptionAttribute');
+        $mcpDescriptionProperty = self::attributePropertyName($config['mcpDescriptionProperty'] ?? null, 'mcpDescriptionProperty', $mcpDescriptionAttribute, 'mcpDescriptionAttribute');
         $typeAliases = self::typeAliasesMap($config['typeAliases'] ?? []);
         $routing = self::routingPath($config['routing'] ?? null, $projectDir);
 
-        return new self($typescript, $preserveNull, $output, $requirementTypes, $mcpScopeAttribute, $mcpScopeProperty, $typeAliases, $routing, $projectDir);
+        return new self(
+            typescript: $typescript,
+            preserveNull: $preserveNull,
+            output: $output,
+            requirementTypes: $requirementTypes,
+            mcpScopeAttribute: $mcpScopeAttribute,
+            mcpScopeProperty: $mcpScopeProperty,
+            mcpDescriptionAttribute: $mcpDescriptionAttribute,
+            mcpDescriptionProperty: $mcpDescriptionProperty,
+            typeAliases: $typeAliases,
+            routing: $routing,
+            projectDir: $projectDir,
+        );
     }
 
     public function isPreserveNull(string $shapeName, string $fieldName): bool
@@ -143,31 +167,40 @@ final readonly class TypeBridgeConfig
         return $result;
     }
 
-    private static function mcpScopeAttributeName(mixed $value): ?string
+    /**
+     * A config key naming one of the project's attributes (`mcpScopeAttribute`,
+     * `mcpDescriptionAttribute`): a non-empty class name, or absent.
+     */
+    private static function attributeClassName(mixed $value, string $key): ?string
     {
         if (null === $value) {
             return null;
         }
 
         if (!is_string($value) || '' === $value) {
-            throw new RuntimeException('TypeBridge config key "mcpScopeAttribute" must be an attribute class name.');
+            throw new RuntimeException(\sprintf('TypeBridge config key "%s" must be an attribute class name.', $key));
         }
 
         return $value;
     }
 
-    private static function mcpScopePropertyName(mixed $value, ?string $mcpScopeAttribute): ?string
+    /**
+     * A config key naming a property on one of those attributes. Naming a property on an
+     * attribute that was never configured is a config mistake, not a no-op — silently ignoring
+     * it would leave the values it points at uncollected.
+     */
+    private static function attributePropertyName(mixed $value, string $key, ?string $attribute, string $attributeKey): ?string
     {
         if (null === $value) {
             return null;
         }
 
         if (!is_string($value) || '' === $value) {
-            throw new RuntimeException('TypeBridge config key "mcpScopeProperty" must be a property name.');
+            throw new RuntimeException(\sprintf('TypeBridge config key "%s" must be a property name.', $key));
         }
 
-        if (null === $mcpScopeAttribute) {
-            throw new RuntimeException('TypeBridge config key "mcpScopeProperty" names a property on "mcpScopeAttribute", which is not set.');
+        if (null === $attribute) {
+            throw new RuntimeException(\sprintf('TypeBridge config key "%s" names a property on "%s", which is not set.', $key, $attributeKey));
         }
 
         return $value;

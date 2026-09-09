@@ -37,6 +37,11 @@ final class EndpointContractCollector
      * @param string|null $mcpScopeProperty the one property on that attribute holding the scopes;
      *        without it every public property is read, so an attribute carrying anything else
      *        (a route param => entity class map, say) contributes those values as scopes too
+     * @param string|null $mcpDescriptionAttribute FQCN of the project's endpoint-documentation
+     *        attribute; when set, an #[McpTool] with no description of its own reads this
+     *        attribute's text off the same method before falling back to the docblock summary
+     * @param string|null $mcpDescriptionProperty the property on that attribute holding the text
+     *        (a string, or a list of strings joined with a space); `description` when not named
      * @param RoutePathResolver|null $routePathResolver resolves the path Symfony actually serves
      *        for an #[McpTool] method. A routing-config `prefix` and any class-level #[Route] are
      *        part of that path, and the method attribute alone cannot see them. Without one a
@@ -51,6 +56,8 @@ final class EndpointContractCollector
         array $requirementTypes = [],
         private readonly ?string $mcpScopeAttribute = null,
         private readonly ?string $mcpScopeProperty = null,
+        private readonly ?string $mcpDescriptionAttribute = null,
+        private readonly ?string $mcpDescriptionProperty = null,
         private readonly ?RoutePathResolver $routePathResolver = null,
     ) {
         $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
@@ -162,12 +169,138 @@ final class EndpointContractCollector
 
         return new CollectedMcpTool(
             name: $tool->name ?? $endpointName,
-            description: $tool->description,
+            description: $this->resolveMcpDescription($method, $tool),
             httpMethod: $httpMethod,
             httpPath: $httpPath,
             destructive: $tool->destructive ?? ('GET' !== $httpMethod),
             scopes: $this->resolveMcpScopes($method),
         );
+    }
+
+    /**
+     * The tool's LLM-facing description, from the first source with text: the attribute's own
+     * `description`, the project's documentation attribute on the same method (when one is
+     * configured), then the method's docblock summary. Having none is an error rather than an
+     * absent key — a tool the model cannot read is worse than a build break.
+     */
+    private function resolveMcpDescription(ReflectionMethod $method, McpTool $tool): string
+    {
+        $description = $this->text($tool->description)
+            ?? $this->documentedDescription($method)
+            ?? $this->docblockSummary($method);
+        if (null !== $description) {
+            return $description;
+        }
+
+        throw new RuntimeException(\sprintf(
+            'Endpoint "%s::%s" is exposed as an MCP tool but has no description: none on #[McpTool], %s, and no docblock summary.',
+            $method->getDeclaringClass()->getName(),
+            $method->getName(),
+            null === $this->mcpDescriptionAttribute
+                ? 'no documentation attribute configured (mcpDescriptionAttribute)'
+                : \sprintf('no #[%s] on the method', $this->mcpDescriptionAttribute),
+        ));
+    }
+
+    /**
+     * The text of the configured documentation attribute on the method, or null when the method
+     * carries none (or it is blank). The property is a string or a list of strings — the shape
+     * of property-api's Spec\Api, where a list is the description in paragraphs — joined with a
+     * space.
+     */
+    private function documentedDescription(ReflectionMethod $method): ?string
+    {
+        if (null === $this->mcpDescriptionAttribute) {
+            return null;
+        }
+
+        $attributes = $method->getAttributes($this->mcpDescriptionAttribute);
+        if ([] === $attributes) {
+            return null;
+        }
+
+        $reflection = new \ReflectionObject($instance = $attributes[0]->newInstance());
+        $propertyName = $this->mcpDescriptionProperty ?? 'description';
+        if (!$reflection->hasProperty($propertyName)) {
+            throw new RuntimeException(\sprintf(
+                'Attribute #[%s] on "%s::%s" has no property "%s" (%s).',
+                $this->mcpDescriptionAttribute,
+                $method->getDeclaringClass()->getName(),
+                $method->getName(),
+                $propertyName,
+                null === $this->mcpDescriptionProperty
+                    ? 'the default; name the right one with the mcpDescriptionProperty config'
+                    : 'named by the mcpDescriptionProperty config',
+            ));
+        }
+
+        $value = $reflection->getProperty($propertyName)->getValue($instance);
+        $parts = [];
+        foreach (\is_array($value) ? $value : [$value] as $part) {
+            if (!\is_string($part)) {
+                throw new RuntimeException(\sprintf(
+                    'Attribute #[%s] on "%s::%s": property "%s" must hold a string or a list of strings to describe an MCP tool.',
+                    $this->mcpDescriptionAttribute,
+                    $method->getDeclaringClass()->getName(),
+                    $method->getName(),
+                    $propertyName,
+                ));
+            }
+
+            if (null !== $part = $this->text($part)) {
+                $parts[] = $part;
+            }
+        }
+
+        return [] === $parts ? null : implode(' ', $parts);
+    }
+
+    /**
+     * The summary of the method's docblock — the text before the first blank line or tag,
+     * joined onto one line — or null when there is no docblock or it opens with a tag.
+     */
+    private function docblockSummary(ReflectionMethod $method): ?string
+    {
+        $docComment = $method->getDocComment();
+        if (false === $docComment) {
+            return null;
+        }
+
+        $body = preg_replace('~^/\*\*|\*/$~', '', trim($docComment)) ?? '';
+        $summary = [];
+        foreach (preg_split('/\R/', $body) ?: [] as $line) {
+            $line = trim(ltrim(trim($line), '*'));
+            if (str_starts_with($line, '@')) {
+                break;
+            }
+
+            if ('' === $line) {
+                if ([] !== $summary) {
+                    break;
+                }
+
+                continue;
+            }
+
+            $summary[] = $line;
+        }
+
+        return [] === $summary ? null : implode(' ', $summary);
+    }
+
+    /**
+     * Trimmed text, or null for nothing worth keeping — an omitted description and a blank one
+     * mean the same thing.
+     */
+    private function text(?string $value): ?string
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return '' === $value ? null : $value;
     }
 
     /**

@@ -20,8 +20,11 @@ final readonly class McpTool
 {
     /**
      * @param string|null $name        Override the derived tool name (defaults to the endpoint name).
-     * @param string|null $description LLM-facing tool description; falls back to the method's
-     *                                 docblock summary when omitted.
+     * @param string|null $description LLM-facing tool description. Omitted, the tool inherits the
+     *                                 project's endpoint-documentation attribute on the same method
+     *                                 (the `mcpDescriptionAttribute` config), else the method's
+     *                                 docblock summary; a tool with none fails generation. Set it
+     *                                 only where the model needs different wording than the docs.
      * @param bool|null   $destructive Override the method-derived safety hint (a non-GET method is
      *                                 destructive by default; GET is read-only).
      */

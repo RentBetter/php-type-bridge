@@ -7,17 +7,30 @@ namespace PTGS\TypeBridge\Tests\Mcp;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Mcp\McpManifestGenerator;
+use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use RuntimeException;
 
 /**
  * The generator is what both `typebridge:mcp` and a container-compiled manifest go through, so
- * this is where the config's `routing` key is proven to reach the tools: a tool's path must be
- * the one Symfony serves, which the method attribute alone does not give.
+ * this is where the config's keys are proven to reach the tools: `routing`, because a tool's
+ * path must be the one Symfony serves, which the method attribute alone does not give; and
+ * `mcpDescriptionAttribute`, because a tool's description comes from the endpoint's own docs.
  */
 final class McpManifestGeneratorTest extends TestCase
 {
     private const string ROUTED = __DIR__ . '/../Fixture/RoutedMcpFixtures';
     private const string UNROUTED = __DIR__ . '/../Fixture/UnroutedMcpFixtures';
+    private const string DESCRIBED = __DIR__ . '/../Fixture/DescribedMcpFixtures';
+
+    public function testTheDescriptionAttributeReachesTheToolsThroughTheConfig(): void
+    {
+        $manifest = (new McpManifestGenerator())->generate(
+            self::DESCRIBED,
+            TypeBridgeConfig::fromArray(['mcpDescriptionAttribute' => Api::class]),
+        );
+
+        self::assertSame('List the pings. Newest first.', array_column($manifest['tools'], 'description', 'name')['ListPings']);
+    }
 
     public function testPublishesTheServedPathWhenRoutingIsConfigured(): void
     {

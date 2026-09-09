@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
+use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Authorize;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
@@ -59,7 +60,7 @@ final class McpManifestBuilderTest extends TestCase
         ], $manifest);
     }
 
-    public function testSortsToolsByNameAndOmitsAbsentDescription(): void
+    public function testSortsToolsByName(): void
     {
         $manifest = (new McpManifestBuilder())->build([
             'd' => [$this->toolContract('zebra')],
@@ -68,9 +69,60 @@ final class McpManifestBuilderTest extends TestCase
 
         $names = array_map(static fn (array $tool): mixed => $tool['name'], $manifest['tools']);
         self::assertSame(['alpha', 'zebra'], $names);
-        self::assertArrayNotHasKey('description', $manifest['tools'][0]);
         // No scope attribute configured -> no scopes key rather than an empty list.
         self::assertArrayNotHasKey('scopes', $manifest['tools'][0]);
+    }
+
+    public function testInheritsTheDescriptionFromTheConfiguredDocumentationAttribute(): void
+    {
+        // Resolution order, one endpoint each: the tool's own text wins over the attribute's,
+        // the attribute's (a list, joined) over the docblock's, and the docblock stands in when
+        // neither exists.
+        $byName = $this->describedTools(new EndpointContractCollector(mcpDescriptionAttribute: Api::class));
+
+        self::assertSame('Show one ping, per the tool.', $byName['ShowPing']['description']);
+        self::assertSame('List the pings. Newest first.', $byName['ListPings']['description']);
+        self::assertSame('Count the pings.', $byName['CountPings']['description']);
+    }
+
+    public function testWithoutAConfiguredAttributeTheDocblockSummaryStandsIn(): void
+    {
+        // The documentation attribute is invisible until configured, so ListPings falls through
+        // to its docblock; a summary is the text before the first blank line or tag.
+        $byName = $this->describedTools(new EndpointContractCollector());
+
+        self::assertSame('Show one ping, per the tool.', $byName['ShowPing']['description']);
+        self::assertSame('List the pings, per the docblock.', $byName['ListPings']['description']);
+        self::assertSame('Count the pings.', $byName['CountPings']['description']);
+    }
+
+    public function testFailsWhenTheNamedDescriptionPropertyDoesNotExist(): void
+    {
+        $srcDir = __DIR__ . '/../Fixture/DescribedMcpFixtures';
+        $responseIndex = (new ResponseClassCollector())->collectIndex($srcDir);
+        $collector = new EndpointContractCollector(
+            mcpDescriptionAttribute: Api::class,
+            mcpDescriptionProperty: 'summary',
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('has no property "summary"');
+
+        $collector->collect($srcDir, $responseIndex);
+    }
+
+    public function testFailsWhenAnMcpToolHasNoDescriptionFromAnySource(): void
+    {
+        // An absent key is not an option: a tool the model cannot read is worse than a build
+        // break, and a project compiling its manifest into the container sees it there.
+        $srcDir = __DIR__ . '/../Fixture/UndescribedMcpFixtures';
+        $responseIndex = (new ResponseClassCollector())->collectIndex($srcDir);
+        $collector = new EndpointContractCollector();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('has no description');
+
+        $collector->collect($srcDir, $responseIndex);
     }
 
     public function testCollectsMcpToolsFromAnnotatedFixtureControllers(): void
@@ -247,7 +299,7 @@ final class McpManifestBuilderTest extends TestCase
             ),
             mcp: new CollectedMcpTool(
                 name: 'recordVerdict',
-                description: null,
+                description: 'Record a verdict.',
                 httpMethod: 'POST',
                 httpPath: '/checks/verdicts',
                 destructive: true,
@@ -274,6 +326,26 @@ final class McpManifestBuilderTest extends TestCase
             ],
             'required' => ['tags'],
         ], $manifest['tools'][0]['inputSchema']);
+    }
+
+    /**
+     * The DescribedMcpFixtures tools as the given collector resolves them, keyed by name.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function describedTools(EndpointContractCollector $collector): array
+    {
+        $srcDir = __DIR__ . '/../Fixture/DescribedMcpFixtures';
+        $contracts = $collector->collect($srcDir, (new ResponseClassCollector())->collectIndex($srcDir));
+
+        $byName = [];
+        foreach ((new McpManifestBuilder())->build($contracts)['tools'] as $tool) {
+            $name = $tool['name'];
+            self::assertIsString($name);
+            $byName[$name] = $tool;
+        }
+
+        return $byName;
     }
 
     /**
@@ -356,7 +428,7 @@ final class McpManifestBuilderTest extends TestCase
             responses: [],
             mcp: new CollectedMcpTool(
                 name: $name,
-                description: null,
+                description: ucfirst($name) . '.',
                 httpMethod: 'GET',
                 httpPath: '/' . $name,
                 destructive: false,
