@@ -6,12 +6,14 @@ namespace PTGS\TypeBridge\Support;
 
 use PTGS\TypeBridge\Contract\ContractFormType;
 use PTGS\TypeBridge\Model\CollectedFormField;
+use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
 use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
 use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\FormTypeInterface;
 use Symfony\Component\Form\Forms;
+use Symfony\Component\OptionsResolver\Exception\ExceptionInterface as OptionsException;
 use Symfony\Component\Validator\Validation;
 use RuntimeException;
 
@@ -43,7 +45,19 @@ final class FormTypeInspector
         $this->assertFormTypeInterface($formClass);
         $this->assertContractFormType($formClass);
 
-        $builder = $this->formFactory->createBuilder($formClass);
+        try {
+            $builder = $this->formFactory->createBuilder($formClass);
+        } catch (OptionsException|FormException $exception) {
+            // A form built here gets no options, so one that requires them — a `project` to
+            // scope its entity choices, say — cannot be inspected. That is a fact about the
+            // form worth reporting as such, not an analysis crash: a RuntimeException is what
+            // the validator turns into a finding and the collector into a generation error.
+            throw new RuntimeException(\sprintf(
+                'Form "%s" cannot be built for inspection: %s Give the option a default, or keep the form off the contract surface.',
+                $formClass,
+                $exception->getMessage(),
+            ), previous: $exception);
+        }
 
         /** @var class-string|null $dataClass */
         $dataClass = $builder->getOption('data_class');

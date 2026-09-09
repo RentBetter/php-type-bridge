@@ -84,4 +84,17 @@ final class ContractFormTypeRuleTest extends RuleTestCase
             16,
         ]]);
     }
+
+    public function testReportsAFormThatCannotBeBuiltWithoutOptions(): void
+    {
+        // Inspection builds the form with no options. One that requires an option — a
+        // `project` to scope its choices, say — is a finding to act on, not an analysis crash
+        // that hides every other result behind "Result is incomplete".
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Form/Negative/RequiresOptionRequestType.php',
+        ], [[
+            'Form "PTGS\TypeBridge\Tests\PHPStan\Fixtures\Form\Negative\RequiresOptionRequestType" cannot be built for inspection: An error has occurred resolving the options of the form "PTGS\TypeBridge\Tests\PHPStan\Fixtures\Form\Negative\RequiresOptionRequestType": The required option "project" is missing. Give the option a default, or keep the form off the contract surface.',
+            20,
+        ]]);
+    }
 }
