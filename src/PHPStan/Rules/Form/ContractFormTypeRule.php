@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\PHPStan\Rules\Form;
 use PhpParser\Node;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassNode;
+use PHPStan\Reflection\ClassReflection;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
 use PTGS\TypeBridge\Contract\ContractFormType;
@@ -47,7 +48,48 @@ final class ContractFormTypeRule implements Rule
                 ->identifier('typeBridge.contractForm')
                 ->line($line)
                 ->build(),
-            $this->validator->validate($classReflection->getName()),
+            $this->validator->validate($classReflection->getName(), self::dataClassOf($classReflection)),
         );
+    }
+
+    /**
+     * The class bound to ContractFormType's TData, however the form got there.
+     *
+     * PHPStan has already resolved this. `getAncestorWithClassName()` walks to the interface
+     * through the whole hierarchy and returns it with its template types substituted, so every
+     * spelling — `at-extends`, `at-implements`, the `phpstan-` prefixed variants, an abstract
+     * base that forwards the variable — plus imported short names and nested generics are all
+     * handled by the same resolution the rest of the analysis uses.
+     *
+     * This used to be a regex over the leaf class's raw docblock, which matched one spelling
+     * only and, having thrown away the import context a parser gives for free, then needed a
+     * second regex over the file's `use` statements to turn a short name back into a class. It
+     * could not see a form that inherited the contract from a base — the shape almost every
+     * application uses.
+     *
+     * @return class-string|null
+     */
+    private static function dataClassOf(ClassReflection $classReflection): ?string
+    {
+        $ancestor = $classReflection->getAncestorWithClassName(ContractFormType::class);
+
+        if (null === $ancestor) {
+            return null;
+        }
+
+        $bound = $ancestor->getActiveTemplateTypeMap()->getType('TData');
+
+        if (null === $bound) {
+            return null;
+        }
+
+        $classNames = $bound->getObjectClassNames();
+
+        // Exactly one, or the binding is a union or unresolved and there is nothing to check.
+        if (1 !== \count($classNames) || !class_exists($classNames[0])) {
+            return null;
+        }
+
+        return $classNames[0];
     }
 }

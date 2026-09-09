@@ -25,6 +25,21 @@ final class ContractFormTypeRuleTest extends RuleTestCase
         ], []);
     }
 
+    /**
+     * The shape nearly every application actually uses: a base class implements the contract
+     * and concrete forms extend it. Such a form cannot declare `@implements` — PHPStan's
+     * generics.noParent rejects it on a class implementing no interface directly — so reading
+     * only `@implements`, only on the leaf, made the rule unsatisfiable for all of them.
+     */
+    public function testAcceptsAFormThatInheritsTheContractFromItsParent(): void
+    {
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Form/Positive/InheritedContractType.php',
+            __DIR__ . '/../../Fixtures/Form/Positive/AbstractInheritedContractType.php',
+            __DIR__ . '/../../Fixtures/Form/Positive/InheritedContractData.php',
+        ], []);
+    }
+
     public function testRejectsMissingDataClass(): void
     {
         $this->analyse([

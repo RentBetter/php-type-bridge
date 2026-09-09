@@ -32,17 +32,19 @@ final class FormContractValidator
 
     /**
      * @param class-string $formClass
+     * @param class-string|null $expectedDataClass the data class PHPStan resolved from the
+     *                                             form's generic binding, or null if the form
+     *                                             never binds one
      * @return list<string>
      */
-    public function validate(string $formClass): array
+    public function validate(string $formClass, ?string $expectedDataClass): array
     {
         $errors = [];
-        $reflection = new ReflectionClass($formClass);
 
-        $expectedDataClass = $this->resolveGenericDataClass($reflection);
         if (null === $expectedDataClass) {
             $errors[] = \sprintf(
-                'Contract form "%s" must declare @implements ContractFormType<FooData>.',
+                'Contract form "%s" must bind its data class, e.g. @implements ContractFormType<FooData> '
+                . 'on the form itself or @extends SomeBaseType<FooData> when it inherits the contract.',
                 $formClass,
             );
 
@@ -82,42 +84,6 @@ final class FormContractValidator
         }
 
         return $errors;
-    }
-
-    /**
-     * @template TObject of object
-     * @param ReflectionClass<TObject> $reflection
-     * @return class-string|null
-     */
-    private function resolveGenericDataClass(ReflectionClass $reflection): ?string
-    {
-        $docComment = $reflection->getDocComment();
-        if (false === $docComment) {
-            return null;
-        }
-
-        if (!preg_match('/@implements\s+[\\\\\w]+\s*<\s*([\\\\\w]+)\s*>/', $docComment, $matches)) {
-            return null;
-        }
-
-        $dataClass = ltrim($matches[1], '\\');
-        if (class_exists($dataClass)) {
-            return $dataClass;
-        }
-
-        if (null !== ($importedClass = $this->resolveImportedClass($reflection, $dataClass))) {
-            return $importedClass;
-        }
-
-        $namespace = $reflection->getNamespaceName();
-        if ('' !== $namespace) {
-            $namespaced = $namespace . '\\' . $dataClass;
-            if (class_exists($namespaced)) {
-                return $namespaced;
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -448,41 +414,6 @@ final class FormContractValidator
         $type = $this->docHelper->extractVarType($docComment);
 
         return null !== $type && '' !== $type ? ltrim($type, '\\') : null;
-    }
-
-    /**
-     * @template TObject of object
-     * @param ReflectionClass<TObject> $reflection
-     * @return class-string|null
-     */
-    private function resolveImportedClass(ReflectionClass $reflection, string $shortName): ?string
-    {
-        $file = $reflection->getFileName();
-        if (false === $file) {
-            return null;
-        }
-
-        $content = file_get_contents($file);
-        if (false === $content) {
-            return null;
-        }
-
-        if (!preg_match_all('/^use\s+([^;]+?)(?:\s+as\s+(\w+))?;/m', $content, $matches, \PREG_SET_ORDER)) {
-            return null;
-        }
-
-        foreach ($matches as $match) {
-            $importedClass = ltrim($match[1], '\\');
-            $alias = $match[2] ?? $this->shortName($importedClass);
-
-            if ($alias !== $shortName) {
-                continue;
-            }
-
-            return class_exists($importedClass) ? $importedClass : null;
-        }
-
-        return null;
     }
 
     /**
