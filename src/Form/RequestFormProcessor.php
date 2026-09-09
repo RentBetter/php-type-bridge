@@ -46,7 +46,7 @@ final readonly class RequestFormProcessor
     public function processQueryForm(string $type, Request $request, ?object $data = null, array $options = []): object
     {
         $form = $this->formFactory->create($type, $data, $options);
-        $form->submit($request->query->all(), clearMissing: false);
+        $form->submit($request->query->all());
 
         if (!$form->isValid()) {
             $errors = new FormErrors($form);
@@ -124,12 +124,16 @@ final readonly class RequestFormProcessor
      */
     private function submitAndGet(FormInterface $form, array $submitted): mixed
     {
-        // clearMissing: false preserves initial DTO values for fields the client
-        // omitted — required for partial-PUT semantics where the caller updates
-        // only a subset of fields and the rest are kept from the entity. With
-        // Symfony's default (true), unset fields would be reset to null, which
-        // breaks `processForm(..., $request, T::fromEntity($entity))` updates.
-        $form->submit($submitted, clearMissing: false);
+        // Symfony's default, clearMissing: true, submits every declared field — the one
+        // that omitted ones as null on the DTO, where a service reads null as "the client
+        // did not send this". It is also the only way a field's own constraints see an
+        // omitted field at all: a child that is never submitted is never validated, so
+        // under clearMissing: false a NotBlank could catch an empty value but not a
+        // missing one, and a required field could arrive null past its own constraint.
+        //
+        // A form that must tell "not sent" from "sent empty" removes the absent field in
+        // PRE_SUBMIT rather than turning this off.
+        $form->submit($submitted);
 
         if (!$form->isValid()) {
             $errors = new FormErrors($form);

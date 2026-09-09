@@ -61,9 +61,9 @@ final class ShapeScaffolder
             }
 
             // An absent key and a null value are different claims, and for a request they are not
-            // interchangeable: forms bind with clearMissing disabled, so omitting a key means
-            // "leave this alone". `name?: string` says that; `name: ?string` would say the key is
-            // always present and merely nullable, which is false for any partial update.
+            // interchangeable: omitting a key means "leave this alone", which a service reads off
+            // the null the form binds. `name?: string` says that; `name: ?string` would say the key
+            // is always present and merely nullable, which is false for any partial update.
             //
             // A key is required only when the DTO cannot represent its absence *and* the form
             // demands it. Where either says otherwise the field is optional — a contract that is

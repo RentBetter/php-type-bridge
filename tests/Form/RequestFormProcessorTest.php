@@ -32,6 +32,29 @@ final class RequestFormProcessorTest extends TestCase
         self::assertSame(7, $data->count);
     }
 
+    /**
+     * A service reads null as "the client did not send this", so an omitted field must
+     * arrive null rather than keeping whatever the DTO was seeded with. This is also what
+     * lets a field's own constraints see an omitted field: a child that is never
+     * submitted is never validated.
+     */
+    public function test_an_omitted_field_arrives_null_rather_than_keeping_its_seeded_value(): void
+    {
+        $processor = new RequestFormProcessor($this->formFactory(), new DefaultValidationErrorResponseFactory());
+
+        $seeded = new SampleData();
+        $seeded->name = 'Kept from the entity';
+        $seeded->count = 3;
+
+        $data = $processor->processForm(SampleType::class, $this->jsonRequest([
+            'sample' => ['count' => '7'],
+        ]), $seeded);
+
+        self::assertInstanceOf(SampleData::class, $data);
+        self::assertSame(7, $data->count);
+        self::assertNull($data->name);
+    }
+
     public function test_it_throws_the_default_validation_response_on_invalid_submission(): void
     {
         $processor = new RequestFormProcessor($this->formFactory(), new DefaultValidationErrorResponseFactory());
