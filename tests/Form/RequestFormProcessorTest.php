@@ -55,6 +55,22 @@ final class RequestFormProcessorTest extends TestCase
         self::assertNull($data->name);
     }
 
+    /**
+     * `{}` decodes to [] under assoc and array_is_list([]) is true, so an empty object
+     * used to be refused as a list — the one body every partial update can send.
+     */
+    public function test_an_empty_json_object_is_a_body_that_mentions_no_field(): void
+    {
+        $processor = new RequestFormProcessor($this->formFactory(), new DefaultValidationErrorResponseFactory());
+
+        $request = Request::create('/', 'POST', server: ['CONTENT_TYPE' => 'application/json'], content: '{}');
+        $data = $processor->processFlatForm(SampleType::class, $request);
+
+        self::assertInstanceOf(SampleData::class, $data);
+        self::assertNull($data->name);
+        self::assertNull($data->count);
+    }
+
     public function test_it_throws_the_default_validation_response_on_invalid_submission(): void
     {
         $processor = new RequestFormProcessor($this->formFactory(), new DefaultValidationErrorResponseFactory());

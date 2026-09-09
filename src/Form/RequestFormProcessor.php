@@ -80,7 +80,9 @@ final readonly class RequestFormProcessor
         $json = $this->parseJsonObject($request);
         $submitted = $json[$blockPrefix] ?? [];
 
-        if (!\is_array($submitted) || array_is_list($submitted)) {
+        // Empty means the key was absent or `{}`; either way it is an object with nothing
+        // in it, and only a non-empty list is the shape being refused.
+        if (!\is_array($submitted) || ([] !== $submitted && array_is_list($submitted))) {
             throw new BadRequestHttpException(\sprintf('`%s` must be an object.', $blockPrefix));
         }
 
@@ -161,7 +163,10 @@ final readonly class RequestFormProcessor
             throw new BadRequestHttpException('Malformed JSON body.');
         }
 
-        if (!\is_array($json) || array_is_list($json)) {
+        // `{}` decodes to [] under assoc, and array_is_list([]) is true — an empty object
+        // is a body that mentions no field, not a list, and every partial update can send
+        // one. Only a non-empty list is the shape being refused here.
+        if (!\is_array($json) || ([] !== $json && array_is_list($json))) {
             throw new BadRequestHttpException('JSON body must be an object.');
         }
 
