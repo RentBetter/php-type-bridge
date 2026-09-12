@@ -21,23 +21,30 @@ use PTGS\TypeBridge\Support\PhpDocShapeParserResolver;
  * Reference fields should be named after the entity (singular): `project: string` not
  * `projectId: string`. The value being a UUID is implied by the name.
  *
- * Configurable allowlist covers external-system identifiers (e.g. `stripeCustomerId`)
- * that legitimately keep the Id suffix because they aren't UUIDs in our system.
+ * The allowlist covers identifiers that legitimately keep the suffix — external-system ids
+ * that are not UUIDs of ours, and correlation tokens with no entity to be named after.
  *
- * An entry is either a bare field name, which exempts that name in every shape, or a
- * `ShapeName.fieldName` pair, which exempts it only there — matching how `preserveNull` is
- * written. Prefer the qualified form: `stripeCustomerId` is an external identifier wherever it
- * appears, but a name that is only defensible on one shape should not be quietly permitted on
- * all of them. The shape name is the class's short name, as it is for preserveNull.
+ * **Every entry must be qualified**, in one of two forms:
+ *
+ *   `ShapeName.fieldName`  exempt on that shape only. The shape name is the class's short
+ *                          name, as it is for `preserveNull`.
+ *   `_global.fieldName`    exempt in every shape.
+ *
+ * A bare `fieldName` is not accepted. It used to be, and it meant the second of those — so
+ * exempting one field on one view quietly permitted that name across the whole project, which
+ * is not what anyone writing the entry was asking for. Being broad is defensible; being broad
+ * by accident is not, so it now has to be said out loud.
  *
  * @implements Rule<Class_>
  */
 final class NoIdSuffixRule implements Rule
 {
+    /** Prefix that opts a field name out in every shape. */
+    private const GLOBAL_SCOPE = '_global';
+
     /**
-     * @param list<string> $allowIdSuffix field names that may legitimately keep the `Id`
-     *                                    suffix, each either `fieldName` (anywhere) or
-     *                                    `ShapeName.fieldName` (that shape only)
+     * @param list<string> $allowIdSuffix each entry `ShapeName.fieldName` or
+     *                                    `_global.fieldName`; bare field names do not match
      */
     public function __construct(
         private readonly array $allowIdSuffix = [],
@@ -58,7 +65,6 @@ final class NoIdSuffixRule implements Rule
 
         $errors = [];
         $className = $node->namespacedName?->toString() ?? $scope->getClassReflection()?->getName() ?? ($node->name->name ?? '<anonymous>');
-
         $shapeName = self::shortName($className);
 
         foreach ($shape->fields as $field) {
@@ -69,14 +75,16 @@ final class NoIdSuffixRule implements Rule
             $errors[] = RuleErrorBuilder::message(\sprintf(
                 'Field `%s` in `_self` shape on %s must not end with `Id`. '
                     . 'Reference fields should be named after the entity (singular): use `%s` instead. '
-                    . 'Add `%s.%s` to `typeBridge.shapeNaming.allowIdSuffix` if this is an external-system identifier, '
-                    . 'or the bare `%s` if the name is an external identifier in every shape.',
+                    . 'If this is an external-system identifier, add `%s.%s` to '
+                    . '`typeBridge.shapeNaming.allowIdSuffix`, or `%s.%s` if the name is one in every shape.%s',
                 $field->name,
                 $className,
                 substr($field->name, 0, -2),
                 $shapeName,
                 $field->name,
+                self::GLOBAL_SCOPE,
                 $field->name,
+                $this->bareEntryHint($field->name),
             ))
                 ->identifier('typeBridge.shapeNaming.noIdSuffix')
                 ->line($node->getStartLine())
@@ -92,15 +100,32 @@ final class NoIdSuffixRule implements Rule
             return false;
         }
 
-        if (\in_array($field->name, $this->allowIdSuffix, strict: true)) {
-            return false;
-        }
-
         if (\in_array($shapeName . '.' . $field->name, $this->allowIdSuffix, strict: true)) {
             return false;
         }
 
+        if (\in_array(self::GLOBAL_SCOPE . '.' . $field->name, $this->allowIdSuffix, strict: true)) {
+            return false;
+        }
+
         return $this->isStringValued($field->type);
+    }
+
+    /**
+     * Said only when it explains the error in front of you: the config does name this field,
+     * in the old unqualified form, and that quietly stopped matching.
+     */
+    private function bareEntryHint(string $fieldName): string
+    {
+        if (!\in_array($fieldName, $this->allowIdSuffix, strict: true)) {
+            return '';
+        }
+
+        return \sprintf(
+            ' (`%s` is currently listed unqualified, which no longer matches — a bare entry '
+            . 'exempted the name in every shape, which was rarely what it was written for.)',
+            $fieldName,
+        );
     }
 
     private static function shortName(string $className): string
