@@ -6,7 +6,7 @@ namespace PTGS\TypeBridge\Tests\PHPStan\Fixtures\Form\Negative;
 
 /**
  * @phpstan-type _self = array{
- *     ?ownerId: string,
+ *     ownerId?: string,
  * }
  */
 final class MissingPropertyRequestData

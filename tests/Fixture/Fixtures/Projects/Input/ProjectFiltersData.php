@@ -6,9 +6,9 @@ namespace PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Input;
 
 /**
  * @phpstan-type _self = array{
- *     ?search: string,
- *     ?page: int,
- *     ?archived: bool,
+ *     search?: string,
+ *     page?: int,
+ *     archived?: bool,
  * }
  */
 final class ProjectFiltersData

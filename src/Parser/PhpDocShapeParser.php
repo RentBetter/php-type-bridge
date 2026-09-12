@@ -159,33 +159,17 @@ final class PhpDocShapeParser
     {
         $this->skipWhitespace();
 
-        // Optional key: ?fieldName: type
+        // Optional key, PHPStan's array-shape syntax: fieldName?: type
+        //
+        // A leading `?fieldName:` was once accepted too. It was dropped: `?` already means
+        // nullable, so reading it as an optional key first required lookahead and backtracking
+        // to tell `?name: string` from `?string`, and no other tool understood the result.
         $optional = false;
-        $fieldName = null;
-        if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
-            // Disambiguate: ?fieldName: vs ?type
-            // Look ahead for ident followed by ':'
-            $saved = $this->pos;
-            $this->pos++;
-            $this->skipWhitespace();
-            $ident = $this->tryParseIdent();
-            $this->skipWhitespace();
-            if (null !== $ident && $this->pos < $this->len && ':' === $this->input[$this->pos]) {
-                $optional = true;
-                $fieldName = $ident;
-            } else {
-                // Not an optional field, restore
-                $this->pos = $saved;
-            }
-        }
+        $fieldName = $this->parseIdent();
 
-        if (!$optional) {
-            $fieldName = $this->parseIdent();
-            // Standard PHPStan optional-key syntax: fieldName?: type
-            if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
-                $this->pos++;
-                $optional = true;
-            }
+        if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
+            $this->pos++;
+            $optional = true;
         }
 
         $this->skipWhitespace();
@@ -243,12 +227,35 @@ final class PhpDocShapeParser
      */
     private function parseSuffixedType(): ParsedType
     {
-        $type = $this->parseSingleType();
+        $type = $this->pos < $this->len && '(' === $this->input[$this->pos]
+            ? $this->parseGroup()
+            : $this->parseSingleType();
 
         while ($this->pos + 1 < $this->len && '[' === $this->input[$this->pos] && ']' === $this->input[$this->pos + 1]) {
             $this->pos += 2;
             $type = new ListType($type);
         }
+
+        return $type;
+    }
+
+    /**
+     * A parenthesised group.
+     *
+     * PHPDoc allows parentheses around any type, and phpstan/phpdoc-parser emits them
+     * canonically — around an intersection, and around a union nested inside a shape field:
+     * `(Base & array{note: (string | null)})`. They group and mean nothing else, so the inner
+     * type is parsed and the parens discarded.
+     */
+    private function parseGroup(): ParsedType
+    {
+        $this->pos++;
+        $this->skipWhitespace();
+        // parseTypeDef, not parseType: a group may hold an intersection, and only the former
+        // reads `&`. That is exactly the shape phpdoc-parser emits for `Base & array{...}`.
+        $type = $this->parseTypeDef();
+        $this->skipWhitespace();
+        $this->expect(')');
 
         return $type;
     }

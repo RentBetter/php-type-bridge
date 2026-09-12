@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Support;
 
+use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocNode;
+use PHPStan\PhpDocParser\Ast\PhpDoc\TypeAliasImportTagValueNode;
+use PHPStan\PhpDocParser\Lexer\Lexer;
+use PHPStan\PhpDocParser\Parser\ConstExprParser;
+use PHPStan\PhpDocParser\Parser\PhpDocParser;
+use PHPStan\PhpDocParser\Parser\TokenIterator;
+use PHPStan\PhpDocParser\Parser\TypeParser;
+use PHPStan\PhpDocParser\ParserConfig;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
@@ -17,8 +25,33 @@ use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
 use RuntimeException;
 
+/**
+ * Reads the PHPDoc tags TypeBridge is built on.
+ *
+ * Docblocks are parsed with phpstan/phpdoc-parser and PHP source is split with the tokeniser,
+ * rather than matched with regular expressions. The regexes this replaces had to re-implement
+ * bracket balancing and the stripping of leading `*` continuations by hand, and could not see
+ * a tag that wrapped across lines in a way they did not anticipate.
+ *
+ * Types come back out as strings because that is what TypeBridge's own PhpDocShapeParser
+ * consumes; the parser is used to *find* and delimit them correctly, not to replace the shape
+ * parser. A type is therefore returned in phpdoc-parser's normalised spelling — the same type,
+ * with its own whitespace and any trailing comma dropped.
+ */
 final class PhpDocTypeHelper
 {
+    private readonly Lexer $lexer;
+    private readonly PhpDocParser $parser;
+
+    public function __construct()
+    {
+        $config = new ParserConfig(usedAttributes: []);
+        $constExprParser = new ConstExprParser($config);
+
+        $this->lexer = new Lexer($config);
+        $this->parser = new PhpDocParser($config, new TypeParser($config, $constExprParser), $constExprParser);
+    }
+
     /**
      * @return array<string, string>
      */
@@ -26,11 +59,9 @@ final class PhpDocTypeHelper
     {
         $types = [];
 
-        if (preg_match_all('/@phpstan-type\s+(\w+)\s*=\s*/s', $content, $matches, \PREG_OFFSET_CAPTURE)) {
-            foreach ($matches[0] as $index => $match) {
-                $name = $matches[1][$index][0];
-                $offset = $match[1] + \strlen($match[0]);
-                $types[$name] = $this->extractDefinition($content, $offset);
+        foreach ($this->docComments($content) as $docComment) {
+            foreach ($this->parse($docComment)->getTypeAliasTagValues() as $tag) {
+                $types[$tag->alias] = (string)$tag->type;
             }
         }
 
@@ -39,13 +70,11 @@ final class PhpDocTypeHelper
 
     public function extractVarType(string $docComment): ?string
     {
-        if (!preg_match('/@var\s+/s', $docComment, $match, \PREG_OFFSET_CAPTURE)) {
-            return null;
+        foreach ($this->parse($docComment)->getVarTagValues() as $tag) {
+            return (string)$tag->type;
         }
 
-        $offset = $match[0][1] + \strlen($match[0][0]);
-
-        return $this->extractDefinition($docComment, $offset);
+        return null;
     }
 
     /**
@@ -63,14 +92,10 @@ final class PhpDocTypeHelper
     ): array {
         $imports = [];
 
-        if (!preg_match_all('/@phpstan-import-type\s+(\w+)\s+from\s+([\\\\\w]+)(?:\s+as\s+(\w+))?/', $content, $matches, \PREG_SET_ORDER)) {
-            return $imports;
-        }
-
-        foreach ($matches as $match) {
-            $sourceAlias = $match[1];
-            $classRef = $match[2];
-            $localAlias = $match[3] ?? $sourceAlias;
+        foreach ($this->importTags($content) as $tag) {
+            $sourceAlias = $tag->importedAlias;
+            $classRef = $tag->importedFrom->name;
+            $localAlias = $tag->importedAs ?? $sourceAlias;
             $targetClass = $this->resolveClassReference($classRef, $ownerClass, $classFiles, $shortNameMap);
             $targetTypeName = $this->emittedTypeName($sourceAlias, $targetClass);
             $targetFile = $classFiles[$targetClass] ?? null;
@@ -163,69 +188,51 @@ final class PhpDocTypeHelper
         return $type;
     }
 
-    private function extractDefinition(string $content, int $offset): string
+    /**
+     * Every docblock in the input.
+     *
+     * Callers pass either a whole PHP file — the collectors and the scaffolder do — or a single
+     * docblock, as the PHPStan rules do. A file is split with the tokeniser rather than by
+     * pattern, so a `/**` inside a string literal or a plain comment cannot be mistaken for one.
+     *
+     * @return list<string>
+     */
+    private function docComments(string $content): array
     {
-        $depth = 0;
-        $result = '';
-        $length = \strlen($content);
-
-        for ($index = $offset; $index < $length; $index++) {
-            $character = $content[$index];
-
-            if ('<' === $character || '{' === $character || '(' === $character) {
-                $depth++;
-                $result .= $character;
-                continue;
-            }
-
-            if ('>' === $character || '}' === $character || ')' === $character) {
-                $result .= $character;
-                $depth = max(0, $depth - 1);
-                continue;
-            }
-
-            if ("\n" === $character) {
-                $lineStart = $index + 1;
-                while ($lineStart < $length && \in_array($content[$lineStart], [' ', "\t"], true)) {
-                    $lineStart++;
-                }
-
-                if ($lineStart < $length && '*' === $content[$lineStart]) {
-                    $lineStart++;
-                    if ($lineStart < $length && ' ' === $content[$lineStart]) {
-                        $lineStart++;
-                    }
-                    if ($lineStart < $length && ('@' === $content[$lineStart] || '/' === $content[$lineStart])) {
-                        break;
-                    }
-
-                    $index = $lineStart - 1;
-                    $result .= ' ';
-
-                    continue;
-                }
-
-                if (0 === $depth) {
-                    break;
-                }
-
-                $result .= ' ';
-
-                continue;
-            }
-
-            if (0 === $depth && '*' === $character && $index + 1 < $length && '/' === $content[$index + 1]) {
-                break;
-            }
-
-            if (0 === $depth && "\r" === $character) {
-                break;
-            }
-
-            $result .= $character;
+        if (str_starts_with(ltrim($content), '/**')) {
+            return [$content];
         }
 
-        return trim($result);
+        $docComments = [];
+
+        foreach (token_get_all($content) as $token) {
+            if (\is_array($token) && \T_DOC_COMMENT === $token[0]) {
+                $docComments[] = $token[1];
+            }
+        }
+
+        return $docComments;
+    }
+
+    /**
+     * @return list<TypeAliasImportTagValueNode>
+     */
+    private function importTags(string $content): array
+    {
+        $tags = [];
+
+        foreach ($this->docComments($content) as $docComment) {
+            foreach ($this->parse($docComment)->getTypeAliasImportTagValues() as $tag) {
+                $tags[] = $tag;
+            }
+        }
+
+        return $tags;
+    }
+
+    private function parse(string $docComment): PhpDocNode
+    {
+        return $this->parser->parse(new TokenIterator($this->lexer->tokenize($docComment)));
     }
 
     /**

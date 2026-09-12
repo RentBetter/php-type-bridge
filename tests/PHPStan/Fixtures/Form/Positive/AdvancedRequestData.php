@@ -14,8 +14,8 @@ namespace PTGS\TypeBridge\Tests\PHPStan\Fixtures\Form\Positive;
  *     startsAt: string,
  *     tags?: list<string>,
  *     state: value-of<AdvancedState>,
- *     ?assignee: string,
- *     ?owner: AdvancedOwner,
+ *     assignee?: string,
+ *     owner?: AdvancedOwner,
  * }
  */
 final class AdvancedRequestData

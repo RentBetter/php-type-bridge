@@ -15,7 +15,7 @@ use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
  *     client: ClientData,
  *     status: value-of<ProjectStatus>,
  *     tags: list<string>,
- *     ?nickname: string,
+ *     nickname?: string,
  * }
  */
 final class ProjectView
