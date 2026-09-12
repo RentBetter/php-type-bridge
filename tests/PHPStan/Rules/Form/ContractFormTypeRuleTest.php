@@ -70,6 +70,21 @@ final class ContractFormTypeRuleTest extends RuleTestCase
         ]]);
     }
 
+    /**
+     * A collection whose entry type cannot be built is reported against the form, not raised as
+     * an internal error that abandons the analysis. The entry build sits inside collectFields(),
+     * outside inspect()'s own try, so it needed catching in its own right.
+     */
+    public function testReportsACollectionWhoseEntryTypeCannotBeBuilt(): void
+    {
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Form/Negative/UninspectableEntryRequestType.php',
+        ], [[
+            'Collection entry type "Symfony\\Component\\Form\\Extension\\Core\\Type\\EnumType" cannot be built for inspection: An error has occurred resolving the options of the form "Symfony\\Component\\Form\\Extension\\Core\\Type\\EnumType": The required option "class" is missing. Give the option a default, or keep the form off the contract surface.',
+            24,
+        ]]);
+    }
+
     public function testRejectsMismatchedDataClass(): void
     {
         $this->analyse([

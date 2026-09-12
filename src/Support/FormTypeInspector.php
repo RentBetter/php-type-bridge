@@ -122,10 +122,24 @@ final class FormTypeInspector
             return [];
         }
 
-        $entryBuilder = $this->formFactory->createNamedBuilder(
-            name: '__entry__',
-            type: $entryTypeClass,
-        );
+        try {
+            $entryBuilder = $this->formFactory->createNamedBuilder(
+                name: '__entry__',
+                type: $entryTypeClass,
+            );
+        } catch (OptionsException|FormException $exception) {
+            // Same fact as a top-level form that cannot be built, one level down: a collection
+            // whose entry type needs options — an EnumType without its `class`, say — cannot be
+            // inspected either. This build sits inside collectFields(), which runs *outside*
+            // inspect()'s try, so without catching it here the exception leaves the inspector
+            // entirely and PHPStan reports an internal error and abandons the whole run rather
+            // than reporting the one form.
+            throw new RuntimeException(\sprintf(
+                'Collection entry type "%s" cannot be built for inspection: %s Give the option a default, or keep the form off the contract surface.',
+                $entryTypeClass,
+                $exception->getMessage(),
+            ), previous: $exception);
+        }
 
         if (!$entryBuilder->getCompound()) {
             return [];
@@ -217,10 +231,24 @@ final class FormTypeInspector
             return null;
         }
 
-        $entryBuilder = $this->formFactory->createNamedBuilder(
-            name: '__entry__',
-            type: $entryTypeClass,
-        );
+        try {
+            $entryBuilder = $this->formFactory->createNamedBuilder(
+                name: '__entry__',
+                type: $entryTypeClass,
+            );
+        } catch (OptionsException|FormException $exception) {
+            // Same fact as a top-level form that cannot be built, one level down: a collection
+            // whose entry type needs options — an EnumType without its `class`, say — cannot be
+            // inspected either. This build sits inside collectFields(), which runs *outside*
+            // inspect()'s try, so without catching it here the exception leaves the inspector
+            // entirely and PHPStan reports an internal error and abandons the whole run rather
+            // than reporting the one form.
+            throw new RuntimeException(\sprintf(
+                'Collection entry type "%s" cannot be built for inspection: %s Give the option a default, or keep the form off the contract surface.',
+                $entryTypeClass,
+                $exception->getMessage(),
+            ), previous: $exception);
+        }
 
         /** @var class-string|null $dataClass */
         $dataClass = $entryBuilder->getOption('data_class');
