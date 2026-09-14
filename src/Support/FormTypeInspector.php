@@ -6,7 +6,9 @@ namespace PTGS\TypeBridge\Support;
 
 use PTGS\TypeBridge\Contract\ContractFormType;
 use PTGS\TypeBridge\Model\CollectedFormField;
+use RuntimeException;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
+use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
@@ -15,7 +17,6 @@ use Symfony\Component\Form\FormTypeInterface;
 use Symfony\Component\Form\Forms;
 use Symfony\Component\OptionsResolver\Exception\ExceptionInterface as OptionsException;
 use Symfony\Component\Validator\Validation;
-use RuntimeException;
 
 final class FormTypeInspector
 {
@@ -96,6 +97,7 @@ final class FormTypeInspector
                 entryDataClass: $this->resolveEntryDataClass($config),
                 enumClass: $this->resolveStringOption($config, 'class'),
                 input: $this->resolveStringOption($config, 'input'),
+                multiple: $this->isMultipleChoice($config),
                 hasModelTransformers: [] !== $config->getModelTransformers(),
                 hasViewTransformers: [] !== $config->getViewTransformers(),
                 children: $this->collectFields($child),
@@ -254,6 +256,33 @@ final class FormTypeInspector
         $dataClass = $entryBuilder->getOption('data_class');
 
         return $dataClass;
+    }
+
+    /**
+     * Whether the field holds a *list* of its leaf type rather than one of it.
+     *
+     * That is what `multiple` means on ChoiceType and on everything built on it — EnumType,
+     * CountryType, an application's own choice-based type. It is also an ordinary option
+     * name, which any form type is free to define for something else entirely, so the
+     * option alone is not the question: the type has to be in the choice family, which is
+     * a question about the *resolved* type's parent chain. EnumType does not extend
+     * ChoiceType, it names it as its parent, so a class check answers it wrongly.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private function isMultipleChoice(FormConfigInterface $config): bool
+    {
+        if (!$config->hasOption('multiple') || true !== $config->getOption('multiple')) {
+            return false;
+        }
+
+        for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
+            if ($type->getInnerType() instanceof ChoiceType) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -40,6 +40,28 @@ final class ContractFormTypeRuleTest extends RuleTestCase
         ], []);
     }
 
+    /**
+     * `multiple: true` makes a choice field hold a *list* of its leaf type. Read without it,
+     * an EnumType bound to `list<AdvancedState>` looked like a property that should have been
+     * a bare `AdvancedState`, so the only way to satisfy the rule was to mistype the DTO.
+     */
+    public function testAcceptsAMultipleEnumBoundToAListProperty(): void
+    {
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Form/Positive/MultipleEnumRequestType.php',
+        ], []);
+    }
+
+    public function testRejectsAMultipleEnumBoundToAScalarProperty(): void
+    {
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Form/Negative/ScalarMultipleEnumRequestType.php',
+        ], [[
+            'Contract form "PTGS\TypeBridge\Tests\PHPStan\Fixtures\Form\Negative\ScalarMultipleEnumRequestType" field "states" has multiple: true, so it expects property "states" to be an array of "PTGS\TypeBridge\Tests\PHPStan\Fixtures\Form\Positive\AdvancedState".',
+            17,
+        ]]);
+    }
+
     public function testRejectsMissingDataClass(): void
     {
         $this->analyse([

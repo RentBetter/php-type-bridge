@@ -150,6 +150,38 @@ final class FormContractValidator
             return [];
         }
 
+        // `multiple` makes the field hold a list of its leaf type rather than one of it —
+        // an EnumType with multiple: true binds to `list<Status>`, not `Status`. Checked as
+        // a collection, so the array-value type still has to be documented and a bare
+        // `array` is still a finding.
+        //
+        // The inspector only sets the flag for the choice family, so it already means
+        // "a list of" here — `multiple` is an ordinary option name any form type may define
+        // for its own purposes, and it means that nowhere else.
+        if ($field->multiple) {
+            if (!$this->propertyIsArray($property)) {
+                return [\sprintf(
+                    'Contract form "%s" field "%s" has multiple: true, so it expects property "%s" to be an array of "%s".',
+                    $formClass,
+                    $field->name,
+                    $property->getName(),
+                    $expectedType,
+                )];
+            }
+
+            if (!$this->propertyDocContainsArrayValueType($property, $expectedType)) {
+                return [\sprintf(
+                    'Contract form "%s" field "%s" has multiple: true, so it expects property "%s" to document "%s" items.',
+                    $formClass,
+                    $field->name,
+                    $property->getName(),
+                    $expectedType,
+                )];
+            }
+
+            return [];
+        }
+
         if (!$this->propertyMatchesExpectedType($property, $expectedType)) {
             return [\sprintf(
                 'Contract form "%s" field "%s" expects property "%s" to be compatible with "%s".',
@@ -396,12 +428,32 @@ final class FormContractValidator
             return false;
         }
 
-        $pattern = preg_quote(ltrim($expectedType, '\\'), '/');
+        $expectedType = ltrim($expectedType, '\\');
 
-        return 1 === preg_match(\sprintf(
-            '/(?:^|[<|(,])%1$s(?:\[\]|[>|),]|$)|(?:list|array)<(?:int,\s*)?%1$s>/',
-            $pattern,
-        ), $docType);
+        // Both spellings count. The docblock sits in the same file as the property, so PHP
+        // resolves what is written there through that file's imports — an author writing
+        // `list<TaskStatus>` has named the imported class, and demanding the FQCN instead
+        // would fail every idiomatic docblock in the codebase. Matching the short name can
+        // in principle accept a same-named class from another namespace; that is a far
+        // smaller cost than rejecting the spelling everyone actually writes.
+        $names = [$expectedType];
+        $position = strrpos($expectedType, '\\');
+        if (false !== $position) {
+            $names[] = substr($expectedType, $position + 1);
+        }
+
+        foreach ($names as $name) {
+            $pattern = preg_quote($name, '/');
+
+            if (1 === preg_match(\sprintf(
+                '/(?:^|[<|(,])%1$s(?:\[\]|[>|),]|$)|(?:list|array)<(?:int,\s*)?%1$s>/',
+                $pattern,
+            ), $docType)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function extractPropertyDocType(ReflectionProperty $property): ?string

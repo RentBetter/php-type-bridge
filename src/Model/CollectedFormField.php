@@ -7,6 +7,9 @@ namespace PTGS\TypeBridge\Model;
 final readonly class CollectedFormField
 {
     /**
+     * @param bool                     $multiple      the field's `multiple` option — an EnumType or
+     *                                                ChoiceType carrying it holds a list of its leaf
+     *                                                type, not one of them
      * @param list<CollectedFormField> $children      the fields of a compound field
      * @param list<CollectedFormField> $entryChildren the fields of a collection field's compound entry type —
      *                                                collections have no children of their own at build time,
@@ -24,6 +27,7 @@ final readonly class CollectedFormField
         public ?string $entryDataClass = null,
         public ?string $enumClass = null,
         public ?string $input = null,
+        public bool $multiple = false,
         public bool $hasModelTransformers = false,
         public bool $hasViewTransformers = false,
         public array $children = [],
