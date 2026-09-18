@@ -132,6 +132,15 @@ final class McpManifestBuilder
             return ['type' => 'array', 'items' => $this->entrySchema($field)];
         }
 
+        // An enum field takes one of a known set, and a model has no other way to learn them: the
+        // values go in the schema, so a wrong one is refused by the client rather than by a 422 the
+        // model has to guess its way out of. `multiple` means a list of them (a status filter).
+        if (null !== $field->enumClass) {
+            $leaf = $this->enumSchema($field->enumClass);
+
+            return $field->multiple ? ['type' => 'array', 'items' => $leaf] : $leaf;
+        }
+
         if ($field->compound && [] !== $field->children) {
             $properties = [];
             $required = [];
@@ -179,6 +188,22 @@ final class McpManifestBuilder
         }
 
         return $schema;
+    }
+
+    /**
+     * The values a backed enum allows, typed by what it is backed with.
+     *
+     * @return array{type: string, enum: list<int|string>}
+     */
+    private function enumSchema(string $enumClass): array
+    {
+        if (!is_a($enumClass, \BackedEnum::class, allow_string: true)) {
+            throw new \RuntimeException(\sprintf('`%s` is used as a form field\'s enum but is not a backed enum.', $enumClass));
+        }
+
+        $values = array_map(static fn (\BackedEnum $case): int|string => $case->value, $enumClass::cases());
+
+        return ['type' => [] !== $values && is_int($values[0]) ? 'integer' : 'string', 'enum' => $values];
     }
 
     private function scalarType(CollectedFormField $field): string

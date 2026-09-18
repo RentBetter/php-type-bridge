@@ -16,6 +16,7 @@ use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
+use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Authorize;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
 
@@ -58,6 +59,28 @@ final class McpManifestBuilderTest extends TestCase
                 ],
             ],
         ], $manifest);
+    }
+
+    public function testAnEnumFieldPublishesTheValuesItAccepts(): void
+    {
+        // A model cannot see a PHP enum. Without the values in the schema its only way to learn them
+        // is a 422, and a filter it gets wrong reads as "nothing matched" rather than as a mistake.
+        $manifest = (new McpManifestBuilder())->build(['projects' => [$this->filterContract(multiple: false)]]);
+
+        self::assertSame(
+            ['type' => 'string', 'enum' => ['draft', 'active']],
+            $manifest['tools'][0]['inputSchema']['properties']['status'],
+        );
+    }
+
+    public function testAMultipleEnumFieldPublishesAListOfThoseValues(): void
+    {
+        $manifest = (new McpManifestBuilder())->build(['projects' => [$this->filterContract(multiple: true)]]);
+
+        self::assertSame(
+            ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['draft', 'active']]],
+            $manifest['tools'][0]['inputSchema']['properties']['status'],
+        );
     }
 
     public function testSortsToolsByName(): void
@@ -374,6 +397,47 @@ final class McpManifestBuilderTest extends TestCase
             mapped: true,
             compound: false,
             dataClass: null,
+        );
+    }
+
+    /**
+     * A list endpoint filtered by a status enum — one of them, or several.
+     */
+    private function filterContract(bool $multiple): CollectedEndpointContract
+    {
+        return new CollectedEndpointContract(
+            name: 'listProjects',
+            domain: 'projects',
+            controllerClass: 'App\\ListController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                query: new CollectedInputReference(
+                    formClass: null,
+                    ownerClass: 'App\\ProjectFilterData',
+                    typeName: 'ProjectFilterData',
+                    domain: 'projects',
+                    fields: [
+                        new CollectedFormField(
+                            name: 'status',
+                            formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\EnumType',
+                            required: false,
+                            mapped: true,
+                            compound: false,
+                            dataClass: null,
+                            enumClass: ProjectStatus::class,
+                            multiple: $multiple,
+                        ),
+                    ],
+                ),
+            ),
+            mcp: new CollectedMcpTool(
+                name: 'listProjects',
+                description: 'The projects.',
+                httpMethod: 'GET',
+                httpPath: '/projects',
+                destructive: false,
+            ),
         );
     }
 
