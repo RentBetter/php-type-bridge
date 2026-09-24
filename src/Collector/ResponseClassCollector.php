@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Collector;
 use PTGS\TypeBridge\Contract\ApiResponse;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedResponseProperty;
+use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
 use PTGS\TypeBridge\Support\DomainGuesser;
@@ -83,10 +84,16 @@ final class ResponseClassCollector
                     continue;
                 }
 
+                $rawType = $this->resolvePropertyType($property);
+                $parsed = $this->docHelper->resolveImportedNames($this->parser->parse($rawType), $imports);
                 $properties[] = new CollectedResponseProperty(
                     name: $property->getName(),
-                    rawType: $rawType = $this->resolvePropertyType($property),
-                    parsed: $this->docHelper->resolveImportedNames($this->parser->parse($rawType), $imports),
+                    rawType: $rawType,
+                    parsed: $parsed,
+                    // `?T` is the TS-optional form, as it is in a `_self` shape: the key is left off
+                    // the wire when null (a side-load not asked for). `T|null` parses as a required
+                    // nullable and stays a key that is always present.
+                    optional: $parsed instanceof NullableType && $parsed->optional,
                 );
             }
 
