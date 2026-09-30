@@ -20,6 +20,11 @@ final readonly class SymbolRegistry
      */
     public function __construct(private array $maps) {}
 
+    public function has(string $domain, string $logicalName): bool
+    {
+        return isset($this->maps[$domain][$logicalName]);
+    }
+
     public function resolve(string $domain, string $logicalName): string
     {
         if (!isset($this->maps[$domain][$logicalName])) {

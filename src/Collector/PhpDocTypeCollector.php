@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Collector;
 
+use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
+use ReflectionClass;
 use RuntimeException;
 
 final class PhpDocTypeCollector
@@ -37,6 +39,10 @@ final class PhpDocTypeCollector
             }
 
             $definitions = $this->docHelper->extractPhpStanTypes($content);
+            $phpStanOnly = $this->phpStanOnly($className);
+            if (null !== $phpStanOnly) {
+                $definitions = array_filter($definitions, static fn(string $alias): bool => !$phpStanOnly->covers($alias), \ARRAY_FILTER_USE_KEY);
+            }
             if ([] === $definitions) {
                 continue;
             }
@@ -49,6 +55,9 @@ final class PhpDocTypeCollector
                 shortNameMap: $shortNameMap,
                 domainGuesser: $this->domainGuesser,
             );
+
+            $classImports = $this->docHelper->classImports($content);
+            $localAliases = array_keys($definitions);
 
             $domain = $this->domainGuesser->guess($srcDir, $file);
             $domains[$domain] ??= new CollectedDomain($domain);
@@ -70,11 +79,12 @@ final class PhpDocTypeCollector
                 $domains[$domain]->types[$emittedName] = new CollectedType(
                     name: $emittedName,
                     definition: $definition,
-                    parsed: $this->docHelper->resolveImportedNames($this->parser->parse($definition), $imports, $className),
+                    parsed: $this->docHelper->resolveImportedNames($this->parser->parse($definition), $imports, $className, $classImports, $localAliases),
                     sourceFile: $file,
                     domain: $domain,
                     ownerClass: $className,
                     imports: array_values($imports),
+                    isSelf: '_self' === $alias,
                 );
             }
         }
@@ -107,6 +117,21 @@ final class PhpDocTypeCollector
         }
 
         return substr($className, $position + 1);
+    }
+
+    /**
+     * The class's say on which of its aliases are for PHPStan alone — typing arrays that are
+     * never serialised — so they are not emitted.
+     */
+    private function phpStanOnly(string $className): ?PhpStanOnly
+    {
+        if (!class_exists($className) && !interface_exists($className) && !trait_exists($className) && !enum_exists($className)) {
+            return null;
+        }
+
+        $attributes = (new ReflectionClass($className))->getAttributes(PhpStanOnly::class);
+
+        return [] === $attributes ? null : $attributes[0]->newInstance();
     }
 
     private function emittedTypeName(string $alias, string $ownerClass): string

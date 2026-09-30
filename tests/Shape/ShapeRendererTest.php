@@ -90,6 +90,7 @@ final class ShapeRendererTest extends TestCase
              *     result: self::RESULT_*,
              *     row: array{int, string, ...},
              *     envelope: array{id: string, ...},
+             *     total: \Acme\Money\MoneyInterface,
              * }
              */
             class Example {}

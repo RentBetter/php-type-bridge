@@ -15,6 +15,7 @@ use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\MapType;
+use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ShapeField;
@@ -45,6 +46,8 @@ final class TypeScriptEmitter
     private SymbolRegistry $symbols;
 
     private TypeToTsConverter $converter;
+
+    private ?ClassTypeResolver $classTypes = null;
 
     private TypeScriptNaming $naming;
 
@@ -101,7 +104,8 @@ final class TypeScriptEmitter
     {
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses));
-        $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds());
+        $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry);
+        $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes);
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
         sort($allDomains);
@@ -385,12 +389,14 @@ final class TypeScriptEmitter
         foreach ($collected->types as $type) {
             $this->appendImportedTypes($domain, $type->imports, $imports);
             $this->appendExternalEnums($domain, $type->parsed, $imports);
+            $this->appendClassTypes($domain, $type->parsed, $imports);
         }
 
         foreach ($responses as $response) {
             $this->appendImportedTypes($domain, $response->imports, $imports);
             foreach ($response->properties as $property) {
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
+                $this->appendClassTypes($domain, $property->parsed, $imports);
             }
         }
 
@@ -504,6 +510,31 @@ final class TypeScriptEmitter
 
         foreach ($this->childTypes($type) as $child) {
             $this->appendExternalEnums($domain, $child, $imports);
+        }
+    }
+
+    /**
+     * Imports for the classes a type names where no alias answers to the name — see
+     * {@see ClassTypeResolver}. The same test the converter makes, so what is imported is what
+     * is referenced.
+     *
+     * @param array<string, list<string>> $imports
+     */
+    private function appendClassTypes(string $domain, ParsedType $type, array &$imports): void
+    {
+        if ($type instanceof NameRefType) {
+            if (null !== $type->class && null !== $this->classTypes && !$this->symbols->has($domain, $type->name)) {
+                $symbol = $this->classTypes->resolve($type->class);
+                if ($symbol->targetDomain !== $domain) {
+                    $imports[$symbol->targetDomain][] = $symbol->canonicalName;
+                }
+            }
+
+            return;
+        }
+
+        foreach ($this->childTypes($type) as $child) {
+            $this->appendClassTypes($domain, $child, $imports);
         }
     }
 

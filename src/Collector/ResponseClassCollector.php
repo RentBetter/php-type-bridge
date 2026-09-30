@@ -77,6 +77,8 @@ final class ResponseClassCollector
                 shortNameMap: $shortNameMap,
                 domainGuesser: $this->domainGuesser,
             );
+            $classImports = $this->docHelper->classImports($content);
+            $localAliases = array_keys($this->docHelper->extractPhpStanTypes($content));
 
             $properties = [];
             foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
@@ -85,7 +87,13 @@ final class ResponseClassCollector
                 }
 
                 $rawType = $this->resolvePropertyType($property);
-                $parsed = $this->docHelper->resolveImportedNames($this->parser->parse($rawType), $imports, $className);
+                $parsed = $this->docHelper->resolveImportedNames(
+                    $this->parser->parse($rawType),
+                    $imports,
+                    $className,
+                    $classImports,
+                    $localAliases,
+                );
                 $properties[] = new CollectedResponseProperty(
                     name: $property->getName(),
                     rawType: $rawType,

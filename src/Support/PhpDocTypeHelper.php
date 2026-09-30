@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Support;
 
+use Closure;
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocNode;
 use PHPStan\PhpDocParser\Ast\PhpDoc\TypeAliasImportTagValueNode;
 use PHPStan\PhpDocParser\Lexer\Lexer;
@@ -156,47 +157,127 @@ final class PhpDocTypeHelper
 
     /**
      * Resolves the names in a parsed type that only make sense where it was written: imported
-     * aliases become the names they were imported as, and class constants — `self::STATUS_*` —
-     * become the literal values of the constants they match, read from $ownerClass (the class
-     * whose docblock holds the type) when they say `self`.
+     * aliases become the names they were imported as; a bare name that is not an alias of the
+     * file but names a class is annotated with that class, so the emitter can fall back to the
+     * class's own type; and class constants — `self::STATUS_*` — become the literal values of
+     * the constants they match.
      *
      * @param array<string, ImportedType> $imports
+     * @param ?string $ownerClass the class whose docblock holds the type
+     * @param array<string, string> $classImports the file's `use` statements, alias => class ({@see self::classImports()})
+     * @param list<string> $localAliases the aliases the file declares itself
      */
-    public function resolveImportedNames(ParsedType $type, array $imports, ?string $ownerClass = null): ParsedType
-    {
-        if ($type instanceof ClassConstantType) {
-            return $this->resolveClassConstant($type, $ownerClass);
-        }
-
-        if ($type instanceof NameRefType) {
-            if (isset($imports[$type->name])) {
-                return new NameRefType($imports[$type->name]->targetTypeName);
+    public function resolveImportedNames(
+        ParsedType $type,
+        array $imports,
+        ?string $ownerClass = null,
+        array $classImports = [],
+        array $localAliases = [],
+    ): ParsedType {
+        return $this->mapLeaves($type, function (ParsedType $leaf) use ($imports, $ownerClass, $classImports, $localAliases): ParsedType {
+            if ($leaf instanceof ClassConstantType) {
+                return $this->resolveClassConstant($leaf, $ownerClass, $classImports);
             }
 
-            return $type;
+            if (!$leaf instanceof NameRefType) {
+                return $leaf;
+            }
+
+            if (null === $leaf->class && isset($imports[$leaf->name])) {
+                return new NameRefType($imports[$leaf->name]->targetTypeName);
+            }
+
+            // Written as a qualified name: a class by syntax, resolved as PHP would.
+            if (null !== $leaf->class) {
+                return new NameRefType($leaf->name, $this->resolveClassName($leaf->class, $ownerClass, $classImports) ?? ltrim($leaf->class, '\\'));
+            }
+
+            if (\in_array($leaf->name, $localAliases, true)) {
+                return $leaf;
+            }
+
+            $class = $this->resolveClassName($leaf->name, $ownerClass, $classImports);
+
+            return null === $class ? $leaf : new NameRefType($leaf->name, $class);
+        });
+    }
+
+    /**
+     * The file's `use` statements for classes, as alias => fully qualified name. Only those
+     * before the first class-like declaration: a `use` inside one imports a trait.
+     *
+     * @return array<string, string>
+     */
+    public function classImports(string $content): array
+    {
+        $imports = [];
+        $tokens = \PhpToken::tokenize($content);
+        $count = \count($tokens);
+
+        for ($i = 0; $i < $count; $i++) {
+            $token = $tokens[$i];
+            if ($token->is([\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM])) {
+                break;
+            }
+            if (!$token->is(\T_USE)) {
+                continue;
+            }
+
+            // Read to the semicolon: `use A\B;`, `use A\B as C;`, `use A\{B, C as D};`. Function
+            // and constant imports are skipped.
+            $statement = '';
+            for ($i++; $i < $count && ';' !== $tokens[$i]->text; $i++) {
+                $statement .= $tokens[$i]->text;
+            }
+            $statement = trim($statement);
+            if (str_starts_with($statement, 'function ') || str_starts_with($statement, 'const ')) {
+                continue;
+            }
+
+            $prefix = '';
+            $names = [$statement];
+            if (1 === preg_match('/^(.*?)\\\\?\{(.*)\}$/s', $statement, $group)) {
+                $prefix = trim($group[1], '\\ ') . '\\';
+                $names = explode(',', $group[2]);
+            }
+
+            foreach ($names as $name) {
+                $parts = preg_split('/\s+as\s+/i', trim($name));
+                if (false === $parts || '' === $parts[0]) {
+                    continue;
+                }
+                $class = ltrim($prefix . trim($parts[0]), '\\');
+                $alias = isset($parts[1]) ? trim($parts[1]) : substr((string) strrchr('\\' . $class, '\\'), 1);
+                $imports[$alias] = $class;
+            }
         }
 
+        return $imports;
+    }
+
+    /**
+     * Rebuilds a parsed type with $leaf applied to every name-like leaf, leaving its structure
+     * as it was.
+     *
+     * @param Closure(ParsedType): ParsedType $leaf
+     */
+    private function mapLeaves(ParsedType $type, Closure $leaf): ParsedType
+    {
         if ($type instanceof NullableType) {
-            return new NullableType(
-                inner: $this->resolveImportedNames($type->inner, $imports, $ownerClass),
-                optional: $type->optional,
-            );
+            return new NullableType(inner: $this->mapLeaves($type->inner, $leaf), optional: $type->optional);
         }
 
         if ($type instanceof ListType) {
-            return new ListType($this->resolveImportedNames($type->inner, $imports, $ownerClass));
+            return new ListType($this->mapLeaves($type->inner, $leaf));
         }
 
         if ($type instanceof MapType) {
-            return new MapType(
-                key: $this->resolveImportedNames($type->key, $imports, $ownerClass),
-                value: $this->resolveImportedNames($type->value, $imports, $ownerClass),
-            );
+            return new MapType(key: $this->mapLeaves($type->key, $leaf), value: $this->mapLeaves($type->value, $leaf));
         }
 
         if ($type instanceof TupleType) {
             return new TupleType(array_map(
-                fn (ParsedType $element): ParsedType => $this->resolveImportedNames($element, $imports, $ownerClass),
+                fn(ParsedType $element): ParsedType => $this->mapLeaves($element, $leaf),
                 $type->elements,
             ), unsealed: $type->unsealed);
         }
@@ -206,7 +287,7 @@ final class PhpDocTypeHelper
             foreach ($type->fields as $field) {
                 $fields[] = new ShapeField(
                     name: $field->name,
-                    type: $this->resolveImportedNames($field->type, $imports, $ownerClass),
+                    type: $this->mapLeaves($field->type, $leaf),
                     optional: $field->optional,
                 );
             }
@@ -215,35 +296,44 @@ final class PhpDocTypeHelper
         }
 
         if ($type instanceof IntersectionType) {
-            $base = $this->resolveImportedNames($type->base, $imports, $ownerClass);
-            $extra = $this->resolveImportedNames($type->extra, $imports, $ownerClass);
+            $base = $this->mapLeaves($type->base, $leaf);
+            $extra = $this->mapLeaves($type->extra, $leaf);
             if (!$base instanceof NameRefType || !$extra instanceof ShapeType) {
                 throw new RuntimeException('Resolved intersection type became invalid after import resolution.');
             }
 
-            return new IntersectionType(
-                base: $base,
-                extra: $extra,
-            );
+            return new IntersectionType(base: $base, extra: $extra);
         }
 
         if ($type instanceof UnionType) {
             return new UnionType(array_map(
-                fn(ParsedType $member): ParsedType => $this->resolveImportedNames($member, $imports, $ownerClass),
+                fn(ParsedType $member): ParsedType => $this->mapLeaves($member, $leaf),
                 $type->types,
             ));
         }
 
-        return $type;
+        return $leaf($type);
     }
 
     /**
      * The literal values of the constants a `Class::PATTERN` names, as one literal or a union of
      * them. `value-of<…>` of an array constant takes its elements instead.
+     *
+     * @param array<string, string> $classImports
      */
-    private function resolveClassConstant(ClassConstantType $type, ?string $ownerClass): ParsedType
+    private function resolveClassConstant(ClassConstantType $type, ?string $ownerClass, array $classImports): ParsedType
     {
-        $class = $this->constantClass($type->class, $ownerClass);
+        $class = 'self' === $type->class || 'static' === $type->class
+            ? ($ownerClass ?? throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $type->class)))
+            : $this->resolveClassName($type->class, $ownerClass, $classImports);
+        if (null === $class || (!class_exists($class) && !interface_exists($class) && !enum_exists($class))) {
+            throw new RuntimeException(\sprintf(
+                'Class "%s" in `%s::%s` could not be found. Write self::, import the class, or give its fully qualified name.',
+                $type->class,
+                $type->class,
+                $type->pattern,
+            ));
+        }
         $pattern = '/^' . str_replace('\\*', '.*', preg_quote($type->pattern, '/')) . '$/';
 
         $values = [];
@@ -279,21 +369,27 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * @return class-string
+     * The class a name means where it was written, as PHP resolves it: fully qualified, through
+     * the file's `use` statements, in the owner's namespace, or global — or null when it is no
+     * class at all (an alias).
+     *
+     * @param array<string, string> $classImports
+     * @return ?class-string
      */
-    private function constantClass(string $class, ?string $ownerClass): string
+    private function resolveClassName(string $name, ?string $ownerClass, array $classImports): ?string
     {
-        if ('self' === $class || 'static' === $class) {
-            if (null === $ownerClass) {
-                throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $class));
+        $candidates = [];
+        if (str_starts_with($name, '\\')) {
+            $candidates[] = ltrim($name, '\\');
+        } else {
+            $first = explode('\\', $name, 2);
+            if (isset($classImports[$first[0]])) {
+                $candidates[] = $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
             }
-
-            $class = $ownerClass;
-        }
-
-        $candidates = [ltrim($class, '\\')];
-        if (!str_starts_with($class, '\\') && null !== $ownerClass && null !== $namespace = $this->namespace($ownerClass)) {
-            $candidates[] = $namespace . '\\' . $class;
+            if (null !== $ownerClass && null !== $namespace = $this->namespace($ownerClass)) {
+                $candidates[] = $namespace . '\\' . $name;
+            }
+            $candidates[] = $name;
         }
 
         foreach ($candidates as $candidate) {
@@ -302,10 +398,7 @@ final class PhpDocTypeHelper
             }
         }
 
-        throw new RuntimeException(\sprintf(
-            'Class "%s" in a constant type could not be found. Write self::, or its fully qualified name.',
-            $class,
-        ));
+        return null;
     }
 
     /**

@@ -63,7 +63,7 @@ final readonly class EmitContext
             $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
         }
 
-        return new ConversionScope($this->domain, $symbols);
+        return new ConversionScope($this->domain, $symbols, $this->foreignAliases);
     }
 
     public function localReferenceFor(string $foreignDomain, string $name): string

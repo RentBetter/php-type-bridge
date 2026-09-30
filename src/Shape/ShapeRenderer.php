@@ -54,7 +54,7 @@ final class ShapeRenderer
     {
         return match (true) {
             $type instanceof ScalarType => $type->type,
-            $type instanceof NameRefType => $type->name,
+            $type instanceof NameRefType => null === $type->class ? $type->name : '\\' . ltrim($type->class, '\\'),
             $type instanceof ValueOfType => 'value-of<' . $type->enumClass . '>',
             $type instanceof IdOfType => 'id-of<' . $type->enumClass . '>',
             $type instanceof ListType => 'list<' . $this->render($type->inner) . '>',

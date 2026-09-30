@@ -420,20 +420,21 @@ final class PhpDocShapeParser
             }
         }
 
-        // Name reference (IProjectBase, etc.), or a class constant: self::STATUS_*, Foo::BAR
+        // Name reference (IProjectBase, etc.), a class by its qualified name (\Foo\Bar), or a
+        // class constant: self::STATUS_*, Foo::BAR
         $start = $this->pos;
         $name = $this->tryParseIdent();
-        if (null !== $name) {
-            if ($this->lookAhead('::') || $this->lookAhead('\\')) {
-                $this->pos = $start;
-
-                return $this->parseClassConstant($this->parseClassName(), valueOf: false);
-            }
-
+        if (null !== $name && !$this->lookAhead('::') && !$this->lookAhead('\\')) {
             return new NameRefType($name);
         }
-        if ($this->lookAhead('\\')) {
-            return $this->parseClassConstant($this->parseClassName(), valueOf: false);
+        if (null !== $name || $this->lookAhead('\\')) {
+            $this->pos = $start;
+            $className = $this->parseClassName();
+            if ($this->lookAhead('::')) {
+                return $this->parseClassConstant($className, valueOf: false);
+            }
+
+            return new NameRefType(substr((string) strrchr('\\' . $className, '\\'), 1), class: $className);
         }
 
         throw new RuntimeException(\sprintf(

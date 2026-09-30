@@ -107,8 +107,35 @@ final readonly class EmitterRegistry
      */
     public function ownerFor(ReflectionClass $class): ?RegisteredEmitter
     {
-        $claiming = array_values(array_filter(
+        return $this->topClaimant($class, $this->emitters);
+    }
+
+    /**
+     * The emitter that publishes a type for the class: the highest-priority one that claims it
+     * and implements {@see TypeSymbolEmitter}. Emitters that claim the class without publishing
+     * a type — the built-in conventions — have no say in what it is called, so a tie between
+     * them is not this lookup's concern.
+     *
+     * @param ReflectionClass<object> $class
+     */
+    public function typeSymbolEmitterFor(ReflectionClass $class): ?TypeSymbolEmitter
+    {
+        $owner = $this->topClaimant($class, array_values(array_filter(
             $this->emitters,
+            static fn(RegisteredEmitter $registered): bool => $registered->emitter instanceof TypeSymbolEmitter,
+        )));
+
+        return null !== $owner && $owner->emitter instanceof TypeSymbolEmitter ? $owner->emitter : null;
+    }
+
+    /**
+     * @param ReflectionClass<object> $class
+     * @param list<RegisteredEmitter> $emitters
+     */
+    private function topClaimant(ReflectionClass $class, array $emitters): ?RegisteredEmitter
+    {
+        $claiming = array_values(array_filter(
+            $emitters,
             static fn(RegisteredEmitter $registered): bool => $registered->emitter->claims($class),
         ));
 
