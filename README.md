@@ -174,6 +174,25 @@ A mutating route that takes no input — a `POST` that only triggers work — st
 
 The application remains responsible for runtime HTTP emission.
 
+### PHPStan types in shapes
+
+A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a codebase actually uses and emits the TypeScript that describes the same JSON:
+
+| PHPStan | TypeScript |
+|---------|------------|
+| `positive-int`, `non-negative-int`, `int<0, max>` … | `number` |
+| `non-empty-string`, `numeric-string`, `class-string<T>` … | `string` |
+| `scalar` | `string \| number \| boolean` |
+| `array-key` | `string \| number` |
+| `array<array-key, V>` | `Record<string, V> \| V[]` (json_encode writes whichever the keys make it) |
+| `non-empty-list<T>`, `non-empty-array<K, V>` | `T[]`, `Record<K, V>` |
+| `array{id: string, ...}` (unsealed) | `{ id: string; [key: string]: unknown }` |
+| `array{int, string, ...}` (unsealed tuple) | `[number, string, ...unknown[]]` |
+| `self::STATUS_*`, `Foo::BAR`, `value-of<self::MODE_*>` | the constants' values: `'draft' \| 'live'` |
+| `(A \| B)`, `Base & array{...}` | `A \| B`, `interface … extends Base` |
+
+A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written. One-argument `array<V>` is still refused: PHPStan reads it as `array<array-key, V>`, so write that — or `list<V>` / `array<string, V>` when that is what it is.
+
 ## PHPStan
 
 Include the packaged rules in your project config:

@@ -70,7 +70,7 @@ final class PhpDocTypeCollector
                 $domains[$domain]->types[$emittedName] = new CollectedType(
                     name: $emittedName,
                     definition: $definition,
-                    parsed: $this->docHelper->resolveImportedNames($this->parser->parse($definition), $imports),
+                    parsed: $this->docHelper->resolveImportedNames($this->parser->parse($definition), $imports, $className),
                     sourceFile: $file,
                     domain: $domain,
                     ownerClass: $className,

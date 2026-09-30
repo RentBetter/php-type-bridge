@@ -77,6 +77,31 @@ final class ShapeRendererTest extends TestCase
         self::assertEquals($original, $parser->parse($rendered));
     }
 
+    public function testPhpStanRefinementsConstantsAndUnsealedShapesSurviveARoundTrip(): void
+    {
+        $source = <<<'PHP'
+            <?php
+            /**
+             * @phpstan-type _self = array{
+             *     limit: positive-int,
+             *     label: non-empty-string,
+             *     reviewer: class-string,
+             *     mode: value-of<self::MODE_*>,
+             *     result: self::RESULT_*,
+             *     row: array{int, string, ...},
+             *     envelope: array{id: string, ...},
+             * }
+             */
+            class Example {}
+            PHP;
+
+        $parser = new PhpDocShapeParser();
+        $original = $parser->parse($this->selfBody($source));
+        $rendered = (new ShapeRenderer())->render($original);
+
+        self::assertEquals($original, $parser->parse($rendered));
+    }
+
     private function selfBody(string $source): string
     {
         preg_match('/@phpstan-type\s+_self\s*=\s*(array\{.*?\n\s*\*\s*\})/s', $source, $matches);
