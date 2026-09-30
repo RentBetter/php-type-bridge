@@ -458,14 +458,9 @@ final class FormContractValidator
 
     private function extractPropertyDocType(ReflectionProperty $property): ?string
     {
-        $docComment = $property->getDocComment();
-        if (false === $docComment) {
-            return null;
-        }
+        $type = $this->docHelper->extractPropertyType($property);
 
-        $type = $this->docHelper->extractVarType($docComment);
-
-        return null !== $type && '' !== $type ? ltrim($type, '\\') : null;
+        return null !== $type ? ltrim($type, '\\') : null;
     }
 
     /**

@@ -23,6 +23,7 @@ use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
+use ReflectionProperty;
 use RuntimeException;
 
 /**
@@ -75,6 +76,42 @@ final class PhpDocTypeHelper
         }
 
         return null;
+    }
+
+    /**
+     * A property's documented type, read where PHPStan reads it: its own `@var`, or — for a
+     * promoted constructor property without one — the constructor's `@param` for it. Both are
+     * how a promoted property is typed, so reading only `@var` would miss half of them and
+     * fall back to the native `array`.
+     */
+    public function extractPropertyType(ReflectionProperty $property): ?string
+    {
+        $docComment = $property->getDocComment();
+        if (false !== $docComment && null !== $type = self::nonEmpty($this->extractVarType($docComment))) {
+            return $type;
+        }
+
+        if (!$property->isPromoted()) {
+            return null;
+        }
+
+        $constructorDoc = $property->getDeclaringClass()->getConstructor()?->getDocComment();
+        if (null === $constructorDoc || false === $constructorDoc) {
+            return null;
+        }
+
+        foreach ($this->parse($constructorDoc)->getParamTagValues() as $tag) {
+            if ('$' . $property->getName() === $tag->parameterName) {
+                return self::nonEmpty((string)$tag->type);
+            }
+        }
+
+        return null;
+    }
+
+    private static function nonEmpty(?string $type): ?string
+    {
+        return null === $type || '' === $type ? null : $type;
     }
 
     /**
