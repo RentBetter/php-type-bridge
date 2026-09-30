@@ -10,14 +10,18 @@ use RuntimeException;
  * Recursive descent parser for PHPStan array{} shape subset.
  *
  * Grammar:
- *   TypeDef    = Shape | NameRef '&' Shape | NameRef
- *   Shape      = 'array{' Fields '}' | 'array{' Type (',' Type)* ','? '}'   (keyed, or a positional tuple)
+ *   TypeDef    = Type | NameRef '&' Shape
+ *   Shape      = 'array{' Fields Rest? '}' | 'array{' Type (',' Type)* Rest? '}'   (keyed, or a positional tuple)
+ *   Rest       = ',' '...' ('<' Type (',' Type)? '>')?                         (unsealed: more keys may follow)
  *   Fields     = Field (',' Field)* ','?
  *   Field      = Ident '?'? ':' Type | '?' Ident ':' Type
  *   Type       = Suffixed ('|' Suffixed)*
- *   Suffixed   = SingleType '[]'*
- *   SingleType = '?' SingleType | 'value-of<' ClassName '>' | 'id-of<' ClassName '>' | ScalarType | Literal | Shape | 'list<' Type '>' | Map | NameRef
- *   Map        = 'array<' Type ',' Type '>'
+ *   Suffixed   = (SingleType | '(' TypeDef ')') '[]'*
+ *   SingleType = '?' SingleType | 'value-of<' (ClassName | Const) '>' | 'id-of<' ClassName '>' | Refinement
+ *              | ScalarType | Literal | Shape | ('list<' | 'non-empty-list<') Type '>' | Map | Const | NameRef
+ *   Map        = ('array<' | 'non-empty-array<') Type ',' Type '>'
+ *   Const      = ClassName '::' ConstPattern                                    (self::STATUS_*, Foo::BAR)
+ *   Refinement = ScalarType::REFINEMENTS key TypeArgs? | 'int<' … '>'         (positive-int, class-string<T>)
  *   ScalarType = 'string' | 'int' | 'float' | 'bool' | 'mixed' | 'numeric' | 'null'
  *   Literal    = StringLiteral | NumberLiteral | 'true' | 'false'
  */
@@ -52,11 +56,9 @@ final class PhpDocShapeParser
     {
         $this->skipWhitespace();
 
-        if ($this->lookAhead('array{')) {
-            return $this->parseShapeOrTuple();
-        }
-
-        // Could be NameRef, NameRef & Shape, or a simple type
+        // Could be a shape, NameRef & Shape, a union of either, or a simple type. A shape goes
+        // through parseType too, so a union that starts with one — phpdoc-parser's
+        // `(array{a: int} | array{b: int})` — keeps its tail.
         $type = $this->parseType();
 
         $this->skipWhitespace();
@@ -101,8 +103,36 @@ final class PhpDocShapeParser
         $fields = [];
         $elements = [];
 
+        $unsealed = false;
+
         $this->skipWhitespace();
         while ($this->pos < $this->len && '}' !== $this->input[$this->pos]) {
+            // `...` (or `...<K, V>`) closes an unsealed shape: keys beyond the listed ones may
+            // be there too. Whatever types the extras are declared with, the listed keys keep
+            // theirs, so the extras only ever widen the shape.
+            if ($this->lookAhead('...')) {
+                $this->pos += 3;
+                if ($this->lookAhead('<')) {
+                    $this->pos++;
+                    $this->parseType();
+                    $this->skipWhitespace();
+                    if ($this->pos < $this->len && ',' === $this->input[$this->pos]) {
+                        $this->pos++;
+                        $this->parseType();
+                        $this->skipWhitespace();
+                    }
+                    $this->expect('>');
+                }
+                $unsealed = true;
+                $this->skipWhitespace();
+                if ($this->pos < $this->len && ',' === $this->input[$this->pos]) {
+                    $this->pos++;
+                    $this->skipWhitespace();
+                }
+
+                break;
+            }
+
             if ($this->atKeyedField()) {
                 $fields[] = $this->parseField();
             } else {
@@ -122,7 +152,11 @@ final class PhpDocShapeParser
             throw new RuntimeException('array{} entries must be all keyed or all positional, not a mix');
         }
 
-        return [] !== $elements ? new TupleType($elements) : new ShapeType($fields);
+        if ([] !== $elements) {
+            return new TupleType($elements, unsealed: $unsealed);
+        }
+
+        return new ShapeType($fields, unsealed: $unsealed);
     }
 
     /**
@@ -277,9 +311,9 @@ final class PhpDocShapeParser
             return $this->parseShapeOrTuple();
         }
 
-        // list<T>
-        if ($this->lookAhead('list<')) {
-            $this->expect('list<');
+        // list<T>, or non-empty-list<T> — the same list with a guarantee TypeScript cannot state
+        if ($this->lookAhead('list<') || $this->lookAhead('non-empty-list<')) {
+            $this->expect($this->lookAhead('list<') ? 'list<' : 'non-empty-list<');
             $inner = $this->parseType();
             $this->skipWhitespace();
             $this->expect('>');
@@ -294,8 +328,8 @@ final class PhpDocShapeParser
         // `array<V>` as an INTEGER-keyed list, so quietly treating it as a
         // string-keyed map would emit a type that lies about the data — better
         // to reject it and make the author write `list<V>`.
-        if ($this->lookAhead('array<')) {
-            $this->expect('array<');
+        if ($this->lookAhead('array<') || $this->lookAhead('non-empty-array<')) {
+            $this->expect($this->lookAhead('array<') ? 'array<' : 'non-empty-array<');
             $key = $this->parseType();
             $this->skipWhitespace();
             if ($this->pos >= $this->len || ',' !== $this->input[$this->pos]) {
@@ -314,10 +348,17 @@ final class PhpDocShapeParser
             return new MapType($key, $value);
         }
 
-        // value-of<ClassName>
+        // value-of<ClassName>, or value-of<self::PREFIX_*> — the values of a set of constants
         if ($this->lookAhead('value-of<')) {
             $this->expect('value-of<');
             $className = $this->parseClassName();
+            if ($this->lookAhead('::')) {
+                $constant = $this->parseClassConstant($className, valueOf: true);
+                $this->skipWhitespace();
+                $this->expect('>');
+
+                return $constant;
+            }
             $this->skipWhitespace();
             $this->expect('>');
 
@@ -344,6 +385,23 @@ final class PhpDocShapeParser
             return $this->parseNumberLiteral();
         }
 
+        // PHPStan's refinements of a scalar — `positive-int`, `non-empty-string`, `class-string<T>`,
+        // `int<0, max>` — keep their spelling; ScalarType::base() says what they refine.
+        foreach (ScalarType::REFINEMENTS as $refinement => $base) {
+            if ($this->lookAhead($refinement) && !$this->continuesName($this->pos + \strlen($refinement))) {
+                $this->pos += \strlen($refinement);
+                $this->skipTypeArguments();
+
+                return new ScalarType($refinement);
+            }
+        }
+        if ($this->lookAhead('int<')) {
+            $this->pos += 3;
+            $this->skipTypeArguments();
+
+            return new ScalarType('int');
+        }
+
         // Scalar types
         foreach (['string', 'int', 'float', 'bool', 'mixed', 'numeric', 'null'] as $scalar) {
             if ($this->lookAhead($scalar) && !$this->isIdentChar($this->pos + \strlen($scalar))) {
@@ -362,10 +420,20 @@ final class PhpDocShapeParser
             }
         }
 
-        // Name reference (IProjectBase, etc.)
+        // Name reference (IProjectBase, etc.), or a class constant: self::STATUS_*, Foo::BAR
+        $start = $this->pos;
         $name = $this->tryParseIdent();
         if (null !== $name) {
+            if ($this->lookAhead('::') || $this->lookAhead('\\')) {
+                $this->pos = $start;
+
+                return $this->parseClassConstant($this->parseClassName(), valueOf: false);
+            }
+
             return new NameRefType($name);
+        }
+        if ($this->lookAhead('\\')) {
+            return $this->parseClassConstant($this->parseClassName(), valueOf: false);
         }
 
         throw new RuntimeException(\sprintf(
@@ -373,6 +441,66 @@ final class PhpDocShapeParser
             $this->pos,
             $this->input,
         ));
+    }
+
+    /**
+     * `self::STATUS_*` or `Foo::BAR`, after the class name has been read. The constants are
+     * looked up later, against the class that owns the shape — the parser has no class context.
+     */
+    private function parseClassConstant(string $className, bool $valueOf): ClassConstantType
+    {
+        $this->expect('::');
+
+        $start = $this->pos;
+        while ($this->pos < $this->len && ($this->isIdentChar($this->pos) || '*' === $this->input[$this->pos])) {
+            $this->pos++;
+        }
+
+        if ($this->pos === $start) {
+            throw new RuntimeException(\sprintf(
+                'Expected a constant name after "%s::" at position %d in "%s"',
+                $className,
+                $this->pos,
+                $this->input,
+            ));
+        }
+
+        return new ClassConstantType($className, \substr($this->input, $start, $this->pos - $start), $valueOf);
+    }
+
+    /**
+     * Skips a refinement's own type arguments — `class-string<Foo>`, `int<0, max>` — which narrow
+     * the value but change nothing TypeScript can say about it.
+     */
+    private function skipTypeArguments(): void
+    {
+        if (!$this->lookAhead('<')) {
+            return;
+        }
+
+        $depth = 0;
+        do {
+            $char = $this->input[$this->pos];
+            if ('<' === $char) {
+                $depth++;
+            } elseif ('>' === $char) {
+                $depth--;
+            }
+            $this->pos++;
+        } while ($depth > 0 && $this->pos < $this->len);
+
+        if ($depth > 0) {
+            throw new RuntimeException(\sprintf('Unclosed type arguments in "%s"', $this->input));
+        }
+    }
+
+    /**
+     * Whether a keyword ending before $pos is really a longer name — `scalars`, or
+     * `positive-int-ish` — rather than the keyword itself.
+     */
+    private function continuesName(int $pos): bool
+    {
+        return $this->isIdentChar($pos) || ($pos < $this->len && '-' === $this->input[$pos]);
     }
 
     private function parseStringLiteral(): string

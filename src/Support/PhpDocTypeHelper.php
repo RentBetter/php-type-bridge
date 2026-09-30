@@ -13,8 +13,10 @@ use PHPStan\PhpDocParser\Parser\TokenIterator;
 use PHPStan\PhpDocParser\Parser\TypeParser;
 use PHPStan\PhpDocParser\ParserConfig;
 use PTGS\TypeBridge\Model\ImportedType;
+use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\LiteralType;
 use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
@@ -23,6 +25,7 @@ use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
+use ReflectionClass;
 use ReflectionProperty;
 use RuntimeException;
 
@@ -152,10 +155,19 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * Resolves the names in a parsed type that only make sense where it was written: imported
+     * aliases become the names they were imported as, and class constants — `self::STATUS_*` —
+     * become the literal values of the constants they match, read from $ownerClass (the class
+     * whose docblock holds the type) when they say `self`.
+     *
      * @param array<string, ImportedType> $imports
      */
-    public function resolveImportedNames(ParsedType $type, array $imports): ParsedType
+    public function resolveImportedNames(ParsedType $type, array $imports, ?string $ownerClass = null): ParsedType
     {
+        if ($type instanceof ClassConstantType) {
+            return $this->resolveClassConstant($type, $ownerClass);
+        }
+
         if ($type instanceof NameRefType) {
             if (isset($imports[$type->name])) {
                 return new NameRefType($imports[$type->name]->targetTypeName);
@@ -166,27 +178,27 @@ final class PhpDocTypeHelper
 
         if ($type instanceof NullableType) {
             return new NullableType(
-                inner: $this->resolveImportedNames($type->inner, $imports),
+                inner: $this->resolveImportedNames($type->inner, $imports, $ownerClass),
                 optional: $type->optional,
             );
         }
 
         if ($type instanceof ListType) {
-            return new ListType($this->resolveImportedNames($type->inner, $imports));
+            return new ListType($this->resolveImportedNames($type->inner, $imports, $ownerClass));
         }
 
         if ($type instanceof MapType) {
             return new MapType(
-                key: $this->resolveImportedNames($type->key, $imports),
-                value: $this->resolveImportedNames($type->value, $imports),
+                key: $this->resolveImportedNames($type->key, $imports, $ownerClass),
+                value: $this->resolveImportedNames($type->value, $imports, $ownerClass),
             );
         }
 
         if ($type instanceof TupleType) {
             return new TupleType(array_map(
-                fn (ParsedType $element): ParsedType => $this->resolveImportedNames($element, $imports),
+                fn (ParsedType $element): ParsedType => $this->resolveImportedNames($element, $imports, $ownerClass),
                 $type->elements,
-            ));
+            ), unsealed: $type->unsealed);
         }
 
         if ($type instanceof ShapeType) {
@@ -194,17 +206,17 @@ final class PhpDocTypeHelper
             foreach ($type->fields as $field) {
                 $fields[] = new ShapeField(
                     name: $field->name,
-                    type: $this->resolveImportedNames($field->type, $imports),
+                    type: $this->resolveImportedNames($field->type, $imports, $ownerClass),
                     optional: $field->optional,
                 );
             }
 
-            return new ShapeType($fields);
+            return new ShapeType($fields, unsealed: $type->unsealed);
         }
 
         if ($type instanceof IntersectionType) {
-            $base = $this->resolveImportedNames($type->base, $imports);
-            $extra = $this->resolveImportedNames($type->extra, $imports);
+            $base = $this->resolveImportedNames($type->base, $imports, $ownerClass);
+            $extra = $this->resolveImportedNames($type->extra, $imports, $ownerClass);
             if (!$base instanceof NameRefType || !$extra instanceof ShapeType) {
                 throw new RuntimeException('Resolved intersection type became invalid after import resolution.');
             }
@@ -217,12 +229,83 @@ final class PhpDocTypeHelper
 
         if ($type instanceof UnionType) {
             return new UnionType(array_map(
-                fn(ParsedType $member): ParsedType => $this->resolveImportedNames($member, $imports),
+                fn(ParsedType $member): ParsedType => $this->resolveImportedNames($member, $imports, $ownerClass),
                 $type->types,
             ));
         }
 
         return $type;
+    }
+
+    /**
+     * The literal values of the constants a `Class::PATTERN` names, as one literal or a union of
+     * them. `value-of<…>` of an array constant takes its elements instead.
+     */
+    private function resolveClassConstant(ClassConstantType $type, ?string $ownerClass): ParsedType
+    {
+        $class = $this->constantClass($type->class, $ownerClass);
+        $pattern = '/^' . str_replace('\\*', '.*', preg_quote($type->pattern, '/')) . '$/';
+
+        $values = [];
+        foreach ((new ReflectionClass($class))->getReflectionConstants() as $constant) {
+            if (1 !== preg_match($pattern, $constant->getName())) {
+                continue;
+            }
+
+            $value = $constant->getValue();
+            foreach ($type->valueOf && \is_array($value) ? array_values($value) : [$value] as $literal) {
+                if (!\is_string($literal) && !\is_int($literal) && !\is_float($literal) && !\is_bool($literal)) {
+                    throw new RuntimeException(\sprintf(
+                        '`%s::%s` matches %s::%s, whose value is not a string, number or bool, so it has no literal type.',
+                        $type->class,
+                        $type->pattern,
+                        $class,
+                        $constant->getName(),
+                    ));
+                }
+                if (!\in_array($literal, $values, true)) {
+                    $values[] = $literal;
+                }
+            }
+        }
+
+        if ([] === $values) {
+            throw new RuntimeException(\sprintf('`%s::%s` matches no constant of %s.', $type->class, $type->pattern, $class));
+        }
+
+        $literals = array_map(static fn(string|int|float|bool $value): LiteralType => new LiteralType($value), $values);
+
+        return 1 === \count($literals) ? $literals[0] : new UnionType($literals);
+    }
+
+    /**
+     * @return class-string
+     */
+    private function constantClass(string $class, ?string $ownerClass): string
+    {
+        if ('self' === $class || 'static' === $class) {
+            if (null === $ownerClass) {
+                throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $class));
+            }
+
+            $class = $ownerClass;
+        }
+
+        $candidates = [ltrim($class, '\\')];
+        if (!str_starts_with($class, '\\') && null !== $ownerClass && null !== $namespace = $this->namespace($ownerClass)) {
+            $candidates[] = $namespace . '\\' . $class;
+        }
+
+        foreach ($candidates as $candidate) {
+            if (class_exists($candidate) || interface_exists($candidate) || enum_exists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        throw new RuntimeException(\sprintf(
+            'Class "%s" in a constant type could not be found. Write self::, or its fully qualified name.',
+            $class,
+        ));
     }
 
     /**

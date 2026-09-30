@@ -141,6 +141,6 @@ final class NoIdSuffixRule implements Rule
             return $this->isStringValued($type->inner);
         }
 
-        return $type instanceof ScalarType && 'string' === $type->type;
+        return $type instanceof ScalarType && 'string' === $type->base();
     }
 }

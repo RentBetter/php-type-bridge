@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Emitter\EmittedBlock;
 use PTGS\TypeBridge\Emitter\EmittedType;
 use PTGS\TypeBridge\Emitter\EmitMode;
 use PTGS\TypeBridge\Emitter\TypeEmitter;
+use PTGS\TypeBridge\Emitter\TypeToTsConverter;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\NullableType;
@@ -54,6 +55,9 @@ final class SelfShapeEmitter implements TypeEmitter
             foreach ($type->parsed->extra->fields as $field) {
                 $lines[] = $this->renderShapeField($field, $type->name, $context, $scope);
             }
+            if ($type->parsed->extra->unsealed) {
+                $lines[] = '  ' . TypeToTsConverter::UNSEALED_INDEX . ';';
+            }
             $lines[] = '}';
 
             return implode("\n", $lines);
@@ -63,6 +67,9 @@ final class SelfShapeEmitter implements TypeEmitter
             $lines = [\sprintf('export interface %s {', $name)];
             foreach ($type->parsed->fields as $field) {
                 $lines[] = $this->renderShapeField($field, $type->name, $context, $scope);
+            }
+            if ($type->parsed->unsealed) {
+                $lines[] = '  ' . TypeToTsConverter::UNSEALED_INDEX . ';';
             }
             $lines[] = '}';
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Shape;
 
+use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
@@ -40,6 +41,9 @@ final class ShapeRenderer
         foreach ($shape->fields as $field) {
             $lines[] = self::INDENT . $field->name . ($field->optional ? '?' : '') . ': ' . $this->render($field->type) . ',';
         }
+        if ($shape->unsealed) {
+            $lines[] = self::INDENT . '...';
+        }
         $lines[] = ' * }';
         $lines[] = ' */';
 
@@ -59,7 +63,10 @@ final class ShapeRenderer
             $type instanceof NullableType => $this->renderNullable($type),
             $type instanceof UnionType => $this->renderUnion($type),
             $type instanceof IntersectionType => $this->render($type->base) . ' & ' . $this->render($type->extra),
-            $type instanceof TupleType => 'array{' . implode(', ', array_map($this->render(...), $type->elements)) . '}',
+            $type instanceof TupleType => 'array{' . implode(', ', [...array_map($this->render(...), $type->elements), ...($type->unsealed ? ['...'] : [])]) . '}',
+            $type instanceof ClassConstantType => $type->valueOf
+                ? 'value-of<' . $type->class . '::' . $type->pattern . '>'
+                : $type->class . '::' . $type->pattern,
             $type instanceof ShapeType => $this->renderInlineShape($type),
             default => throw new RuntimeException(\sprintf('Cannot render type "%s".', $type::class)),
         };
@@ -84,6 +91,9 @@ final class ShapeRenderer
         $fields = [];
         foreach ($type->fields as $field) {
             $fields[] = $field->name . ($field->optional ? '?' : '') . ': ' . $this->render($field->type);
+        }
+        if ($type->unsealed) {
+            $fields[] = '...';
         }
 
         return 'array{' . implode(', ', $fields) . '}';

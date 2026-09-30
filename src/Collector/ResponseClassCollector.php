@@ -85,7 +85,7 @@ final class ResponseClassCollector
                 }
 
                 $rawType = $this->resolvePropertyType($property);
-                $parsed = $this->docHelper->resolveImportedNames($this->parser->parse($rawType), $imports);
+                $parsed = $this->docHelper->resolveImportedNames($this->parser->parse($rawType), $imports, $className);
                 $properties[] = new CollectedResponseProperty(
                     name: $property->getName(),
                     rawType: $rawType,
