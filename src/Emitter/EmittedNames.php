@@ -27,7 +27,8 @@ final readonly class EmittedNames
     public function typeDeclarationName(CollectedType $type): string
     {
         $name = $type->name;
-        if (enum_exists($type->ownerClass)) {
+        // Only its _self is the enum's shape; any other alias it declares keeps its own name.
+        if ($type->isSelf && enum_exists($type->ownerClass)) {
             $name = $this->naming->enumShapeName($this->enumResolver->getShortName($type->ownerClass));
         }
 
