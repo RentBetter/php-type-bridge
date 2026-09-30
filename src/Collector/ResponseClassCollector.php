@@ -131,12 +131,9 @@ final class ResponseClassCollector
 
     private function resolvePropertyType(ReflectionProperty $property): string
     {
-        $docComment = $property->getDocComment();
-        if (false !== $docComment) {
-            $docType = $this->docHelper->extractVarType($docComment);
-            if (null !== $docType && '' !== $docType) {
-                return $docType;
-            }
+        $docType = $this->docHelper->extractPropertyType($property);
+        if (null !== $docType) {
+            return $docType;
         }
 
         $type = $property->getType();

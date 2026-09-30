@@ -52,6 +52,18 @@ final class ContractFormTypeRuleTest extends RuleTestCase
         ], []);
     }
 
+    /**
+     * A promoted property is typed by the constructor's `@param` as validly as by its own
+     * `@var`. Read from `@var` alone, the list type was invisible and the property looked
+     * like it held a scalar.
+     */
+    public function testAcceptsAMultipleEnumBoundToAPromotedListProperty(): void
+    {
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Form/Positive/PromotedMultipleEnumRequestType.php',
+        ], []);
+    }
+
     public function testRejectsAMultipleEnumBoundToAScalarProperty(): void
     {
         $this->analyse([
