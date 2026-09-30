@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\ImportedType;
+use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
@@ -68,6 +69,7 @@ final class TypeScriptEmitter
      *   shape can name a primitive without every file importing it. Emitted into each domain
      *   that references one, and registered in that domain's symbol map so a class-declared
      *   `@phpstan-type` of the same name collides loudly instead of shadowing it.
+     * @param list<string> $wrapperTypes generics that emit as the type they wrap (`included<T>`)
      */
     public function __construct(
         private readonly EnumResolver $enumResolver,
@@ -78,6 +80,7 @@ final class TypeScriptEmitter
         ?DomainAssembler $assembler = null,
         private readonly SortStrategy $importSort = new AlphabeticalOrder(),
         private readonly array $typeAliases = [],
+        private readonly array $wrapperTypes = [],
     ) {
         $this->naming = $naming ?? new TypeScriptNaming();
         $this->preserveNullIndex = array_fill_keys($preserveNull, true);
@@ -105,7 +108,7 @@ final class TypeScriptEmitter
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses));
         $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry);
-        $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes);
+        $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->wrapperTypes);
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
         sort($allDomains);
@@ -589,6 +592,10 @@ final class TypeScriptEmitter
 
         if ($type instanceof IntersectionType) {
             return [$type->base, $type->extra];
+        }
+
+        if ($type instanceof GenericType) {
+            return $type->arguments;
         }
 
         return [];

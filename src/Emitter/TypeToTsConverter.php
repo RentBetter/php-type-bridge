@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Emitter;
 
 use PTGS\TypeBridge\Parser\ClassConstantType;
+use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
@@ -38,11 +39,15 @@ final readonly class TypeToTsConverter
      */
     public const string UNSEALED_INDEX = '[key: string]: unknown';
 
+    /**
+     * @param list<string> $wrapperTypes generics that emit as the type they wrap (`included<T>`)
+     */
     public function __construct(
         private EmittedNames $names,
         private SymbolRegistry $symbols,
         private ?EnumIdSymbolResolver $enumIds = null,
         private ?ClassTypeResolver $classTypes = null,
+        private array $wrapperTypes = [],
     ) {}
 
     public function convert(ParsedType $type, ConversionScope $scope): string
@@ -169,6 +174,21 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof IntersectionType) {
             return $this->convert($type->base, $scope) . ' & ' . $this->convert($type->extra, $scope);
+        }
+
+        // A generic that only means something to PHPStan, listed in config: its type argument.
+        if ($type instanceof GenericType) {
+            if (!\in_array($type->name, $this->wrapperTypes, true)) {
+                throw new RuntimeException(\sprintf(
+                    'Unknown generic `%s<…>`. If it only wraps its type for PHPStan\'s sake — as a project\'s own extension might — list it in the `wrapperTypes` config.',
+                    $type->name,
+                ));
+            }
+            if (1 !== \count($type->arguments)) {
+                throw new RuntimeException(\sprintf('`%s<…>` wraps one type; it was given %d.', $type->name, \count($type->arguments)));
+            }
+
+            return $this->convert($type->arguments[0], $scope);
         }
 
         if ($type instanceof ClassConstantType) {

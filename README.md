@@ -191,8 +191,11 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `self::STATUS_*`, `Foo::BAR`, `value-of<self::MODE_*>` | the constants' values: `'draft' \| 'live'` |
 | `(A \| B)`, `Base & array{...}` | `A \| B`, `interface … extends Base` |
 | `MoneyInterface`, `\Acme\Money` (a class) | the JSON it serialises to — see below |
+| `included<T>` — a generic listed in the `wrapperTypes` config | `T` |
 
 A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written.
+
+A project may define generics of its own for PHPStan — `included<T>`, read by its extension as `T|Optional<T>` for a key sent only when asked for. They mean nothing to TypeScript beyond the type they wrap: list them in config as `'wrapperTypes' => ['included']`. Any other generic TypeBridge does not know is an error.
 
 ### Classes in shapes
 

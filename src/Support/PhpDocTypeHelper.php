@@ -15,6 +15,7 @@ use PHPStan\PhpDocParser\Parser\TypeParser;
 use PHPStan\PhpDocParser\ParserConfig;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\ClassConstantType;
+use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
@@ -309,6 +310,13 @@ final class PhpDocTypeHelper
             return new UnionType(array_map(
                 fn(ParsedType $member): ParsedType => $this->mapLeaves($member, $leaf),
                 $type->types,
+            ));
+        }
+
+        if ($type instanceof GenericType) {
+            return new GenericType($type->name, array_map(
+                fn(ParsedType $argument): ParsedType => $this->mapLeaves($argument, $leaf),
+                $type->arguments,
             ));
         }
 
