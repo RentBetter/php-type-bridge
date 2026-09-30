@@ -10,6 +10,8 @@ final readonly class CollectedType
 {
     /**
      * @param list<ImportedType> $imports
+     * @param bool $isSelf declared as `_self`: the shape of the owner class itself, so a shape
+     *        that names the class means this
      */
     public function __construct(
         public string $name,
@@ -19,5 +21,6 @@ final readonly class CollectedType
         public string $domain,
         public string $ownerClass,
         public array $imports = [],
+        public bool $isSelf = false,
     ) {}
 }

@@ -42,6 +42,7 @@ final readonly class TypeToTsConverter
         private EmittedNames $names,
         private SymbolRegistry $symbols,
         private ?EnumIdSymbolResolver $enumIds = null,
+        private ?ClassTypeResolver $classTypes = null,
     ) {}
 
     public function convert(ParsedType $type, ConversionScope $scope): string
@@ -116,6 +117,16 @@ final readonly class TypeToTsConverter
         if ($type instanceof NameRefType) {
             if (isset($scope->importedSymbols[$type->name])) {
                 return $scope->importedSymbols[$type->name];
+            }
+
+            // A name no alias answers to, written where it means a class: the JSON the class
+            // serialises to. An alias of the same name always wins.
+            if (null !== $type->class && null !== $this->classTypes && !$this->symbols->has($scope->domain, $type->name)) {
+                $symbol = $this->classTypes->resolve($type->class);
+
+                return $symbol->targetDomain === $scope->domain
+                    ? $symbol->canonicalName
+                    : $scope->foreignAliases[$symbol->targetDomain][$symbol->canonicalName] ?? $symbol->canonicalName;
             }
 
             return $this->symbols->resolve($scope->domain, $type->name);

@@ -190,8 +190,21 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `array{int, string, ...}` (unsealed tuple) | `[number, string, ...unknown[]]` |
 | `self::STATUS_*`, `Foo::BAR`, `value-of<self::MODE_*>` | the constants' values: `'draft' \| 'live'` |
 | `(A \| B)`, `Base & array{...}` | `A \| B`, `interface … extends Base` |
+| `MoneyInterface`, `\Acme\Money` (a class) | the JSON it serialises to — see below |
 
-A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written. One-argument `array<V>` is still refused: PHPStan reads it as `array<array-key, V>`, so write that — or `list<V>` / `array<string, V>` when that is what it is.
+A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written.
+
+### Classes in shapes
+
+PHPStan-typed code often holds objects in an array that json_encode then serialises — `array{total: MoneyInterface}` — so a shape may name a class, and it means the JSON that class serialises to:
+
+- its `_self` shape, or the nearest parent's or interface's when it declares none (`Money implements MoneyInterface` takes `MoneyInterface`'s), imported from that class's module;
+- otherwise, the type the emitter that claims the class publishes for it — an emitter implementing `TypeSymbolEmitter`, as a serialisable enum's does;
+- otherwise it is an error that says so.
+
+The name resolves as PHP resolves it: through the file's `use` statements, in its namespace, or fully qualified. An alias of the same name always wins, so nothing that resolved before changes.
+
+Shapes that type PHP arrays which are never serialised — working data holding `DateTimeImmutable`s or entities — have no JSON to describe. Mark the class that declares them `#[PhpStanOnly]` and TypeBridge emits none of its aliases — or `#[PhpStanOnly(['Draft'])]` for only those named, when the class also declares shapes that are sent. One-argument `array<V>` is still refused: PHPStan reads it as `array<array-key, V>`, so write that — or `list<V>` / `array<string, V>` when that is what it is.
 
 ## PHPStan
 

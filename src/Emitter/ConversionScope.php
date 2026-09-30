@@ -14,9 +14,12 @@ final readonly class ConversionScope
 {
     /**
      * @param array<string, string> $importedSymbols local alias for each imported type name
+     * @param array<string, array<string, string>> $foreignAliases the module's local name for a
+     *        symbol imported from another domain, where the plain name collides with a local one
      */
     public function __construct(
         public string $domain,
         public array $importedSymbols = [],
+        public array $foreignAliases = [],
     ) {}
 }
