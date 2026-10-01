@@ -20,8 +20,9 @@ use ReflectionMethod;
 /**
  * Built-in convention: a controller method carrying #[ApiResponses] emits its
  * request-input aliases (// Endpoint inputs) and a status-keyed result map
- * (// Endpoint results). The shared `EndpointResult<M>` helper is emitted once
- * per module by the orchestrator via {@see self::RESULT_HELPER}.
+ * (// Endpoint results). The shared `EndpointResult<M>` helper is declared by the
+ * orchestrator via {@see self::RESULT_HELPER}: once in the root module when there is one,
+ * once per module otherwise.
  */
 #[AsTypeBridgeEmitter('endpoint-contracts', mode: EmitMode::Referenced)]
 final class EndpointContractEmitter implements TypeEmitter

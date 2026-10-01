@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Emitter;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
+use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Config\OutputStructure;
+use PTGS\TypeBridge\Emitter\Builtin\EndpointContractEmitter;
 use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
@@ -48,6 +51,33 @@ final class RootModuleTest extends TestCase
         self::assertStringContainsString('export interface Base', $root);
         self::assertStringContainsString('export type UuidStr = string;', $root);
         self::assertStringContainsString(TypeScriptEmitter::INCLUDING_HELPER, $root);
+    }
+
+    public function test_endpoint_result_is_declared_once_in_the_root_module_and_imported(): void
+    {
+        $src = __DIR__ . '/../Fixture/Fixtures';
+        $responseCollector = new ResponseClassCollector();
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($src);
+
+        $output = (new TypeScriptEmitter(
+            enumResolver: $enumResolver,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output', new OutputStructure(rootModule: 'genTypes.ts')),
+            preserveNull: ['ProjectAdminView.internalNotes'],
+        ))->emit(
+            (new PhpDocTypeCollector())->collect($src),
+            $responseCollector->collect($src),
+            (new EndpointContractCollector())->collect($src, $responseCollector->collectIndex($src)),
+        );
+
+        self::assertStringContainsString(EndpointContractEmitter::RESULT_HELPER, $output['']);
+        foreach ($output as $domain => $module) {
+            if ('' === $domain || !str_contains($module, 'EndpointResult<')) {
+                continue;
+            }
+            self::assertStringNotContainsString('export type EndpointResult', $module, "{$domain} declares its own");
+            self::assertMatchesRegularExpression("/import type \\{[^}]*\\bEndpointResult\\b[^}]*\\} from '\\.\\.\\/genTypes';/", $module, "{$domain} imports it");
+        }
     }
 
     public function test_without_one_each_module_declares_its_own(): void
