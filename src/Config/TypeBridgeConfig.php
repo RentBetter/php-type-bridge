@@ -42,9 +42,8 @@ final readonly class TypeBridgeConfig
      * @param array<string, string> $typeAliases project-wide alias name => TypeScript type (e.g.
      *   "UuidStr" => "string"). Declared here rather than as a @phpstan-type on a class, so a
      *   shape can reference the name without every file importing it.
-     * @param list<string> $wrapperTypes generics that only mean something to PHPStan — a project's
-     *   own `included<T>`, read by its extension as `T|Optional<T>` — and so emit as the type they
-     *   wrap. Any other generic TypeBridge does not know is an error.
+     * @param IncludeConvention $includes how the project marks what a response only sends when a
+     *   request asks for it — the `included<T>` generic, the side-load attribute
      * @param string|null $routing the application's routing entrypoint (e.g. `config/routes.yaml`),
      *   relative to $projectDir. When set, an #[McpTool] endpoint's path is the one Symfony
      *   actually serves — routing-config prefixes and class-level #[Route] included — rather
@@ -66,7 +65,7 @@ final readonly class TypeBridgeConfig
         public ?string $mcpDescriptionAttribute = null,
         public ?string $mcpDescriptionProperty = null,
         public array $typeAliases = [],
-        public array $wrapperTypes = [],
+        public IncludeConvention $includes = new IncludeConvention(),
         public ?string $routing = null,
         public ?string $projectDir = null,
     ) {}
@@ -91,7 +90,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config, ?string $projectDir = null): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'typeAliases', 'wrapperTypes', 'routing'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'typeAliases', 'includes', 'routing'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -115,7 +114,7 @@ final readonly class TypeBridgeConfig
         $mcpDescriptionAttribute = self::attributeClassName($config['mcpDescriptionAttribute'] ?? null, 'mcpDescriptionAttribute');
         $mcpDescriptionProperty = self::attributePropertyName($config['mcpDescriptionProperty'] ?? null, 'mcpDescriptionProperty', $mcpDescriptionAttribute, 'mcpDescriptionAttribute');
         $typeAliases = self::typeAliasesMap($config['typeAliases'] ?? []);
-        $wrapperTypes = self::wrapperTypesList($config['wrapperTypes'] ?? []);
+        $includes = IncludeConvention::fromArray(self::stringKeyedArray($config['includes'] ?? [], 'includes'));
         $routing = self::routingPath($config['routing'] ?? null, $projectDir);
 
         return new self(
@@ -128,7 +127,7 @@ final readonly class TypeBridgeConfig
             mcpDescriptionAttribute: $mcpDescriptionAttribute,
             mcpDescriptionProperty: $mcpDescriptionProperty,
             typeAliases: $typeAliases,
-            wrapperTypes: $wrapperTypes,
+            includes: $includes,
             routing: $routing,
             projectDir: $projectDir,
         );
@@ -246,28 +245,6 @@ final readonly class TypeBridgeConfig
                 throw new RuntimeException('TypeBridge config key "requirementTypes" must map requirement-regex strings to TS type strings.');
             }
             $result[$regex] = $tsType;
-        }
-
-        return $result;
-    }
-
-    /**
-     * Generic names that wrap a type for PHPStan's sake and emit as the type they wrap.
-     *
-     * @return list<string>
-     */
-    private static function wrapperTypesList(mixed $value): array
-    {
-        if (!is_array($value) || !array_is_list($value)) {
-            throw new RuntimeException('TypeBridge config key "wrapperTypes" must be a list of generic names.');
-        }
-
-        $result = [];
-        foreach ($value as $name) {
-            if (!is_string($name) || 1 !== preg_match('/^[A-Za-z_][A-Za-z0-9_-]*$/', $name)) {
-                throw new RuntimeException('TypeBridge config key "wrapperTypes" must list generic names, such as "included".');
-            }
-            $result[] = $name;
         }
 
         return $result;

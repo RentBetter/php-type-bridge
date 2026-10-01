@@ -191,11 +191,44 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `self::STATUS_*`, `Foo::BAR`, `value-of<self::MODE_*>` | the constants' values: `'draft' \| 'live'` |
 | `(A \| B)`, `Base & array{...}` | `A \| B`, `interface … extends Base` |
 | `MoneyInterface`, `\Acme\Money` (a class) | the JSON it serialises to — see below |
-| `included<T>` — a generic listed in the `wrapperTypes` config | `T` |
+| `included<T>` — a generic listed in `includes.types` | `T`, on a key absent unless asked for — see below |
 
 A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written.
 
-A project may define generics of its own for PHPStan — `included<T>`, read by its extension as `T|Optional<T>` for a key sent only when asked for. They mean nothing to TypeScript beyond the type they wrap: list them in config as `'wrapperTypes' => ['included']`. Any other generic TypeBridge does not know is an error.
+### Keys sent only when asked for
+
+An API can leave parts of a response out unless the request asks for them (`?include=checks.debug`), and mark those keys in its shapes with a generic of its own — `included<T>`, which its PHPStan extension reads as `T|Optional<T>`. Whether such a key is there depends on two things, and the shape says which:
+
+| Shape key | Present on the wire when… | Depends on |
+|---|---|---|
+| `debug: included<mixed>` | exactly when the request includes it | the request only |
+| `documentation?: included<string>` | the request includes it **and** there is a value | the request **and** the data |
+| `notifiedAt?: DateTimeData` | there is a value | the data only |
+| `name: string` | always | nothing |
+
+The key's `?` carries the difference, and PHPStan keeps it honest: a required key whose value could be null fails analysis, since the null would be dropped before the response is sent. A side-loaded collection is in the first row by construction — asked for, it is always there, as an empty list when nothing is referenced.
+
+Tell TypeBridge how the project marks them:
+
+```php
+'includes' => [
+    'types' => ['included'],                    // the include generics
+    'sideLoadAttribute' => SideLoad::class,     // the attribute on a side-loaded response property
+],
+```
+
+An included key always emits as optional, since it is absent unless asked for. The keys in the first row — required `included<>` keys, and side-loads — are listed in a `…Included` union beside the shape or response, and each module that declares one also declares a helper that makes them present:
+
+```ts
+export interface SystemCheckData { name: string; debug?: unknown; documentation?: string; }
+export type SystemCheckDataIncluded = 'debug';
+export type Including<T, K extends keyof T> = T & Required<Pick<T, K>>;
+
+// fetched with ?include=checks.debug
+const check: Including<SystemCheckData, 'debug'> = …;   // check.debug is there; check.documentation may not be
+```
+
+Any other generic TypeBridge does not know is an error that names `includes.types`.
 
 ### Classes in shapes
 

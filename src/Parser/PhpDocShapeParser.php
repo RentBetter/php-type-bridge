@@ -19,7 +19,7 @@ use RuntimeException;
  *   Suffixed   = (SingleType | '(' TypeDef ')') '[]'*
  *   SingleType = '?' SingleType | 'value-of<' (ClassName | Const) '>' | 'id-of<' ClassName '>' | Refinement
  *              | ScalarType | Literal | Shape | ('list<' | 'non-empty-list<') Type '>' | Map | Const | Generic | NameRef
- *   Generic    = Ident '<' Type (',' Type)* '>'                               (included<T>: emitted per `wrapperTypes`)
+ *   Generic    = Ident '<' Type (',' Type)* '>'                               (included<T>: see `includes.types` config)
  *   Map        = ('array<' | 'non-empty-array<') Type ',' Type '>'
  *   Const      = ClassName '::' ConstPattern                                    (self::STATUS_*, Foo::BAR)
  *   Refinement = ScalarType::REFINEMENTS key TypeArgs? | 'int<' … '>'         (positive-int, class-string<T>)

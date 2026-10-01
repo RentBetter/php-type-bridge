@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Emitter\EmittedBlock;
 use PTGS\TypeBridge\Emitter\EmittedType;
 use PTGS\TypeBridge\Emitter\EmitMode;
 use PTGS\TypeBridge\Emitter\TypeEmitter;
+use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Emitter\TypeToTsConverter;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
@@ -60,7 +61,7 @@ final class SelfShapeEmitter implements TypeEmitter
             }
             $lines[] = '}';
 
-            return implode("\n", $lines);
+            return implode("\n", [...$lines, ...self::includedUnion($name, $type->parsed->extra, $context)]);
         }
 
         if ($type->parsed instanceof ShapeType) {
@@ -73,17 +74,37 @@ final class SelfShapeEmitter implements TypeEmitter
             }
             $lines[] = '}';
 
-            return implode("\n", $lines);
+            return implode("\n", [...$lines, ...self::includedUnion($name, $type->parsed, $context)]);
         }
 
         return \sprintf('export type %s = %s;', $name, $context->convert($type->parsed, $scope));
+    }
+
+    /**
+     * `export type {Shape}Included = 'a' | 'b';` — the included keys that are present whenever the
+     * request asks for them: those whose PHP key is required. An included key that is optional in
+     * PHP may still be absent, so it is not listed.
+     *
+     * @return list<string>
+     */
+    private static function includedUnion(string $name, ShapeType $shape, EmitContext $context): array
+    {
+        $keys = [];
+        foreach ($shape->fields as $field) {
+            if (!$field->optional && $context->converter->isIncluded($field->type)) {
+                $keys[] = "'" . $field->name . "'";
+            }
+        }
+
+        return [] === $keys ? [] : ['', \sprintf('export type %s%s = %s;', $name, TypeScriptEmitter::INCLUDED_SUFFIX, implode(' | ', $keys))];
     }
 
     private function renderShapeField(ShapeField $field, string $shapeName, EmitContext $context, ConversionScope $scope): string
     {
         $this->assertNullableMatchesPreserveNullConfig($field, $shapeName, $context);
 
-        $optional = $field->optional;
+        // An included key is absent unless the request asks for it, whatever its PHP spelling.
+        $optional = $field->optional || $context->converter->isIncluded($field->type);
         $type = $field->type;
         if ($type instanceof NullableType && $type->optional) {
             $optional = true;
