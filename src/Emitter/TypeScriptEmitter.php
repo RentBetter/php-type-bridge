@@ -331,8 +331,10 @@ final class TypeScriptEmitter
             }
         }
 
+        // Helpers every module with endpoints shares, declared once like the aliases.
+        $helpers = [];
         if ([] !== $contracts) {
-            $blocks[] = new EmittedBlock(50, '// Endpoint results', EndpointContractEmitter::RESULT_HELPER);
+            $helpers[] = new EmittedBlock(50, '// Endpoint results', EndpointContractEmitter::RESULT_HELPER, 'EndpointResult');
 
             $seenControllers = [];
             foreach ($contracts as $contract) {
@@ -347,10 +349,10 @@ final class TypeScriptEmitter
             }
         }
 
-        $shared = [...$this->typeAliasBlocks($blocks), ...$this->includingBlocks($blocks)];
+        $shared = [...$this->typeAliasBlocks($blocks), ...$this->includingBlocks($blocks), ...$helpers];
         if ($this->domainMapper->hasRootModule()) {
-            // Declared once, in the root module; the aliases this module uses are imported from it.
-            // The `Including` helper is only declared — consumers import it themselves.
+            // Declared once, in the root module; what this module uses — the aliases, `EndpointResult`
+            // — is imported from it. The `Including` helper is only declared: consumers import it.
             foreach ($shared as $block) {
                 $rootBlocks[$block->sortKey ?? $block->code] = $block;
                 if ('Including' !== $block->sortKey && null !== $block->sortKey) {
