@@ -266,6 +266,7 @@ The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` helper are the 
 PHPStan-typed code often holds objects in an array that json_encode then serialises — `array{total: MoneyInterface}` — so a shape may name a class, and it means the JSON that class serialises to:
 
 - its `_self` shape, or the nearest parent's or interface's when it declares none (`Money implements MoneyInterface` takes `MoneyInterface`'s), imported from that class's module;
+- or the type it imports as its `_self`, when what it serialises to is declared elsewhere — `@phpstan-import-type MoneyData from AbstractV2Normalizer as _self`. The shape is then `MoneyData`, wherever it is written, and the class emits nothing under its own name, so a client has the one type to use;
 - otherwise, the type the emitter that claims the class publishes for it — an emitter implementing `TypeSymbolEmitter`, as a serialisable enum's does;
 - otherwise it is an error that says so.
 

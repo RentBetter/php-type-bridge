@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Emitter;
 
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
+use PTGS\TypeBridge\Model\ImportedType;
 use ReflectionClass;
 use RuntimeException;
 
@@ -13,15 +14,22 @@ use RuntimeException;
  * The TypeScript type for a class named in a shape: the JSON the class serialises to.
  *
  * `total: MoneyInterface` in a shape means the object PHPStan sees there, and json_encode writes
- * what that object serialises itself to. That is declared by the class's `_self` — or, when it
- * has none of its own, by the nearest parent or interface that does, as `MoneyModelV2` gets its
- * shape from `MoneyInterface`. Failing that, the emitter that claims the class may publish the
+ * what that object serialises itself to. That is declared by the class's `_self` — written out,
+ * or imported from where the shape is declared (`@phpstan-import-type MoneyData from
+ * AbstractV2Normalizer as _self`), when the class then emits nothing under its own name — or, when
+ * it has neither, by the nearest parent or interface that does. Failing that, the emitter that claims the class may publish the
  * type it writes for it: an enum's, typically.
  */
 final class ClassTypeResolver
 {
     /** @var array<string, CollectedType> keyed by the class that declares the `_self` */
     private array $selfShapes = [];
+
+    /** @var array<string, ImportedType> keyed by the class that imports its `_self` */
+    private array $selfImports = [];
+
+    /** @var array<string, CollectedDomain> */
+    private array $domains;
 
     /** @var array<string, EmitImport> */
     private array $resolved = [];
@@ -34,12 +42,14 @@ final class ClassTypeResolver
         private readonly EmittedNames $names,
         private readonly EmitterRegistry $registry,
     ) {
+        $this->domains = $domains;
         foreach ($domains as $domain) {
             foreach ($domain->types as $type) {
                 if ($type->isSelf) {
                     $this->selfShapes[$type->ownerClass] = $type;
                 }
             }
+            $this->selfImports += $domain->selfImports;
         }
     }
 
@@ -61,6 +71,10 @@ final class ClassTypeResolver
 
                 return new EmitImport($shape->domain, $this->names->typeDeclarationName($shape));
             }
+
+            if (isset($this->selfImports[$candidate])) {
+                return $this->importedSelf($candidate, $this->selfImports[$candidate]);
+            }
         }
 
         $emitter = $this->registry->typeSymbolEmitterFor($reflection);
@@ -75,6 +89,24 @@ final class ClassTypeResolver
             . 'never serialised, mark that shape\'s class #[PhpStanOnly].',
             $class,
         ));
+    }
+
+    /**
+     * The type a class imports as its `_self`, under the name its declaring module emits it as.
+     */
+    private function importedSelf(string $class, ImportedType $import): EmitImport
+    {
+        $target = $this->domains[$import->targetDomain]->types[$import->targetTypeName] ?? null;
+        if (null === $target) {
+            throw new RuntimeException(\sprintf(
+                '%s imports %s as its `_self`, but %s declares no such type that is emitted.',
+                $class,
+                $import->targetTypeName,
+                $import->targetClass,
+            ));
+        }
+
+        return new EmitImport($target->domain, $this->names->typeDeclarationName($target));
     }
 
     /**

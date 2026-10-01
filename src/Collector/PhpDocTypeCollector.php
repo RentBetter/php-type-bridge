@@ -44,7 +44,10 @@ final class PhpDocTypeCollector
             if (null !== $phpStanOnly) {
                 $definitions = array_filter($definitions, static fn(string $alias): bool => !$phpStanOnly->covers($alias), \ARRAY_FILTER_USE_KEY);
             }
-            if ([] === $definitions) {
+            // A class may declare what it serialises to by importing a type as its `_self`
+            // rather than writing the shape itself; it then has nothing of its own to emit.
+            $importsSelf = !isset($definitions['_self']) && 1 === preg_match('/@(?:phpstan|psalm)-import-type\s+\S+\s+from\s+\S+\s+as\s+_self\b/', $content);
+            if ([] === $definitions && !$importsSelf) {
                 continue;
             }
 
@@ -62,6 +65,10 @@ final class PhpDocTypeCollector
 
             $domain = $this->domainGuesser->guess($srcDir, $file);
             $domains[$domain] ??= new CollectedDomain($domain);
+
+            if ($importsSelf && isset($imports['_self'])) {
+                $domains[$domain]->selfImports[$className] = $imports['_self'];
+            }
 
             foreach ($definitions as $alias => $definition) {
                 $emittedName = $this->emittedTypeName($alias, $className);
