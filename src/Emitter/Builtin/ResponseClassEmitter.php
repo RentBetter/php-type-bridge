@@ -11,8 +11,10 @@ use PTGS\TypeBridge\Emitter\EmittedBlock;
 use PTGS\TypeBridge\Emitter\EmittedType;
 use PTGS\TypeBridge\Emitter\EmitMode;
 use PTGS\TypeBridge\Emitter\TypeEmitter;
+use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use ReflectionClass;
+use ReflectionProperty;
 
 /**
  * Built-in convention: a class implementing {@see ApiResponse} emits as a response
@@ -44,17 +46,41 @@ final class ResponseClassEmitter implements TypeEmitter
             return \sprintf('export type %s = null;', $context->names->responseDeclarationName($response));
         }
 
-        $lines = [\sprintf('export interface %s {', $context->names->responseDeclarationName($response))];
+        $name = $context->names->responseDeclarationName($response);
+        $lines = [\sprintf('export interface %s {', $name)];
+        $included = [];
         foreach ($response->properties as $property) {
+            $isIncluded = $context->converter->isIncluded($property->parsed);
             $lines[] = \sprintf(
                 '  %s%s: %s;',
                 $property->name,
-                $property->optional ? '?' : '',
+                $property->optional || $isIncluded ? '?' : '',
                 $context->convert($property->parsed, $scope),
             );
+
+            // Present whenever it is asked for: a side-load (an empty list when nothing is
+            // referenced), or an included value whose PHP property is not nullable.
+            if (self::isSideLoad($response->className, $property->name, $context) || ($isIncluded && !$property->optional)) {
+                $included[] = "'" . $property->name . "'";
+            }
         }
         $lines[] = '}';
 
+        if ([] !== $included) {
+            $lines[] = '';
+            $lines[] = \sprintf('export type %s%s = %s;', $name, TypeScriptEmitter::INCLUDED_SUFFIX, implode(' | ', $included));
+        }
+
         return implode("\n", $lines);
+    }
+
+    private static function isSideLoad(string $class, string $property, EmitContext $context): bool
+    {
+        $attribute = $context->converter->includes->sideLoadAttribute;
+        if (null === $attribute || !class_exists($class) || !property_exists($class, $property)) {
+            return false;
+        }
+
+        return [] !== (new ReflectionProperty($class, $property))->getAttributes($attribute);
     }
 }

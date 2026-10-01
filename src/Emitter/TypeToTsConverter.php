@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Emitter;
 
+use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Parser\ClassConstantType;
+use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
@@ -38,12 +40,25 @@ final readonly class TypeToTsConverter
      */
     public const string UNSEALED_INDEX = '[key: string]: unknown';
 
+    /**
+     * @param IncludeConvention $includes what marks a key that is only sent when asked for
+     */
     public function __construct(
         private EmittedNames $names,
         private SymbolRegistry $symbols,
         private ?EnumIdSymbolResolver $enumIds = null,
         private ?ClassTypeResolver $classTypes = null,
+        public IncludeConvention $includes = new IncludeConvention(),
     ) {}
+
+    /**
+     * Whether a key of this type is only sent when the request asks for it: it is wrapped in
+     * one of the project's include generics (`included<T>`).
+     */
+    public function isIncluded(ParsedType $type): bool
+    {
+        return $type instanceof GenericType && $this->includes->isIncludeType($type->name);
+    }
 
     public function convert(ParsedType $type, ConversionScope $scope): string
     {
@@ -147,7 +162,7 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof ShapeType) {
             $fields = array_map(function (ShapeField $field) use ($scope): string {
-                $optional = $field->optional;
+                $optional = $field->optional || $this->isIncluded($field->type);
                 $fieldType = $field->type;
                 if ($fieldType instanceof NullableType && $fieldType->optional) {
                     $optional = true;
@@ -169,6 +184,21 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof IntersectionType) {
             return $this->convert($type->base, $scope) . ' & ' . $this->convert($type->extra, $scope);
+        }
+
+        // An include generic (`included<T>`) is its type; the key it sits on is what is optional.
+        if ($type instanceof GenericType) {
+            if (!$this->includes->isIncludeType($type->name)) {
+                throw new RuntimeException(\sprintf(
+                    'Unknown generic `%s<…>`. If it marks a key that is only sent when a request asks for it, list it in the `includes.types` config.',
+                    $type->name,
+                ));
+            }
+            if (1 !== \count($type->arguments)) {
+                throw new RuntimeException(\sprintf('`%s<…>` wraps one type; it was given %d.', $type->name, \count($type->arguments)));
+            }
+
+            return $this->convert($type->arguments[0], $scope);
         }
 
         if ($type instanceof ClassConstantType) {

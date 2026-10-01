@@ -65,6 +65,7 @@ final class GenerateTypesCommand extends Command
             assembler: new DomainAssembler($config->output->header, $config->output->declarationOrder->strategy()),
             importSort: $config->output->importOrder->strategy(),
             typeAliases: $config->typeAliases,
+            includes: $config->includes,
         );
 
         $files = [];

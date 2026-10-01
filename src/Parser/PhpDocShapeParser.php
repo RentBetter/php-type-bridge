@@ -18,7 +18,8 @@ use RuntimeException;
  *   Type       = Suffixed ('|' Suffixed)*
  *   Suffixed   = (SingleType | '(' TypeDef ')') '[]'*
  *   SingleType = '?' SingleType | 'value-of<' (ClassName | Const) '>' | 'id-of<' ClassName '>' | Refinement
- *              | ScalarType | Literal | Shape | ('list<' | 'non-empty-list<') Type '>' | Map | Const | NameRef
+ *              | ScalarType | Literal | Shape | ('list<' | 'non-empty-list<') Type '>' | Map | Const | Generic | NameRef
+ *   Generic    = Ident '<' Type (',' Type)* '>'                               (included<T>: see `includes.types` config)
  *   Map        = ('array<' | 'non-empty-array<') Type ',' Type '>'
  *   Const      = ClassName '::' ConstPattern                                    (self::STATUS_*, Foo::BAR)
  *   Refinement = ScalarType::REFINEMENTS key TypeArgs? | 'int<' … '>'         (positive-int, class-string<T>)
@@ -424,6 +425,9 @@ final class PhpDocShapeParser
         // class constant: self::STATUS_*, Foo::BAR
         $start = $this->pos;
         $name = $this->tryParseIdent();
+        if (null !== $name && $this->lookAhead('<')) {
+            return new GenericType($name, $this->parseTypeArguments());
+        }
         if (null !== $name && !$this->lookAhead('::') && !$this->lookAhead('\\')) {
             return new NameRefType($name);
         }
@@ -467,6 +471,26 @@ final class PhpDocShapeParser
         }
 
         return new ClassConstantType($className, \substr($this->input, $start, $this->pos - $start), $valueOf);
+    }
+
+    /**
+     * `<A, B>` after a generic's name.
+     *
+     * @return list<ParsedType>
+     */
+    private function parseTypeArguments(): array
+    {
+        $this->expect('<');
+        $arguments = [$this->parseType()];
+        $this->skipWhitespace();
+        while ($this->lookAhead(',')) {
+            $this->pos++;
+            $arguments[] = $this->parseType();
+            $this->skipWhitespace();
+        }
+        $this->expect('>');
+
+        return $arguments;
     }
 
     /**

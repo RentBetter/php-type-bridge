@@ -42,6 +42,8 @@ final readonly class TypeBridgeConfig
      * @param array<string, string> $typeAliases project-wide alias name => TypeScript type (e.g.
      *   "UuidStr" => "string"). Declared here rather than as a @phpstan-type on a class, so a
      *   shape can reference the name without every file importing it.
+     * @param IncludeConvention $includes how the project marks what a response only sends when a
+     *   request asks for it — the `included<T>` generic, the side-load attribute
      * @param string|null $routing the application's routing entrypoint (e.g. `config/routes.yaml`),
      *   relative to $projectDir. When set, an #[McpTool] endpoint's path is the one Symfony
      *   actually serves — routing-config prefixes and class-level #[Route] included — rather
@@ -63,6 +65,7 @@ final readonly class TypeBridgeConfig
         public ?string $mcpDescriptionAttribute = null,
         public ?string $mcpDescriptionProperty = null,
         public array $typeAliases = [],
+        public IncludeConvention $includes = new IncludeConvention(),
         public ?string $routing = null,
         public ?string $projectDir = null,
     ) {}
@@ -87,7 +90,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config, ?string $projectDir = null): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'typeAliases', 'routing'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'typeAliases', 'includes', 'routing'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -111,6 +114,7 @@ final readonly class TypeBridgeConfig
         $mcpDescriptionAttribute = self::attributeClassName($config['mcpDescriptionAttribute'] ?? null, 'mcpDescriptionAttribute');
         $mcpDescriptionProperty = self::attributePropertyName($config['mcpDescriptionProperty'] ?? null, 'mcpDescriptionProperty', $mcpDescriptionAttribute, 'mcpDescriptionAttribute');
         $typeAliases = self::typeAliasesMap($config['typeAliases'] ?? []);
+        $includes = IncludeConvention::fromArray(self::stringKeyedArray($config['includes'] ?? [], 'includes'));
         $routing = self::routingPath($config['routing'] ?? null, $projectDir);
 
         return new self(
@@ -123,6 +127,7 @@ final readonly class TypeBridgeConfig
             mcpDescriptionAttribute: $mcpDescriptionAttribute,
             mcpDescriptionProperty: $mcpDescriptionProperty,
             typeAliases: $typeAliases,
+            includes: $includes,
             routing: $routing,
             projectDir: $projectDir,
         );

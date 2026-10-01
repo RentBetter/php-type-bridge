@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Shape;
 
 use PTGS\TypeBridge\Parser\ClassConstantType;
+use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
@@ -64,6 +65,7 @@ final class ShapeRenderer
             $type instanceof UnionType => $this->renderUnion($type),
             $type instanceof IntersectionType => $this->render($type->base) . ' & ' . $this->render($type->extra),
             $type instanceof TupleType => 'array{' . implode(', ', [...array_map($this->render(...), $type->elements), ...($type->unsealed ? ['...'] : [])]) . '}',
+            $type instanceof GenericType => $type->name . '<' . implode(', ', array_map($this->render(...), $type->arguments)) . '>',
             $type instanceof ClassConstantType => $type->valueOf
                 ? 'value-of<' . $type->class . '::' . $type->pattern . '>'
                 : $type->class . '::' . $type->pattern,

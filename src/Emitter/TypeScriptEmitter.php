@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Emitter;
 
+use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Emitter\Builtin\EndpointContractEmitter;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
@@ -11,6 +12,7 @@ use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\ImportedType;
+use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
@@ -41,6 +43,11 @@ use RuntimeException;
  */
 final class TypeScriptEmitter
 {
+    /** Names the union of a shape's or response's keys that are present whenever they are asked for. */
+    public const string INCLUDED_SUFFIX = 'Included';
+
+    public const string INCLUDING_HELPER = 'export type Including<T, K extends keyof T> = T & Required<Pick<T, K>>;';
+
     private EmittedNames $names;
 
     private SymbolRegistry $symbols;
@@ -68,6 +75,7 @@ final class TypeScriptEmitter
      *   shape can name a primitive without every file importing it. Emitted into each domain
      *   that references one, and registered in that domain's symbol map so a class-declared
      *   `@phpstan-type` of the same name collides loudly instead of shadowing it.
+     * @param IncludeConvention $includes what marks the parts of a response sent only when asked for
      */
     public function __construct(
         private readonly EnumResolver $enumResolver,
@@ -78,6 +86,7 @@ final class TypeScriptEmitter
         ?DomainAssembler $assembler = null,
         private readonly SortStrategy $importSort = new AlphabeticalOrder(),
         private readonly array $typeAliases = [],
+        private readonly IncludeConvention $includes = new IncludeConvention(),
     ) {
         $this->naming = $naming ?? new TypeScriptNaming();
         $this->preserveNullIndex = array_fill_keys($preserveNull, true);
@@ -105,7 +114,7 @@ final class TypeScriptEmitter
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses));
         $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry);
-        $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes);
+        $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
         sort($allDomains);
@@ -313,9 +322,28 @@ final class TypeScriptEmitter
             }
         }
 
-        $blocks = array_merge($this->typeAliasBlocks($blocks), $blocks);
+        $blocks = array_merge($this->typeAliasBlocks($blocks), $this->includingBlocks($blocks), $blocks);
 
         return $this->assembler->assemble($this->renderImportLines($domain, $imports, $foreignAliases), $blocks);
+    }
+
+    /**
+     * `Including<T, K>` for a module that declares an `…Included` union: the type with those keys
+     * present, for a response whose request asked for them. Declared per module, like the type
+     * aliases, so each module stays self-contained; the copies are identical.
+     *
+     * @param list<EmittedBlock> $blocks
+     * @return list<EmittedBlock>
+     */
+    private function includingBlocks(array $blocks): array
+    {
+        foreach ($blocks as $block) {
+            if (1 === preg_match('/^export type \w+' . self::INCLUDED_SUFFIX . ' = /m', $block->code)) {
+                return [new EmittedBlock(10, '// Includes', self::INCLUDING_HELPER, 'Including')];
+            }
+        }
+
+        return [];
     }
 
     /**
@@ -589,6 +617,10 @@ final class TypeScriptEmitter
 
         if ($type instanceof IntersectionType) {
             return [$type->base, $type->extra];
+        }
+
+        if ($type instanceof GenericType) {
+            return $type->arguments;
         }
 
         return [];
