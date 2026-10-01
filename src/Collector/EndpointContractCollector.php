@@ -118,6 +118,7 @@ final class EndpointContractCollector
                         ));
                     }
                     $seenNames[$endpointName] = $claimant;
+                    [$httpMethod, $httpPath] = $this->routeMethodAndPath($method);
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
                         name: $endpointName,
@@ -127,6 +128,8 @@ final class EndpointContractCollector
                         responses: $responses,
                         request: $this->resolveRequestContract($method, $srcDir, $classFiles),
                         mcp: $this->resolveMcpTool($method, $endpointName),
+                        httpMethod: $httpMethod,
+                        httpPath: $this->contractPath($method, $httpPath),
                     );
                 }
             }
@@ -405,6 +408,17 @@ final class EndpointContractCollector
      * would otherwise publish the attribute path as if it were served, and a tool pointing at a
      * path the application answers 404 to is worse than no tool.
      */
+    /**
+     * The path a client calls an endpoint at: the one Symfony serves when the routing config is
+     * given — its prefixes and any class-level #[Route] included — and the method attribute's own
+     * otherwise. Unlike an MCP tool's, an endpoint the router does not know keeps its attribute
+     * path rather than failing generation.
+     */
+    private function contractPath(ReflectionMethod $method, string $attributePath): string
+    {
+        return $this->routePathResolver?->pathFor($method->getDeclaringClass()->getName(), $method->getName()) ?? $attributePath;
+    }
+
     private function servedPath(ReflectionMethod $method, string $attributePath): string
     {
         if (null === $this->routePathResolver) {

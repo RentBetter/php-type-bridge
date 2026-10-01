@@ -148,3 +148,43 @@ export type DeleteProjectEndpointMap = {
   204: DeleteProjectResponse;
 };
 export type DeleteProjectResult = EndpointResult<DeleteProjectEndpointMap>;
+
+// Endpoints
+/** How to call an endpoint. Its response map and inputs ride along in the type, for helpers that call it. */
+export interface Endpoint<M extends Record<number, unknown> = Record<number, unknown>, I = Record<never, never>> {
+  readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /** The route's path, `{placeholders}` and all. */
+  readonly path: string;
+  /** Never set at runtime: the types a helper reads off the endpoint. */
+  readonly types?: { responses: M; input: I };
+}
+
+export const ArchiveProject: Endpoint<ArchiveProjectEndpointMap, { path: ArchiveProjectPathParams }> = {
+  method: 'POST',
+  path: '/api/projects/{id}/archive',
+};
+
+export const ListProjects: Endpoint<ListProjectsEndpointMap, { query?: ListProjectsQuery }> = {
+  method: 'GET',
+  path: '/api/projects',
+};
+
+export const ShowProject: Endpoint<ShowProjectEndpointMap, { path: ShowProjectPathParams }> = {
+  method: 'GET',
+  path: '/api/projects/{id}',
+};
+
+export const CreateProject: Endpoint<CreateProjectEndpointMap, { body: CreateProjectBody }> = {
+  method: 'POST',
+  path: '/api/projects',
+};
+
+export const UpdateProject: Endpoint<UpdateProjectEndpointMap, { path: UpdateProjectPathParams; body: UpdateProjectBody }> = {
+  method: 'PUT',
+  path: '/api/projects/{id}',
+};
+
+export const DeleteProject: Endpoint<DeleteProjectEndpointMap, { path: DeleteProjectPathParams }> = {
+  method: 'DELETE',
+  path: '/api/projects/{id}',
+};
