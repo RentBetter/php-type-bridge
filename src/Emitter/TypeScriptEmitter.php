@@ -47,7 +47,41 @@ final class TypeScriptEmitter
     /** Names the union of a shape's or response's keys that are present whenever they are asked for. */
     public const string INCLUDED_SUFFIX = 'Included';
 
-    public const string INCLUDING_HELPER = 'export type Including<T, K extends keyof T> = T & Required<Pick<T, K>>;';
+    /**
+     * `WithIncludes<T, P>`: a type as sent when the request included paths P — one dotted path
+     * (`'checks.debug'`) or a list of them — with every key they name present, at any depth. P is
+     * checked against `IncludePath<T>`, the paths T has, so a misspelt one does not compile.
+     */
+    public const string WITH_INCLUDES_HELPER = <<<'TS'
+        /** The dotted paths `?include=` can name on T, five levels deep: each key, and the paths below it. */
+        export type IncludePath<T, Depth extends unknown[] = []> = Depth['length'] extends 5
+          ? never
+          : T extends readonly (infer Item)[]
+            ? IncludePath<Item, Depth>
+            : T extends object
+              ? { [K in keyof T & string]-?: K | `${K}.${IncludePath<NonNullable<T[K]>, [...Depth, unknown]>}` }[keyof T & string]
+              : never;
+
+        /** T as sent when the request included paths P (`'checks.debug'`, or a list of them): every key they name is there. */
+        export type WithIncludes<T, P extends IncludePath<T> | readonly IncludePath<T>[]> = WithIncludesAt<
+          T,
+          P extends readonly string[] ? P[number] : P
+        >;
+
+        type WithIncludesAt<T, P extends string> = [P] extends [never]
+          ? T
+          : T extends readonly (infer Item)[]
+            ? Array<WithIncludesAt<Item, P>>
+            : T extends object
+              ? Omit<T, IncludeRoot<P>> & {
+                  [K in IncludeRoot<P> & keyof T]-?: WithIncludesAt<Exclude<T[K], undefined>, IncludeBelow<P, K & string>>;
+                }
+              : T;
+
+        type IncludeRoot<P extends string> = P extends `${infer Root}.${string}` ? Root : P;
+
+        type IncludeBelow<P extends string, K extends string> = P extends `${K}.${infer Rest}` ? Rest : never;
+        TS;
 
     private EmittedNames $names;
 
@@ -59,7 +93,7 @@ final class TypeScriptEmitter
 
     /**
      * What emit() declares in the shared root module — the config type aliases and the
-     * `Including` helper the domain modules use — so emitDiscovered(), which writes that module
+     * `WithIncludes` helper the domain modules use — so emitDiscovered(), which writes that module
      * too, declares them alongside its own.
      *
      * @var array<string, EmittedBlock> keyed by the name each declares
@@ -349,13 +383,13 @@ final class TypeScriptEmitter
             }
         }
 
-        $shared = [...$this->typeAliasBlocks($blocks), ...$this->includingBlocks($blocks), ...$helpers];
+        $shared = [...$this->typeAliasBlocks($blocks), ...$this->withIncludesBlocks($blocks), ...$helpers];
         if ($this->domainMapper->hasRootModule()) {
             // Declared once, in the root module; what this module uses — the aliases, `EndpointResult`
-            // — is imported from it. The `Including` helper is only declared: consumers import it.
+            // — is imported from it. The `WithIncludes` helper is only declared: consumers import it.
             foreach ($shared as $block) {
                 $rootBlocks[$block->sortKey ?? $block->code] = $block;
-                if ('Including' !== $block->sortKey && null !== $block->sortKey) {
+                if ('WithIncludes' !== $block->sortKey && null !== $block->sortKey) {
                     $imports[''][] = $block->sortKey;
                 }
             }
@@ -367,18 +401,18 @@ final class TypeScriptEmitter
     }
 
     /**
-     * `Including<T, K>` for a module that declares an `…Included` union: the type with those keys
-     * present, for a response whose request asked for them. Declared per module, like the type
+     * `WithIncludes<T, P>` for a module that declares an `…Included` union: the type with the keys
+     * a request's include paths name present, at any depth. Declared per module, like the type
      * aliases, so each module stays self-contained; the copies are identical.
      *
      * @param list<EmittedBlock> $blocks
      * @return list<EmittedBlock>
      */
-    private function includingBlocks(array $blocks): array
+    private function withIncludesBlocks(array $blocks): array
     {
         foreach ($blocks as $block) {
             if (1 === preg_match('/^export type \w+' . self::INCLUDED_SUFFIX . ' = /m', $block->code)) {
-                return [new EmittedBlock(15, '// Includes', self::INCLUDING_HELPER, 'Including')];
+                return [new EmittedBlock(15, '// Includes', self::WITH_INCLUDES_HELPER, 'WithIncludes')];
             }
         }
 

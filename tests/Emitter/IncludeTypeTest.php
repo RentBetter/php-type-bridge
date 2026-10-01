@@ -25,7 +25,7 @@ use RuntimeException;
  * What a response only sends when the request asks for it (`?include=`). A key is absent unless
  * asked for; whether it is then guaranteed is what the PHP spelling says — a required key, or a
  * side-load, always is; an optional one may still be absent. The `…Included` union lists the
- * guaranteed ones, and `Including<T, K>` makes them present.
+ * guaranteed ones, and `WithIncludes<T, P>` makes them present.
  */
 final class IncludeTypeTest extends TestCase
 {
@@ -70,7 +70,7 @@ final class IncludeTypeTest extends TestCase
 
     public function test_a_module_with_an_included_union_declares_the_including_helper(): void
     {
-        self::assertStringContainsString(TypeScriptEmitter::INCLUDING_HELPER, self::$output['Checks']);
+        self::assertStringContainsString(TypeScriptEmitter::WITH_INCLUDES_HELPER, self::$output['Checks']);
     }
 
     public function test_an_unlisted_generic_is_an_error_that_names_the_config_key(): void

@@ -237,22 +237,29 @@ Tell TypeBridge how the project marks them:
 ],
 ```
 
-An included key always emits as optional, since it is absent unless asked for. The keys in the first row — required `included<>` keys, and side-loads — are listed in a `…Included` union beside the shape or response, and a helper makes them present — declared in the shared root module when the output has one (`output.rootModule`), in each module that needs it otherwise:
+An included key always emits as optional, since it is absent unless asked for. The keys in the first row — required `included<>` keys, and side-loads — are listed in a `…Included` union beside the shape or response. `WithIncludes<T, P>` makes the keys a request's include paths name present, at any depth. It is declared in the shared root module when the output has one (`output.rootModule`), and in each module that needs it otherwise:
 
 ```ts
 export interface SystemCheckData { name: string; debug?: unknown; documentation?: string; }
 export type SystemCheckDataIncluded = 'debug';
-export type Including<T, K extends keyof T> = T & Required<Pick<T, K>>;
+export interface ListSystemChecksResponse { checks: SystemCheckData[]; definitions?: SystemCheckDefinitionData[]; }
 
-// fetched with ?include=checks.debug
-const check: Including<SystemCheckData, 'debug'> = …;   // check.debug is there; check.documentation may not be
+// One list drives both the request and the type, so they cannot drift apart.
+const CHECKS_INCLUDE = ['checks.debug', 'definitions'] as const;
+type Checks = WithIncludes<ListSystemChecksResponse, typeof CHECKS_INCLUDE>;
+
+const response = await api.get<Checks>('/checks', { params: { include: CHECKS_INCLUDE.join(',') } });
+response.data.checks[0].debug;        // there: the path reaches through the list
+response.data.definitions.length;      // there: a side-load asked for
 ```
+
+P is a dotted path, a union of them, or a list. Each is checked against `IncludePath<T>`, which covers every key path in T to five levels, so a misspelt path (`'checks.debgu'`) does not compile. That check is against the type, not the API's include vocabulary: a path to a key that is always sent still compiles, and it changes nothing.
 
 Any other generic TypeBridge does not know is an error that names `includes.types`.
 
 ### Shared declarations
 
-The config `typeAliases` (`UuidStr`, …) and the `Including` helper are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
+The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` helper are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
 
 ### Classes in shapes
 
