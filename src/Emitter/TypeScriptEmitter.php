@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Model\CollectedResponseProperty;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
@@ -55,6 +56,15 @@ final class TypeScriptEmitter
     private TypeToTsConverter $converter;
 
     private ?ClassTypeResolver $classTypes = null;
+
+    /**
+     * What emit() declares in the shared root module — the config type aliases and the
+     * `Including` helper the domain modules use — so emitDiscovered(), which writes that module
+     * too, declares them alongside its own.
+     *
+     * @var array<string, EmittedBlock> keyed by the name each declares
+     */
+    private array $rootBlocks = [];
 
     private TypeScriptNaming $naming;
 
@@ -119,6 +129,7 @@ final class TypeScriptEmitter
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
         sort($allDomains);
 
+        $rootBlocks = [];
         $output = [];
         foreach ($allDomains as $domain) {
             $output[$domain] = $this->emitDomain(
@@ -126,7 +137,13 @@ final class TypeScriptEmitter
                 $domains[$domain] ?? new CollectedDomain($domain),
                 $responses[$domain] ?? [],
                 $contracts[$domain] ?? [],
+                $rootBlocks,
             );
+        }
+
+        $this->rootBlocks = $rootBlocks;
+        if ([] !== $rootBlocks) {
+            $output[''] = $this->assembler->assemble([], array_values($rootBlocks));
         }
 
         return $output;
@@ -199,6 +216,12 @@ final class TypeScriptEmitter
             }
         }
 
+        // The root module is written by both passes: declare emit()'s shared blocks here too, or
+        // this module would replace the one emit() returned and drop them.
+        if ([] !== $this->rootBlocks) {
+            $blocksByDomain[''] = [...($blocksByDomain[''] ?? []), ...array_values($this->rootBlocks)];
+        }
+
         $output = [];
         $domains = array_keys($blocksByDomain);
         sort($domains);
@@ -254,12 +277,14 @@ final class TypeScriptEmitter
     /**
      * @param list<CollectedApiResponseClass> $responses
      * @param list<CollectedEndpointContract> $contracts
+     * @param array<string, EmittedBlock> $rootBlocks what this module shares, gathered for the root module when there is one
      */
     private function emitDomain(
         string $domain,
         CollectedDomain $collected,
         array $responses,
         array $contracts,
+        array &$rootBlocks,
     ): string {
         $imports = $this->collectExternalImports($domain, $collected, $responses, $contracts);
         $foreignAliases = $this->computeForeignAliases($domain, $collected, $responses, $contracts, $imports);
@@ -322,7 +347,19 @@ final class TypeScriptEmitter
             }
         }
 
-        $blocks = array_merge($this->typeAliasBlocks($blocks), $this->includingBlocks($blocks), $blocks);
+        $shared = [...$this->typeAliasBlocks($blocks), ...$this->includingBlocks($blocks)];
+        if ($this->domainMapper->hasRootModule()) {
+            // Declared once, in the root module; the aliases this module uses are imported from it.
+            // The `Including` helper is only declared — consumers import it themselves.
+            foreach ($shared as $block) {
+                $rootBlocks[$block->sortKey ?? $block->code] = $block;
+                if ('Including' !== $block->sortKey && null !== $block->sortKey) {
+                    $imports[''][] = $block->sortKey;
+                }
+            }
+        } else {
+            $blocks = [...$shared, ...$blocks];
+        }
 
         return $this->assembler->assemble($this->renderImportLines($domain, $imports, $foreignAliases), $blocks);
     }
@@ -339,7 +376,7 @@ final class TypeScriptEmitter
     {
         foreach ($blocks as $block) {
             if (1 === preg_match('/^export type \w+' . self::INCLUDED_SUFFIX . ' = /m', $block->code)) {
-                return [new EmittedBlock(10, '// Includes', self::INCLUDING_HELPER, 'Including')];
+                return [new EmittedBlock(15, '// Includes', self::INCLUDING_HELPER, 'Including')];
             }
         }
 
@@ -415,13 +452,16 @@ final class TypeScriptEmitter
         $imports = [];
 
         foreach ($collected->types as $type) {
-            $this->appendImportedTypes($domain, $type->imports, $imports);
+            $this->appendImportedTypes($domain, $this->referenced($type->imports, [$type->parsed]), $imports);
             $this->appendExternalEnums($domain, $type->parsed, $imports);
             $this->appendClassTypes($domain, $type->parsed, $imports);
         }
 
         foreach ($responses as $response) {
-            $this->appendImportedTypes($domain, $response->imports, $imports);
+            $this->appendImportedTypes($domain, $this->referenced($response->imports, array_map(
+                static fn(CollectedResponseProperty $property): ParsedType => $property->parsed,
+                $response->properties,
+            )), $imports);
             foreach ($response->properties as $property) {
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
                 $this->appendClassTypes($domain, $property->parsed, $imports);
@@ -476,6 +516,36 @@ final class TypeScriptEmitter
         sort($enumClasses);
 
         return array_values(array_unique($enumClasses));
+    }
+
+    /**
+     * The imports a type actually uses. A class's `@phpstan-import-type` tags serve every alias it
+     * declares and its own code, so one of them may be used by none of the shapes emitted here —
+     * and an import nothing references fails the consumer's unused-import check.
+     *
+     * @param list<ImportedType> $importedTypes
+     * @param list<ParsedType> $types
+     * @return list<ImportedType>
+     */
+    private function referenced(array $importedTypes, array $types): array
+    {
+        $names = [];
+        $collect = function (ParsedType $type) use (&$collect, &$names): void {
+            if ($type instanceof NameRefType) {
+                $names[$type->name] = true;
+            }
+            foreach ($this->childTypes($type) as $child) {
+                $collect($child);
+            }
+        };
+        foreach ($types as $type) {
+            $collect($type);
+        }
+
+        return array_values(array_filter(
+            $importedTypes,
+            static fn(ImportedType $imported): bool => isset($names[$imported->targetTypeName]),
+        ));
     }
 
     /**
