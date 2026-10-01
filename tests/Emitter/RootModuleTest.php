@@ -19,7 +19,7 @@ use PTGS\TypeBridge\Tests\Fixture\Discovered\AlphaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
 
 /**
- * What every module shares — the config type aliases, the `Including` helper — is declared once
+ * What every module shares — the config type aliases, the `WithIncludes` helper — is declared once
  * in the root module when there is one, and imported from it; and a module imports only what it
  * uses.
  */
@@ -33,10 +33,10 @@ final class RootModuleTest extends TestCase
 
         self::assertStringContainsString("import type { UuidStr } from '../genTypes';", $output['Notes']);
         self::assertStringNotContainsString('export type UuidStr', $output['Notes']);
-        self::assertStringNotContainsString('export type Including', $output['Notes']);
+        self::assertStringNotContainsString('export type WithIncludes', $output['Notes']);
 
         // The aliases together under their banner, then the helper under its own.
-        self::assertStringContainsString("// Aliases\nexport type UuidStr = string;\n\n// Includes\n" . TypeScriptEmitter::INCLUDING_HELPER, $output['']);
+        self::assertStringContainsString("// Aliases\nexport type UuidStr = string;\n\n// Includes\n" . TypeScriptEmitter::WITH_INCLUDES_HELPER, $output['']);
     }
 
     /**
@@ -50,7 +50,7 @@ final class RootModuleTest extends TestCase
 
         self::assertStringContainsString('export interface Base', $root);
         self::assertStringContainsString('export type UuidStr = string;', $root);
-        self::assertStringContainsString(TypeScriptEmitter::INCLUDING_HELPER, $root);
+        self::assertStringContainsString(TypeScriptEmitter::WITH_INCLUDES_HELPER, $root);
     }
 
     public function test_endpoint_result_is_declared_once_in_the_root_module_and_imported(): void
@@ -85,7 +85,7 @@ final class RootModuleTest extends TestCase
         $output = $this->emitter(new OutputStructure())->emit((new PhpDocTypeCollector())->collect(self::SRC));
 
         self::assertStringContainsString('export type UuidStr = string;', $output['Notes']);
-        self::assertStringContainsString(TypeScriptEmitter::INCLUDING_HELPER, $output['Notes']);
+        self::assertStringContainsString(TypeScriptEmitter::WITH_INCLUDES_HELPER, $output['Notes']);
         self::assertArrayNotHasKey('', $output);
     }
 

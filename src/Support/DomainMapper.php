@@ -37,7 +37,7 @@ final readonly class DomainMapper
 
     /**
      * Whether the output has a shared root module, which what every module shares — the config
-     * type aliases, the `Including` helper — is declared in once.
+     * type aliases, the `WithIncludes` helper — is declared in once.
      */
     public function hasRootModule(): bool
     {
