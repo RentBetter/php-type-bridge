@@ -70,4 +70,18 @@ final class OutputStructureTest extends TestCase
 
         OutputStructure::fromArray(['segmentCase' => 'nope']);
     }
+
+    public function test_domain_depth_defaults_to_the_top_directory(): void
+    {
+        self::assertSame(1, OutputStructure::fromArray([])->domainDepth);
+        self::assertSame(2, OutputStructure::fromArray(['domainDepth' => 2])->domainDepth);
+    }
+
+    public function test_rejects_a_domain_depth_below_one(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('domainDepth');
+
+        OutputStructure::fromArray(['domainDepth' => 0]);
+    }
 }

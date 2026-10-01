@@ -12,6 +12,7 @@ use PTGS\TypeBridge\Emitter\DomainAssembler;
 use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
+use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -51,7 +52,8 @@ final class GenerateTypesCommand extends Command
 
         $config = null !== $configFile ? TypeBridgeConfig::fromFile($configFile) : new TypeBridgeConfig();
 
-        $enumResolver = new EnumResolver();
+        $domainGuesser = new DomainGuesser($config->output->domainDepth);
+        $enumResolver = new EnumResolver(domainGuesser: $domainGuesser);
         $candidateClasses = array_keys((new PhpFileClassLocator())->classesIn($sourceDir));
         $registry = EmitterRegistry::fromAttributeScan($candidateClasses);
 
@@ -71,11 +73,12 @@ final class GenerateTypesCommand extends Command
         $files = [];
         if (!$discoveredOnly) {
             $enumResolver->scanDirectory($sourceDir);
-            $responseCollector = new ResponseClassCollector();
+            $responseCollector = new ResponseClassCollector(domainGuesser: $domainGuesser);
             $files = $emitter->emit(
-                (new PhpDocTypeCollector())->collect($sourceDir),
+                (new PhpDocTypeCollector(domainGuesser: $domainGuesser))->collect($sourceDir),
                 $responseCollector->collect($sourceDir),
                 (new EndpointContractCollector(
+                    domainGuesser: $domainGuesser,
                     requirementTypes: $config->requirementTypes,
                     mcpDescriptionAttribute: $config->mcpDescriptionAttribute,
                     mcpDescriptionProperty: $config->mcpDescriptionProperty,

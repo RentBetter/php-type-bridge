@@ -261,6 +261,10 @@ Any other generic TypeBridge does not know is an error that names `includes.type
 
 The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` helper are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
 
+### Modules
+
+Each domain is one module: the directories a class sits in under the source root, `output.domainDepth` levels deep (default `1`). At 1, everything under `src/Admin/` is one `admin` module. At 2, `src/Admin/SystemChecks/` is a module of its own, `admin/systemChecks`, which keeps modules small in a codebase organised by subdomain. Modules import each other by relative path (`../../entity/genTypes`). A module that both the full pass and a discovered emitter write is written once, with the declarations of both.
+
 ### Classes in shapes
 
 PHPStan-typed code often holds objects in an array that json_encode then serialises — `array{total: MoneyInterface}` — so a shape may name a class, and it means the JSON that class serialises to:
