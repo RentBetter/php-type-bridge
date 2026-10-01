@@ -45,11 +45,24 @@ final readonly class DomainMapper
     }
 
     /**
-     * Relative import path from one domain's module to another's.
+     * Relative import path from one domain's module to another's: up to the directory they share,
+     * then down to the target — `../../entity/genTypes` from `http/v2`, `../tasks/genTypes` from
+     * `admin/systemChecks` to `admin/tasks`.
      */
     public function getRelativeImportPath(string $fromDomain, string $toDomain): string
     {
-        return '../' . $this->dirName($toDomain) . '/genTypes';
+        $from = explode('/', $this->dirName($fromDomain));
+        $to = explode('/', $this->dirName($toDomain));
+
+        $shared = 0;
+        while (isset($from[$shared], $to[$shared]) && $from[$shared] === $to[$shared]) {
+            $shared++;
+        }
+
+        $up = \count($from) - $shared;
+        $down = \array_slice($to, $shared);
+
+        return (0 === $up ? './' : str_repeat('../', $up)) . ([] === $down ? '' : implode('/', $down) . '/') . 'genTypes';
     }
 
     /**

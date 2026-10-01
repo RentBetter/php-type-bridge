@@ -51,4 +51,19 @@ final class DomainMapperTest extends TestCase
         self::assertSame('../../genTypes', $mapper->getRootImportPath('Listings\\Channels'));
         self::assertSame('../genTypes', $mapper->getRootImportPath('Root'));
     }
+
+    /**
+     * Up to the directory two modules share, then down: a module two levels deep is two `../`
+     * from the root, and a sibling subdomain is one.
+     */
+    public function test_relative_imports_climb_to_the_shared_directory(): void
+    {
+        $mapper = new DomainMapper('/out', new OutputStructure(segmentCase: SegmentCase::PerSegmentLcFirst));
+
+        self::assertSame('../../entity/genTypes', $mapper->getRelativeImportPath('Http/V2', 'Entity'));
+        self::assertSame('../tasks/genTypes', $mapper->getRelativeImportPath('Admin/SystemChecks', 'Admin/Tasks'));
+        self::assertSame('../admin/systemChecks/genTypes', $mapper->getRelativeImportPath('Portal', 'Admin/SystemChecks'));
+        self::assertSame('../genTypes', $mapper->getRelativeImportPath('Admin/SystemChecks', 'Admin'));
+        self::assertSame('./systemChecks/genTypes', $mapper->getRelativeImportPath('Admin', 'Admin/SystemChecks'));
+    }
 }

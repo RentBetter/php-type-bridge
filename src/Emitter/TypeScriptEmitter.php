@@ -100,6 +100,14 @@ final class TypeScriptEmitter
      */
     private array $rootBlocks = [];
 
+    /**
+     * What emit() wrote into each domain's module, so emitDiscovered() can add its own
+     * declarations to a module both passes write rather than replace it.
+     *
+     * @var array<string, array{imports: array<string, list<string>>, foreignAliases: array<string, array<string, string>>, blocks: list<EmittedBlock>}>
+     */
+    private array $emittedModules = [];
+
     private TypeScriptNaming $naming;
 
     private readonly EmitterRegistry $registry;
@@ -260,6 +268,24 @@ final class TypeScriptEmitter
         $domains = array_keys($blocksByDomain);
         sort($domains);
         foreach ($domains as $domain) {
+            // A module emit() also wrote — a subdomain holding both shapes and the enums a
+            // discovered emitter claims — is written once, with both passes' declarations.
+            $emitted = '' === $domain ? null : ($this->emittedModules[$domain] ?? null);
+            if (null !== $emitted) {
+                $imports = $emitted['imports'];
+                foreach ($importsByDomain[$domain] ?? [] as $import) {
+                    if ($import->targetDomain !== $domain) {
+                        $imports[$import->targetDomain][] = $import->canonicalName;
+                    }
+                }
+                $output[$domain] = $this->assembler->assemble(
+                    $this->renderImportLines($domain, $imports, $emitted['foreignAliases']),
+                    [...$emitted['blocks'], ...$blocksByDomain[$domain]],
+                );
+
+                continue;
+            }
+
             $output[$domain] = $this->assembler->assemble(
                 $this->renderEmitterImports($domain, $importsByDomain[$domain] ?? []),
                 $blocksByDomain[$domain],
@@ -396,6 +422,8 @@ final class TypeScriptEmitter
         } else {
             $blocks = [...$shared, ...$blocks];
         }
+
+        $this->emittedModules[$domain] = ['imports' => $imports, 'foreignAliases' => $foreignAliases, 'blocks' => $blocks];
 
         return $this->assembler->assemble($this->renderImportLines($domain, $imports, $foreignAliases), $blocks);
     }

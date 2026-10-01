@@ -24,6 +24,7 @@ final readonly class OutputStructure
         public string $header = '// AUTO-GENERATED. DO NOT EDIT.',
         public SortOrder $declarationOrder = SortOrder::Declared,
         public SortOrder $importOrder = SortOrder::Name,
+        public int $domainDepth = 1,
     ) {}
 
     /**
@@ -31,7 +32,7 @@ final readonly class OutputStructure
      */
     public static function fromArray(array $config): self
     {
-        $allowedKeys = ['segmentCase', 'rootModule', 'importStrategy', 'aliasBase', 'header', 'declarationOrder', 'importOrder'];
+        $allowedKeys = ['segmentCase', 'rootModule', 'importStrategy', 'aliasBase', 'header', 'declarationOrder', 'importOrder', 'domainDepth'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -51,6 +52,10 @@ final readonly class OutputStructure
         $rootModule = self::nullableStringOption($config, 'rootModule');
         $declarationOrder = self::enumOption($config, 'declarationOrder', SortOrder::class, SortOrder::Declared);
         $importOrder = self::enumOption($config, 'importOrder', SortOrder::class, SortOrder::Name);
+        $domainDepth = $config['domainDepth'] ?? 1;
+        if (!\is_int($domainDepth) || $domainDepth < 1) {
+            throw new RuntimeException('TypeBridge output config "domainDepth" must be a positive integer.');
+        }
 
         if (ImportStrategy::Alias === $importStrategy && null === $aliasBase) {
             throw new RuntimeException('TypeBridge output config "aliasBase" is required when "importStrategy" is "alias".');
@@ -64,6 +69,7 @@ final readonly class OutputStructure
             header: $header,
             declarationOrder: $declarationOrder,
             importOrder: $importOrder,
+            domainDepth: $domainDepth,
         );
     }
 
