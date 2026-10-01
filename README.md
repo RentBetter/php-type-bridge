@@ -180,6 +180,7 @@ This first cut is focused on contract collection and code generation:
 - response DTO status resolution
 - endpoint contract collection
 - generated TypeScript endpoint maps and `EndpointResult` unions
+- a generated `Endpoint` constant per endpoint: its method and path, typed with its responses and inputs (see [Calling an endpoint](#calling-an-endpoint))
 - PHPStan rules for:
   - `#[ApiResponses]` on routed API controller methods
   - `#[ApiRequest]` on routed mutating API controller methods
@@ -193,6 +194,19 @@ Custom forms participating in request contracts must implement `PTGS\TypeBridge\
 A mutating route that takes no input — a `POST` that only triggers work — still carries `#[ApiRequest]`, bare. The collector records no request contract for it (the generated input schema is an empty object) and `MutatingApiRequestRequiredRule` reads the bare attribute as the explicit declaration it asks for, so the absence of input is stated rather than flagged.
 
 The application remains responsible for runtime HTTP emission.
+
+### Calling an endpoint
+
+Each endpoint also emits a constant saying how to call it. It is plain data, `method` and `path`, typed with the endpoint's response map and the inputs it takes, so a client's own helpers can call any endpoint without restating its URL or its types:
+
+```ts
+export const UpdateProject: Endpoint<UpdateProjectEndpointMap, { path: UpdateProjectPathParams; body: UpdateProjectBody }> = {
+  method: 'PUT',
+  path: '/api/projects/{id}',
+};
+```
+
+The inputs are `path` when the route has placeholders, `body` when the request has one, and `query`, which a caller may leave out. `types` is never set; it is there for a helper to read the endpoint's types off it: `E extends Endpoint<infer M, infer I>`. The path is the one Symfony serves when the `routing` config is given, its prefixes and any class-level `#[Route]` included. Without it, the path is the method attribute's own. TypeBridge sends nothing itself: how a request is made, and what an error status does, is the client's to decide.
 
 ### PHPStan types in shapes
 

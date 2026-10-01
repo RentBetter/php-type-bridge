@@ -19,10 +19,12 @@ use ReflectionMethod;
 
 /**
  * Built-in convention: a controller method carrying #[ApiResponses] emits its
- * request-input aliases (// Endpoint inputs) and a status-keyed result map
- * (// Endpoint results). The shared `EndpointResult<M>` helper is declared by the
- * orchestrator via {@see self::RESULT_HELPER}: once in the root module when there is one,
- * once per module otherwise.
+ * request-input aliases (// Endpoint inputs), a status-keyed result map
+ * (// Endpoint results), and a constant saying how to call it (// Endpoints): its method and
+ * path, typed with that map and its inputs so a client's helpers can read them. The shared
+ * `EndpointResult<M>` and `Endpoint<M, I>` helpers are declared by the orchestrator via
+ * {@see self::RESULT_HELPER} and {@see self::ENDPOINT_HELPER}: once in the root module when
+ * there is one, once per module otherwise.
  */
 #[AsTypeBridgeEmitter('endpoint-contracts', mode: EmitMode::Referenced)]
 final class EndpointContractEmitter implements TypeEmitter
@@ -34,6 +36,19 @@ final class EndpointContractEmitter implements TypeEmitter
         . "    data: M[S];\n"
         . "  };\n"
         . '}[keyof M & number];';
+
+    public const string ENDPOINT_HELPER = <<<'TS'
+        /** How to call an endpoint. Its response map and inputs ride along in the type, for helpers that call it. */
+        export interface Endpoint<M extends Record<number, unknown> = Record<number, unknown>, I = Record<never, never>> {
+          readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+          /** The route's path, `{placeholders}` and all. */
+          readonly path: string;
+          /** Never set at runtime: the types a helper reads off the endpoint. */
+          readonly types?: { responses: M; input: I };
+        }
+        TS;
+
+    private const array METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
     public function claims(ReflectionClass $class): bool
     {
@@ -58,6 +73,9 @@ final class EndpointContractEmitter implements TypeEmitter
         }
         foreach ($contracts as $contract) {
             $blocks[] = new EmittedBlock(50, '// Endpoint results', $this->renderResult($contract, $context));
+        }
+        foreach ($contracts as $contract) {
+            $blocks[] = new EmittedBlock(60, '// Endpoints', $this->renderEndpoint($contract, $context), $contract->name);
         }
 
         return new EmittedType($context->domain, $blocks);
@@ -114,5 +132,47 @@ final class EndpointContractEmitter implements TypeEmitter
         $lines[] = \sprintf('export type %s = EndpointResult<%s>;', $context->naming->endpointResultName($contract->name), $context->naming->endpointMapName($contract->name));
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * `export const ListProjects: Endpoint<ListProjectsEndpointMap, { query?: ListProjectsQuery }> = {…}`:
+     * the method and path to call, typed with the endpoint's responses and the inputs it takes —
+     * its path params and body when it has them, and its query, which a caller may leave out.
+     */
+    private function renderEndpoint(CollectedEndpointContract $contract, EmitContext $context): string
+    {
+        if (!\in_array($contract->httpMethod, self::METHODS, true)) {
+            throw new \RuntimeException(\sprintf(
+                'Endpoint "%s" is routed for %s, which an Endpoint cannot describe: it takes %s.',
+                $contract->name,
+                $contract->httpMethod,
+                implode(', ', self::METHODS),
+            ));
+        }
+
+        $inputs = [];
+        $request = $contract->request;
+        if (null !== $request && (null !== $request->path || null !== $request->pathParams)) {
+            $inputs[] = 'path: ' . $context->naming->pathAliasName($contract->name);
+        }
+        if (null !== $request?->query) {
+            $inputs[] = 'query?: ' . $context->naming->queryAliasName($contract->name);
+        }
+        if (null !== $request?->body) {
+            $inputs[] = 'body: ' . $context->naming->bodyAliasName($contract->name);
+        }
+
+        $type = $context->naming->endpointMapName($contract->name);
+        if ([] !== $inputs) {
+            $type .= ', { ' . implode('; ', $inputs) . ' }';
+        }
+
+        return \sprintf(
+            "export const %s: Endpoint<%s> = {\n  method: '%s',\n  path: '%s',\n};",
+            $contract->name,
+            $type,
+            $contract->httpMethod,
+            addcslashes($contract->httpPath, "'\\"),
+        );
     }
 }

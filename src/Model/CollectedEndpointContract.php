@@ -17,5 +17,7 @@ final readonly class CollectedEndpointContract
         public array $responses,
         public ?CollectedEndpointRequest $request = null,
         public ?CollectedMcpTool $mcp = null,
+        public string $httpMethod = 'GET',
+        public string $httpPath = '',
     ) {}
 }

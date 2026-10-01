@@ -369,6 +369,7 @@ final class TypeScriptEmitter
         $helpers = [];
         if ([] !== $contracts) {
             $helpers[] = new EmittedBlock(50, '// Endpoint results', EndpointContractEmitter::RESULT_HELPER, 'EndpointResult');
+            $helpers[] = new EmittedBlock(60, '// Endpoints', EndpointContractEmitter::ENDPOINT_HELPER, 'Endpoint');
 
             $seenControllers = [];
             foreach ($contracts as $contract) {
