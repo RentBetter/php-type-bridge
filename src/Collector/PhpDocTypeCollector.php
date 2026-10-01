@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Collector;
 
 use PTGS\TypeBridge\Attribute\PhpStanOnly;
+use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
@@ -141,7 +142,7 @@ final class PhpDocTypeCollector
         }
 
         $shortName = $this->shortName($ownerClass);
-        if (enum_exists($ownerClass)) {
+        if (enum_exists($ownerClass) && null === ValueOfName::of($ownerClass)) {
             return $shortName . 'Data';
         }
 

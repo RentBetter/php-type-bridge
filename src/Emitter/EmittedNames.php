@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Emitter;
 
+use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedType;
@@ -27,9 +28,11 @@ final readonly class EmittedNames
     public function typeDeclarationName(CollectedType $type): string
     {
         $name = $type->name;
-        // Only its _self is the enum's shape; any other alias it declares keeps its own name.
+        // Only its _self is the enum's shape; any other alias it declares keeps its own name. The
+        // shape takes the enum's own name when its value union has been named something else.
         if ($type->isSelf && enum_exists($type->ownerClass)) {
-            $name = $this->naming->enumShapeName($this->enumResolver->getShortName($type->ownerClass));
+            $shortName = $this->enumResolver->getShortName($type->ownerClass);
+            $name = null === ValueOfName::of($type->ownerClass) ? $this->naming->enumShapeName($shortName) : $shortName;
         }
 
         if ($type->parsed instanceof ShapeType || $type->parsed instanceof IntersectionType) {
@@ -50,6 +53,7 @@ final readonly class EmittedNames
 
     public function enumName(string $enumClass): string
     {
-        return $this->naming->enumValueName($this->enumResolver->getShortName($enumClass));
+        return ValueOfName::of($this->enumResolver->resolveFqcn($enumClass))->name
+            ?? $this->naming->enumValueName($this->enumResolver->getShortName($enumClass));
     }
 }

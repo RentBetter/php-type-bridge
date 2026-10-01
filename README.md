@@ -82,6 +82,26 @@ export interface ProjectStatusData {
 
 Enum-owned `_self` shapes emit with a suffix (default `Data`) to avoid colliding with the enum value union. Override via `enumShapeSuffix` (see [TypeScript naming](#typescript-naming)).
 
+When the enum's name belongs to the object it serialises to, name its value union instead with `#[ValueOfName]`. The `_self` then takes the enum's own name, as any class's `_self` does:
+
+```php
+/**
+ * @phpstan-type _self = array{code: value-of<Currency>}
+ */
+#[ValueOfName('CurrencyCode')]
+enum Currency: string implements JsonSerializable { … }
+```
+
+```ts
+export type CurrencyCode = 'AUD' | 'NZD';
+
+export interface Currency {
+  code: CurrencyCode;
+}
+```
+
+A shape that names the class — `currency: Currency` — is that interface, and `value-of<Currency>` is `CurrencyCode`, wherever they are written.
+
 ## TypeScript naming
 
 If you need project-specific naming, pass a config file to the generator:
