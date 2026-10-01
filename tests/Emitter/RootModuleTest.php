@@ -32,8 +32,8 @@ final class RootModuleTest extends TestCase
         self::assertStringNotContainsString('export type UuidStr', $output['Notes']);
         self::assertStringNotContainsString('export type Including', $output['Notes']);
 
-        self::assertStringContainsString('export type UuidStr = string;', $output['']);
-        self::assertStringContainsString(TypeScriptEmitter::INCLUDING_HELPER, $output['']);
+        // The aliases together under their banner, then the helper under its own.
+        self::assertStringContainsString("// Aliases\nexport type UuidStr = string;\n\n// Includes\n" . TypeScriptEmitter::INCLUDING_HELPER, $output['']);
     }
 
     /**

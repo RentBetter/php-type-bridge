@@ -376,7 +376,7 @@ final class TypeScriptEmitter
     {
         foreach ($blocks as $block) {
             if (1 === preg_match('/^export type \w+' . self::INCLUDED_SUFFIX . ' = /m', $block->code)) {
-                return [new EmittedBlock(10, '// Includes', self::INCLUDING_HELPER, 'Including')];
+                return [new EmittedBlock(15, '// Includes', self::INCLUDING_HELPER, 'Including')];
             }
         }
 
