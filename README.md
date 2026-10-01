@@ -217,7 +217,7 @@ Tell TypeBridge how the project marks them:
 ],
 ```
 
-An included key always emits as optional, since it is absent unless asked for. The keys in the first row — required `included<>` keys, and side-loads — are listed in a `…Included` union beside the shape or response, and each module that declares one also declares a helper that makes them present:
+An included key always emits as optional, since it is absent unless asked for. The keys in the first row — required `included<>` keys, and side-loads — are listed in a `…Included` union beside the shape or response, and a helper makes them present — declared in the shared root module when the output has one (`output.rootModule`), in each module that needs it otherwise:
 
 ```ts
 export interface SystemCheckData { name: string; debug?: unknown; documentation?: string; }
@@ -229,6 +229,10 @@ const check: Including<SystemCheckData, 'debug'> = …;   // check.debug is ther
 ```
 
 Any other generic TypeBridge does not know is an error that names `includes.types`.
+
+### Shared declarations
+
+The config `typeAliases` (`UuidStr`, …) and the `Including` helper are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
 
 ### Classes in shapes
 

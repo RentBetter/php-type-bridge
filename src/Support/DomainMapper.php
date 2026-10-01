@@ -36,6 +36,15 @@ final readonly class DomainMapper
     }
 
     /**
+     * Whether the output has a shared root module, which what every module shares — the config
+     * type aliases, the `Including` helper — is declared in once.
+     */
+    public function hasRootModule(): bool
+    {
+        return null !== $this->structure->rootModule;
+    }
+
+    /**
      * Relative import path from one domain's module to another's.
      */
     public function getRelativeImportPath(string $fromDomain, string $toDomain): string
