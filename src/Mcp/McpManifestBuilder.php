@@ -14,7 +14,8 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
  *
  * Each tool's `inputSchema` is a JSON Schema object assembled from the endpoint's path params,
  * query and body fields — the arguments an MCP client supplies. The HTTP method + path tell the
- * runtime how to call the API; `destructive` is the safety hint; `scopes` (when the project
+ * runtime how to call the API, and `query` (when there are any) names the arguments it sends in the
+ * query string whatever the method — a POST can take query parameters as well as a body; `destructive` is the safety hint; `scopes` (when the project
  * configures a scope attribute) names the auth scopes the calling token must hold, letting the
  * runtime filter or annotate tools the caller cannot use. (Response output schemas are a later
  * increment — MCP `outputSchema` is optional.)
@@ -66,6 +67,11 @@ final class McpManifestBuilder
             $tool['scopes'] = $mcp->scopes;
         }
         $tool['inputSchema'] = $this->inputSchema($contract);
+
+        $query = array_map(static fn (CollectedFormField $field): string => $field->name, $contract->request?->query->fields ?? []);
+        if ([] !== $query) {
+            $tool['query'] = $query;
+        }
 
         return $tool;
     }

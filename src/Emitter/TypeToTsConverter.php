@@ -188,11 +188,12 @@ final readonly class TypeToTsConverter
 
         // An include generic (`included<T>`) is its type; the key it sits on is what is optional.
         // A ref generic (`ref<T>`) is an id that expands to T: `Ref<T>`, which WithExpands reads.
+        // An enum generic (`enum<T>`) is the enum T, sent as its case.
         if ($type instanceof GenericType) {
             $isRef = $this->includes->isRefType($type->name);
-            if (!$isRef && !$this->includes->isIncludeType($type->name)) {
+            if (!$isRef && !$this->includes->isIncludeType($type->name) && !$this->includes->isEnumType($type->name)) {
                 throw new RuntimeException(\sprintf(
-                    'Unknown generic `%s<…>`. If it marks a key that is only sent when a request asks for it, list it in the `includes.types` config; if it is a reference a request can expand, in `includes.refTypes`.',
+                    'Unknown generic `%s<…>`. If it marks a key that is only sent when a request asks for it, list it in the `includes.types` config; if it is a reference a request can expand, in `includes.refTypes`; if it wraps an enum, in `includes.enumTypes`.',
                     $type->name,
                 ));
             }

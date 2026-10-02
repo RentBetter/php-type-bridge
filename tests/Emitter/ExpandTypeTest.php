@@ -30,7 +30,7 @@ final class ExpandTypeTest extends TestCase
         $output = self::emit(new OutputStructure());
 
         self::assertStringContainsString(
-            "export interface CheckData {\n  name: string;\n  definition?: Ref<DefinitionData>;\n  owner: Ref<DefinitionData>;\n  related: Ref<ResultData>[];\n}",
+            "export interface CheckData {\n  name: string;\n  status: Status;\n  definition?: Ref<DefinitionData>;\n  owner: Ref<DefinitionData>;\n  related: Ref<ResultData>[];\n}",
             $output['Checks'],
         );
         self::assertStringContainsString('latestResult?: Ref<ResultData>;', $output['Checks']);
@@ -69,9 +69,15 @@ final class ExpandTypeTest extends TestCase
         self::emit(new OutputStructure(), new IncludeConvention());
     }
 
+    public function test_an_enum_generic_emits_as_the_type_it_wraps(): void
+    {
+        self::assertStringContainsString('  status: Status;', self::emit(new OutputStructure())['Checks']);
+    }
+
     public function test_the_config_reads_the_reference_generics(): void
     {
         self::assertSame(['ref'], TypeBridgeConfig::fromArray(['includes' => ['refTypes' => ['ref']]])->includes->refTypes);
+        self::assertSame(['enum'], TypeBridgeConfig::fromArray(['includes' => ['enumTypes' => ['enum']]])->includes->enumTypes);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/includes\.refTypes/');
@@ -81,7 +87,7 @@ final class ExpandTypeTest extends TestCase
     /**
      * @return array<string, string>
      */
-    private static function emit(OutputStructure $structure, IncludeConvention $includes = new IncludeConvention(refTypes: ['ref'])): array
+    private static function emit(OutputStructure $structure, IncludeConvention $includes = new IncludeConvention(refTypes: ['ref'], enumTypes: ['enum'])): array
     {
         $responseCollector = new ResponseClassCollector();
         $enumResolver = new EnumResolver();

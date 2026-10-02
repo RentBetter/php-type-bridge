@@ -12,6 +12,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\ExpandFixtures\Checks\View;
  * @phpstan-type DefinitionData = array{id: string, name: string, latestResult?: ref<ResultData>}
  * @phpstan-type CheckData = array{
  *     name: string,
+ *     status: enum<Status>,
  *     definition?: ref<DefinitionData>,
  *     owner: ref<DefinitionData>,
  *     related: list<ref<ResultData>>,

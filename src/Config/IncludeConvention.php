@@ -21,6 +21,9 @@ use RuntimeException;
  *   ref<DefinitionData>`. It is sent as the record's id, and as the record itself when the
  *   request expands its path. TypeBridge emits it as `Ref<DefinitionData>`, which
  *   `WithExpands<T, P>` swaps for the record at the paths a request expanded.
+ * - `enumTypes`: generics a shape wraps an enum in when the normaliser hands over a marker for
+ *   it rather than the case — `status: enum<Status>`. It is sent as the case, so TypeBridge emits
+ *   the enum's own type, as it would for `status: Status`.
  */
 final readonly class IncludeConvention
 {
@@ -30,11 +33,13 @@ final readonly class IncludeConvention
      * @param list<string> $types
      * @param class-string|null $sideLoadAttribute
      * @param list<string> $refTypes
+     * @param list<string> $enumTypes
      */
     public function __construct(
         public array $types = [],
         public ?string $sideLoadAttribute = null,
         public array $refTypes = [],
+        public array $enumTypes = [],
     ) {}
 
     /**
@@ -42,10 +47,10 @@ final readonly class IncludeConvention
      */
     public static function fromArray(array $config): self
     {
-        $unknownKeys = array_diff(array_keys($config), ['types', 'sideLoadAttribute', 'refTypes']);
+        $unknownKeys = array_diff(array_keys($config), ['types', 'sideLoadAttribute', 'refTypes', 'enumTypes']);
         if ([] !== $unknownKeys) {
             throw new RuntimeException(\sprintf(
-                'Unknown TypeBridge "includes" config keys: %s. Allowed: types, sideLoadAttribute, refTypes.',
+                'Unknown TypeBridge "includes" config keys: %s. Allowed: types, sideLoadAttribute, refTypes, enumTypes.',
                 implode(', ', $unknownKeys),
             ));
         }
@@ -59,6 +64,7 @@ final readonly class IncludeConvention
             self::genericNames($config, 'types', 'included'),
             $attribute,
             self::genericNames($config, 'refTypes', 'ref'),
+            self::genericNames($config, 'enumTypes', 'enum'),
         );
     }
 
@@ -70,6 +76,11 @@ final readonly class IncludeConvention
     public function isRefType(string $name): bool
     {
         return \in_array($name, $this->refTypes, true);
+    }
+
+    public function isEnumType(string $name): bool
+    {
+        return \in_array($name, $this->enumTypes, true);
     }
 
     /**

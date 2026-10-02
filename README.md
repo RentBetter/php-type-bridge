@@ -227,6 +227,7 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `MoneyInterface`, `\Acme\Money` (a class) | the JSON it serialises to — see below |
 | `included<T>` — a generic listed in `includes.types` | `T`, on a key absent unless asked for — see below |
 | `ref<T>` — a generic listed in `includes.refTypes` | `Ref<T>`: an id a request can expand to T — see below |
+| `enum<T>` — a generic listed in `includes.enumTypes` | `T`'s own type: an enum the normaliser hands over as a marker |
 
 A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written.
 
@@ -295,7 +296,9 @@ checks.checks[0].definition?.latestResult;  // still an id: not expanded
 
 P is checked against `ExpandPath<T>` — the refs in T, and the refs inside what they expand to, five levels deep — so a path that names anything but a reference does not compile. `Ref`, `ExpandPath` and `WithExpands` are declared beside `WithIncludes`, in the root module or in each module that has a ref. The two compose: `WithIncludes<WithExpands<T, X>, P>` includes keys inside expanded records.
 
-Any other generic TypeBridge does not know is an error that names `includes.types` and `includes.refTypes`.
+A normaliser that hands an enum over as a marker of its own, for its serialiser to write out, says so with a generic listed in `includes.enumTypes`: `status: enum<Status>` emits as `status: Status`, what the marker is sent as.
+
+Any other generic TypeBridge does not know is an error that names `includes.types`, `includes.refTypes` and `includes.enumTypes`.
 
 ### Shared declarations
 
