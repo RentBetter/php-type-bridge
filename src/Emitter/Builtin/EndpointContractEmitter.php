@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Emitter\Builtin;
 
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\AsTypeBridgeEmitter;
+use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Emitter\EmitContext;
 use PTGS\TypeBridge\Emitter\EmittedBlock;
 use PTGS\TypeBridge\Emitter\EmittedType;
@@ -25,6 +26,10 @@ use ReflectionMethod;
  * `EndpointResult<M>` and `Endpoint<M, I>` helpers are declared by the orchestrator via
  * {@see self::RESULT_HELPER} and {@see self::ENDPOINT_HELPER}: once in the root module when
  * there is one, once per module otherwise.
+ *
+ * An endpoint whose success response has a body takes the include query parameters too
+ * (`includes.query`): its query is `IncludeQuery`, or its own query form's type and that. The
+ * orchestrator declares `IncludeQuery` the same way, via {@see self::includeQueryHelper()}.
  */
 #[AsTypeBridgeEmitter('endpoint-contracts', mode: EmitMode::Referenced)]
 final class EndpointContractEmitter implements TypeEmitter
@@ -50,6 +55,40 @@ final class EndpointContractEmitter implements TypeEmitter
 
     private const array METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
+    /**
+     * @param list<CollectedEndpointContract> $contracts
+     */
+    public static function anyTakesIncludeQuery(array $contracts, IncludeConvention $includes): bool
+    {
+        foreach ($contracts as $contract) {
+            if (self::takesIncludeQuery($contract, $includes)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * `IncludeQuery`: each include query parameter as an optional string, described as configured.
+     */
+    public static function includeQueryHelper(IncludeConvention $includes): string
+    {
+        $lines = ['export interface IncludeQuery {'];
+        foreach ($includes->query as $name => $description) {
+            $lines[] = '  /** ' . str_replace('*/', '*\\/', $description) . ' */';
+            $lines[] = "  {$name}?: string;";
+        }
+        $lines[] = '}';
+
+        return implode("\n", $lines);
+    }
+
+    private static function takesIncludeQuery(CollectedEndpointContract $contract, IncludeConvention $includes): bool
+    {
+        return [] !== $includes->query && $contract->hasSuccessBody();
+    }
+
     public function claims(ReflectionClass $class): bool
     {
         foreach ($class->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
@@ -67,7 +106,7 @@ final class EndpointContractEmitter implements TypeEmitter
 
         $blocks = [];
         foreach ($contracts as $contract) {
-            if (null !== $contract->request && $contract->request->hasAnyInput()) {
+            if ((null !== $contract->request && $contract->request->hasAnyInput()) || self::takesIncludeQuery($contract, $context->includes)) {
                 $blocks[] = new EmittedBlock(40, '// Endpoint inputs', $this->renderInputs($contract, $context));
             }
         }
@@ -83,15 +122,16 @@ final class EndpointContractEmitter implements TypeEmitter
 
     private function renderInputs(CollectedEndpointContract $contract, EmitContext $context): string
     {
-        $request = $contract->request;
-        if (null === $request) {
-            return '';
+        $lines = [];
+        if (null !== $query = $this->queryType($contract, $context)) {
+            $lines[] = \sprintf('export type %s = %s;', $context->naming->queryAliasName($contract->name), $query);
         }
 
-        $lines = [];
-        if (null !== $request->query) {
-            $lines[] = \sprintf('export type %s = %s;', $context->naming->queryAliasName($contract->name), $context->symbolForInputReference($request->query));
+        $request = $contract->request;
+        if (null === $request) {
+            return implode("\n", $lines);
         }
+
         if (null !== $request->body) {
             $lines[] = \sprintf('export type %s = %s;', $context->naming->bodyAliasName($contract->name), $context->symbolForInputReference($request->body));
         }
@@ -102,6 +142,23 @@ final class EndpointContractEmitter implements TypeEmitter
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * The endpoint's query: its query form's type, `IncludeQuery` when its response has a body to
+     * shape, both intersected, or none.
+     */
+    private function queryType(CollectedEndpointContract $contract, EmitContext $context): ?string
+    {
+        $types = [];
+        if (null !== $query = $contract->request?->query) {
+            $types[] = $context->symbolForInputReference($query);
+        }
+        if (self::takesIncludeQuery($contract, $context->includes)) {
+            $types[] = 'IncludeQuery';
+        }
+
+        return [] === $types ? null : implode(' & ', $types);
     }
 
     /**
@@ -155,7 +212,7 @@ final class EndpointContractEmitter implements TypeEmitter
         if (null !== $request && (null !== $request->path || null !== $request->pathParams)) {
             $inputs[] = 'path: ' . $context->naming->pathAliasName($contract->name);
         }
-        if (null !== $request?->query) {
+        if (null !== $this->queryType($contract, $context)) {
             $inputs[] = 'query?: ' . $context->naming->queryAliasName($contract->name);
         }
         if (null !== $request?->body) {

@@ -7,8 +7,10 @@ namespace PTGS\TypeBridge\Emitter;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Model\ImportedType;
+use PTGS\TypeBridge\Support\RootSources;
 use ReflectionClass;
 use RuntimeException;
+
 
 /**
  * The TypeScript type for a class named in a shape: the JSON the class serialises to.
@@ -41,6 +43,7 @@ final class ClassTypeResolver
         array $domains,
         private readonly EmittedNames $names,
         private readonly EmitterRegistry $registry,
+        private readonly RootSources $rootSources = new RootSources(),
     ) {
         $this->domains = $domains;
         foreach ($domains as $domain) {
@@ -79,7 +82,7 @@ final class ClassTypeResolver
 
         $emitter = $this->registry->typeSymbolEmitterFor($reflection);
         if (null !== $emitter) {
-            return $emitter->typeSymbol($reflection);
+            return $this->rootSources->place($emitter->typeSymbol($reflection), $reflection);
         }
 
         throw new RuntimeException(\sprintf(

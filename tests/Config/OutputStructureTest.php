@@ -84,4 +84,29 @@ final class OutputStructureTest extends TestCase
 
         OutputStructure::fromArray(['domainDepth' => 0]);
     }
+
+    public function test_root_sources_are_paths_under_the_source_directory(): void
+    {
+        self::assertSame([], OutputStructure::fromArray([])->rootSources);
+        self::assertSame(['_', 'Event/EntityRef.php'], OutputStructure::fromArray([
+            'rootModule' => 'genTypes.ts',
+            'rootSources' => ['_/', '/Event/EntityRef.php'],
+        ])->rootSources);
+    }
+
+    public function test_root_sources_need_a_root_module(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('rootModule');
+
+        OutputStructure::fromArray(['rootSources' => ['_']]);
+    }
+
+    public function test_rejects_a_root_source_that_is_not_a_path(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('rootSources');
+
+        OutputStructure::fromArray(['rootModule' => 'genTypes.ts', 'rootSources' => ['_', '']]);
+    }
 }

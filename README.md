@@ -300,6 +300,20 @@ A normaliser that hands an enum over as a marker of its own, for its serialiser 
 
 Any other generic TypeBridge does not know is an error that names `includes.types`, `includes.refTypes` and `includes.enumTypes`.
 
+The query parameters a request asks with are `includes.query`, each named with its description:
+
+```php
+'includes' => [
+    // …
+    'query' => [
+        'include' => 'Opt-in parts of the response, comma-separated dotted paths.',
+        'expand' => 'References to send as their records, comma-separated dotted paths.',
+    ],
+],
+```
+
+Every endpoint whose success response has a body takes them, so no action declares them on its query form: its query type is `IncludeQuery` (declared once, beside `WithIncludes`), intersected with its form's type when it has one, and its MCP tool lists them among its arguments, sent in the query string. An endpoint that answers 204 has nothing to shape and takes none.
+
 ### Shared declarations
 
 The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` and `WithExpands` helpers are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
@@ -307,6 +321,17 @@ The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` and `WithExpand
 ### Modules
 
 Each domain is one module: the directories a class sits in under the source root, `output.domainDepth` levels deep (default `1`). At 1, everything under `src/Admin/` is one `admin` module. At 2, `src/Admin/SystemChecks/` is a module of its own, `admin/systemChecks`, which keeps modules small in a codebase organised by subdomain. Modules import each other by relative path (`../../entity/genTypes`). A module that both the full pass and a discovered emitter write is written once, with the declarations of both.
+
+Types every domain shares — money, dates, an entity reference — belong beside the config aliases rather than in a module of their own. `output.rootSources` lists the paths under the source root whose types are declared in the root module: a directory covers everything beneath it, a file only itself. It needs `output.rootModule`.
+
+```php
+'output' => [
+    'rootModule' => 'genTypes.ts',
+    'rootSources' => ['_', 'Entity', 'Event/EntityRef.php'],
+],
+```
+
+Moving a class into or out of a root source moves its type on the next generate; the imports that name it follow.
 
 ### Classes in shapes
 

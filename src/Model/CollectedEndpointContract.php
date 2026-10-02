@@ -20,4 +20,18 @@ final readonly class CollectedEndpointContract
         public string $httpMethod = 'GET',
         public string $httpPath = '',
     ) {}
+
+    /**
+     * Whether a success response sends a body: what the include query parameters shape.
+     */
+    public function hasSuccessBody(): bool
+    {
+        foreach ($this->responses as $response) {
+            if (!$response->error && 204 !== $response->status) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

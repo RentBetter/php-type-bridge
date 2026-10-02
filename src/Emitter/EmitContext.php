@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Emitter;
 
+use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
@@ -29,6 +30,7 @@ final readonly class EmitContext
      * @param array<string, array<string, string>>  $foreignAliases foreignDomain => (canonicalName => aliasInThisFile)
      * @param array<string, true>                   $preserveNullIndex keyed by "ShapeName.fieldName"
      * @param list<string>                          $candidateClasses every class in the generation run (for emitters that scan, e.g. a common-module emitter)
+     * @param IncludeConvention                     $includes what shapes a response on request, and the query parameters that ask
      */
     public function __construct(
         public string $domain,
@@ -43,6 +45,7 @@ final readonly class EmitContext
         public TypeScriptNaming $naming,
         private array $preserveNullIndex,
         public array $candidateClasses = [],
+        public IncludeConvention $includes = new IncludeConvention(),
     ) {}
 
     public function convert(ParsedType $type, ConversionScope $scope): string

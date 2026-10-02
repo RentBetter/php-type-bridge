@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\DomainMapper;
+use PTGS\TypeBridge\Support\RootSources;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -52,7 +53,7 @@ final class GenerateTypesCommand extends Command
 
         $config = null !== $configFile ? TypeBridgeConfig::fromFile($configFile) : new TypeBridgeConfig();
 
-        $domainGuesser = new DomainGuesser($config->output->domainDepth);
+        $domainGuesser = new DomainGuesser($config->output->domainDepth, $config->output->rootSources);
         $enumResolver = new EnumResolver(domainGuesser: $domainGuesser);
         $candidateClasses = array_keys((new PhpFileClassLocator())->classesIn($sourceDir));
         $registry = EmitterRegistry::fromAttributeScan($candidateClasses);
@@ -68,6 +69,7 @@ final class GenerateTypesCommand extends Command
             importSort: $config->output->importOrder->strategy(),
             typeAliases: $config->typeAliases,
             includes: $config->includes,
+            rootSources: new RootSources($domainGuesser, realpath($sourceDir) ?: $sourceDir),
         );
 
         $files = [];

@@ -9,6 +9,8 @@ use PTGS\TypeBridge\Config\ImportStrategy;
 use PTGS\TypeBridge\Config\OutputStructure;
 use PTGS\TypeBridge\Config\SegmentCase;
 use PTGS\TypeBridge\Emitter\DomainAssembler;
+use PTGS\TypeBridge\Emitter\EmitImport;
+use PTGS\TypeBridge\Emitter\EnumIdSymbolResolver;
 use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Model\CollectedDomain;
@@ -16,7 +18,9 @@ use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Sorting\AlphabeticalOrder;
+use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\DomainMapper;
+use PTGS\TypeBridge\Support\RootSources;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\AlphaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\BetaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
@@ -49,6 +53,33 @@ final class DiscoveredEmitterTest extends TestCase
         self::assertStringNotContainsString('// Enums', $domain);
 
         self::assertStringContainsString('export interface Base {', $output['']);
+    }
+
+    /**
+     * A class under a root source is declared in the root module whichever emitter writes it, and
+     * the symbol its emitter publishes for it points there too.
+     */
+    public function test_a_root_sources_class_is_re_homed_to_the_root_module(): void
+    {
+        $registry = EmitterRegistry::fromAttributeScan([MarkedEmitter::class]);
+        $rootSources = new RootSources(new DomainGuesser(rootSources: ['Discovered/AlphaStatus.php']), (string) realpath(__DIR__ . '/../Fixture'));
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output', new OutputStructure(rootModule: 'genTypes.ts')),
+            registry: $registry,
+            rootSources: $rootSources,
+        );
+
+        $output = $emitter->emitDiscovered([AlphaStatus::class, BetaStatus::class]);
+
+        self::assertStringContainsString("export type AlphaStatusId = 'OPEN' | 'CLOSED';", $output['']);
+        self::assertStringContainsString('export interface Base {', $output['']);
+        self::assertStringNotContainsString('AlphaStatusId', $output['Marked']);
+        self::assertStringContainsString('BetaStatusId', $output['Marked']);
+
+        $ids = new EnumIdSymbolResolver(new EnumResolver(), $registry, $rootSources);
+        self::assertEquals(new EmitImport('', 'AlphaStatusId'), $ids->resolve(AlphaStatus::class));
+        self::assertEquals(new EmitImport('Marked', 'BetaStatusId'), $ids->resolve(BetaStatus::class));
     }
 
     public function test_returns_empty_without_discovered_emitters(): void

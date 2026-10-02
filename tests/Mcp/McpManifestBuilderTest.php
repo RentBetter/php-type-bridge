@@ -7,7 +7,9 @@ namespace PTGS\TypeBridge\Tests\Mcp;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
+use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Mcp\McpManifestBuilder;
+use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
 use PTGS\TypeBridge\Model\CollectedFormField;
@@ -510,14 +512,14 @@ final class McpManifestBuilderTest extends TestCase
         );
     }
 
-    private function toolContract(string $name): CollectedEndpointContract
+    private function toolContract(string $name, ?int $status = null): CollectedEndpointContract
     {
         return new CollectedEndpointContract(
             name: $name,
             domain: 'misc',
             controllerClass: 'App\\Controller',
             methodName: '__invoke',
-            responses: [],
+            responses: null === $status ? [] : [$this->response($status)],
             mcp: new CollectedMcpTool(
                 name: $name,
                 description: ucfirst($name) . '.',
@@ -526,5 +528,53 @@ final class McpManifestBuilderTest extends TestCase
                 destructive: false,
             ),
         );
+    }
+
+    /**
+     * Every tool whose response has a body takes the include query parameters, described as
+     * configured and sent in the query string, without its query form declaring them; one
+     * answering 204 takes none, and one whose form declares them gets each once.
+     */
+    public function testAToolWithAResponseBodyTakesTheIncludeQuery(): void
+    {
+        $builder = new McpManifestBuilder(new IncludeConvention(query: ['include' => 'Opt-in parts.', 'expand' => 'Records in place.']));
+
+        $tool = $builder->build(['misc' => [$this->toolContract('listThings', status: 200)]])['tools'][0];
+        self::assertSame(['include', 'expand'], $tool['query']);
+        self::assertSame(['type' => 'string', 'description' => 'Opt-in parts.'], $tool['inputSchema']['properties']['include']);
+        self::assertSame(['type' => 'string', 'description' => 'Records in place.'], $tool['inputSchema']['properties']['expand']);
+
+        $noContent = $builder->build(['misc' => [$this->toolContract('deleteThing', status: 204)]])['tools'][0];
+        self::assertArrayNotHasKey('query', $noContent);
+        self::assertSame(['type' => 'object'], $noContent['inputSchema']);
+    }
+
+    public function testAQueryFormThatDeclaresThemStillListsEachOnce(): void
+    {
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $contract = new CollectedEndpointContract(
+            name: 'listThings',
+            domain: 'misc',
+            controllerClass: 'App\\Controller',
+            methodName: '__invoke',
+            responses: [$this->response(200)],
+            request: new CollectedEndpointRequest(
+                query: new CollectedInputReference(null, 'App\\ThingFilter', 'ThingFilter', 'misc', [
+                    $this->scalarField('include', $text, required: false),
+                    $this->scalarField('name', $text, required: false),
+                ]),
+            ),
+            mcp: new CollectedMcpTool(name: 'listThings', description: 'List things.', httpMethod: 'GET', httpPath: '/things', destructive: false),
+        );
+
+        $tool = (new McpManifestBuilder(new IncludeConvention(query: ['include' => 'Opt-in parts.', 'expand' => 'Records in place.'])))->build(['misc' => [$contract]])['tools'][0];
+
+        self::assertSame(['include', 'name', 'expand'], $tool['query']);
+        self::assertSame(['include', 'name', 'expand'], array_keys($tool['inputSchema']['properties']));
+    }
+
+    private function response(int $status): CollectedApiResponseClass
+    {
+        return new CollectedApiResponseClass('App\\Response' . $status, 'Response' . $status, 'misc', '', $status, false, []);
     }
 }

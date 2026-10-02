@@ -66,4 +66,16 @@ final class DomainMapperTest extends TestCase
         self::assertSame('../genTypes', $mapper->getRelativeImportPath('Admin/SystemChecks', 'Admin'));
         self::assertSame('./systemChecks/genTypes', $mapper->getRelativeImportPath('Admin', 'Admin/SystemChecks'));
     }
+
+    /**
+     * The root module imports a domain's from its own directory.
+     */
+    public function test_relative_imports_from_the_root_module_start_in_its_directory(): void
+    {
+        $atTop = new DomainMapper('/out', new OutputStructure(segmentCase: SegmentCase::PerSegmentLcFirst, rootModule: 'genTypes.ts'));
+        self::assertSame('./admin/systemChecks/genTypes', $atTop->getRelativeImportPath('', 'Admin/SystemChecks'));
+
+        $nested = new DomainMapper('/out', new OutputStructure(segmentCase: SegmentCase::PerSegmentLcFirst, rootModule: 'common/genTypes.ts'));
+        self::assertSame('../admin/genTypes', $nested->getRelativeImportPath('', 'Admin'));
+    }
 }

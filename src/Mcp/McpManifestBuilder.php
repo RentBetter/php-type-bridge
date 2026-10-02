@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Mcp;
 
+use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
@@ -22,6 +23,13 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
  */
 final class McpManifestBuilder
 {
+    /**
+     * @param IncludeConvention $includes whose `query` parameters every tool with a response body takes
+     */
+    public function __construct(
+        private readonly IncludeConvention $includes = new IncludeConvention(),
+    ) {}
+
     /**
      * @param array<string, list<CollectedEndpointContract>> $contractsByDomain
      *
@@ -69,11 +77,23 @@ final class McpManifestBuilder
         $tool['inputSchema'] = $this->inputSchema($contract);
 
         $query = array_map(static fn (CollectedFormField $field): string => $field->name, $contract->request?->query->fields ?? []);
+        $query = array_values(array_unique([...$query, ...array_keys($this->includeQuery($contract))]));
         if ([] !== $query) {
             $tool['query'] = $query;
         }
 
         return $tool;
+    }
+
+    /**
+     * The include query parameters this tool takes: all of them when its response has a body to
+     * shape, none otherwise.
+     *
+     * @return array<string, string>
+     */
+    private function includeQuery(CollectedEndpointContract $contract): array
+    {
+        return $contract->hasSuccessBody() ? $this->includes->query : [];
     }
 
     /**
@@ -95,6 +115,10 @@ final class McpManifestBuilder
 
             $this->addFields($request->query, $properties, $required);
             $this->addFields($request->body, $properties, $required);
+        }
+
+        foreach ($this->includeQuery($contract) as $name => $description) {
+            $properties[$name] ??= ['type' => 'string', 'description' => $description];
         }
 
         // An endpoint with no inputs is a bare `{type: object}`: an empty PHP array would
