@@ -434,6 +434,7 @@ final class TypeScriptEmitter
             enumResolver: $this->enumResolver,
             naming: $this->naming,
             preserveNullIndex: $this->preserveNullIndex,
+            includes: $this->includes,
         );
 
         $blocks = [];
@@ -467,6 +468,9 @@ final class TypeScriptEmitter
         // Helpers every module with endpoints shares, declared once like the aliases.
         $helpers = [];
         if ([] !== $contracts) {
+            if (EndpointContractEmitter::anyTakesIncludeQuery($contracts, $this->includes)) {
+                $helpers[] = new EmittedBlock(40, '// Endpoint inputs', EndpointContractEmitter::includeQueryHelper($this->includes), 'IncludeQuery');
+            }
             $helpers[] = new EmittedBlock(50, '// Endpoint results', EndpointContractEmitter::RESULT_HELPER, 'EndpointResult');
             $helpers[] = new EmittedBlock(60, '// Endpoints', EndpointContractEmitter::ENDPOINT_HELPER, 'Endpoint');
 

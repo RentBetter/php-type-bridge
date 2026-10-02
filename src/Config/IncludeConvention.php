@@ -24,6 +24,10 @@ use RuntimeException;
  * - `enumTypes`: generics a shape wraps an enum in when the normaliser hands over a marker for
  *   it rather than the case — `status: enum<Status>`. It is sent as the case, so TypeBridge emits
  *   the enum's own type, as it would for `status: Status`.
+ * - `query`: the query parameters a request shapes the response with, name => description —
+ *   `include` and `expand`. They are published on every endpoint whose success response has a
+ *   body, the responses they shape: in its generated query type, as `IncludeQuery`, and in its
+ *   MCP tool's arguments. An action declares none of them on its own query form.
  */
 final readonly class IncludeConvention
 {
@@ -34,12 +38,14 @@ final readonly class IncludeConvention
      * @param class-string|null $sideLoadAttribute
      * @param list<string> $refTypes
      * @param list<string> $enumTypes
+     * @param array<string, string> $query
      */
     public function __construct(
         public array $types = [],
         public ?string $sideLoadAttribute = null,
         public array $refTypes = [],
         public array $enumTypes = [],
+        public array $query = [],
     ) {}
 
     /**
@@ -47,10 +53,10 @@ final readonly class IncludeConvention
      */
     public static function fromArray(array $config): self
     {
-        $unknownKeys = array_diff(array_keys($config), ['types', 'sideLoadAttribute', 'refTypes', 'enumTypes']);
+        $unknownKeys = array_diff(array_keys($config), ['types', 'sideLoadAttribute', 'refTypes', 'enumTypes', 'query']);
         if ([] !== $unknownKeys) {
             throw new RuntimeException(\sprintf(
-                'Unknown TypeBridge "includes" config keys: %s. Allowed: types, sideLoadAttribute, refTypes, enumTypes.',
+                'Unknown TypeBridge "includes" config keys: %s. Allowed: types, sideLoadAttribute, refTypes, enumTypes, query.',
                 implode(', ', $unknownKeys),
             ));
         }
@@ -65,6 +71,7 @@ final readonly class IncludeConvention
             $attribute,
             self::genericNames($config, 'refTypes', 'ref'),
             self::genericNames($config, 'enumTypes', 'enum'),
+            self::queryParameters($config),
         );
     }
 
@@ -81,6 +88,27 @@ final readonly class IncludeConvention
     public function isEnumType(string $name): bool
     {
         return \in_array($name, $this->enumTypes, true);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array<string, string>
+     */
+    private static function queryParameters(array $config): array
+    {
+        $query = $config['query'] ?? [];
+        if (!\is_array($query)) {
+            throw new RuntimeException('TypeBridge config key "includes.query" must map each query parameter\'s name to its description.');
+        }
+        $parameters = [];
+        foreach ($query as $name => $description) {
+            if (!\is_string($name) || 1 !== preg_match(self::GENERIC_NAME, $name) || !\is_string($description) || '' === trim($description)) {
+                throw new RuntimeException('TypeBridge config key "includes.query" must map each query parameter\'s name to its description, such as "include" => "Opt-in parts of the response…".');
+            }
+            $parameters[$name] = $description;
+        }
+
+        return $parameters;
     }
 
     /**

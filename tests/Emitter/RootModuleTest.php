@@ -111,6 +111,39 @@ final class RootModuleTest extends TestCase
         self::assertStringContainsString('export type UuidStr = string;', $root);
     }
 
+    /**
+     * An endpoint whose success response has a body takes the include query parameters: its query
+     * is its form's type and `IncludeQuery`, or `IncludeQuery` alone, declared once in the root
+     * module with each parameter's description. One answering 204 takes none.
+     */
+    public function test_an_endpoint_with_a_response_body_takes_the_include_query(): void
+    {
+        $src = __DIR__ . '/../Fixture/Fixtures';
+        $responseCollector = new ResponseClassCollector();
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($src);
+
+        $output = (new TypeScriptEmitter(
+            enumResolver: $enumResolver,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output', new OutputStructure(rootModule: 'genTypes.ts')),
+            preserveNull: ['ProjectAdminView.internalNotes'],
+            includes: new IncludeConvention(query: ['include' => 'Opt-in parts.', 'expand' => 'Records */ in place.']),
+        ))->emit(
+            (new PhpDocTypeCollector())->collect($src),
+            $responseCollector->collect($src),
+            (new EndpointContractCollector())->collect($src, $responseCollector->collectIndex($src)),
+        );
+
+        self::assertStringContainsString("export interface IncludeQuery {\n  /** Opt-in parts. */\n  include?: string;\n  /** Records *\\/ in place. */\n  expand?: string;\n}", $output['']);
+
+        $projects = $output['Projects'];
+        self::assertMatchesRegularExpression('/export type ListProjectsQuery = \\w+ & IncludeQuery;/', $projects);
+        self::assertStringContainsString('export type ShowProjectQuery = IncludeQuery;', $projects);
+        self::assertStringContainsString('query?: ShowProjectQuery', $projects);
+        self::assertStringNotContainsString('DeleteProjectQuery', $projects);
+        self::assertMatchesRegularExpression("/import type \\{[^}]*\\bIncludeQuery\\b[^}]*\\} from '\\.\\.\\/genTypes';/", $projects);
+    }
+
     public function test_without_one_each_module_declares_its_own(): void
     {
         $output = $this->emitter(new OutputStructure())->emit((new PhpDocTypeCollector())->collect(self::SRC));

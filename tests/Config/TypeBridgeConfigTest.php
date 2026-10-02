@@ -226,4 +226,22 @@ PHP);
 
         TypeBridgeConfig::fromArray(['routing' => ''], sys_get_temp_dir());
     }
+
+    public function test_parses_the_include_query_parameters(): void
+    {
+        $config = TypeBridgeConfig::fromArray([
+            'includes' => ['query' => ['include' => 'Opt-in parts.', 'expand' => 'Records in place.']],
+        ]);
+
+        self::assertSame(['include' => 'Opt-in parts.', 'expand' => 'Records in place.'], $config->includes->query);
+        self::assertSame([], TypeBridgeConfig::fromArray([])->includes->query);
+    }
+
+    public function test_rejects_an_include_query_parameter_without_a_description(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('includes.query');
+
+        TypeBridgeConfig::fromArray(['includes' => ['query' => ['include', 'expand']]]);
+    }
 }

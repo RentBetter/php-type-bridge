@@ -300,6 +300,20 @@ A normaliser that hands an enum over as a marker of its own, for its serialiser 
 
 Any other generic TypeBridge does not know is an error that names `includes.types`, `includes.refTypes` and `includes.enumTypes`.
 
+The query parameters a request asks with are `includes.query`, each named with its description:
+
+```php
+'includes' => [
+    // …
+    'query' => [
+        'include' => 'Opt-in parts of the response, comma-separated dotted paths.',
+        'expand' => 'References to send as their records, comma-separated dotted paths.',
+    ],
+],
+```
+
+Every endpoint whose success response has a body takes them, so no action declares them on its query form: its query type is `IncludeQuery` (declared once, beside `WithIncludes`), intersected with its form's type when it has one, and its MCP tool lists them among its arguments, sent in the query string. An endpoint that answers 204 has nothing to shape and takes none.
+
 ### Shared declarations
 
 The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` and `WithExpands` helpers are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
