@@ -187,10 +187,13 @@ final readonly class TypeToTsConverter
         }
 
         // An include generic (`included<T>`) is its type; the key it sits on is what is optional.
+        // A ref generic (`ref<T>`) is an id that expands to T: `Ref<T>`, which WithExpands reads.
+        // An enum generic (`enum<T>`) is the enum T, sent as its case.
         if ($type instanceof GenericType) {
-            if (!$this->includes->isIncludeType($type->name)) {
+            $isRef = $this->includes->isRefType($type->name);
+            if (!$isRef && !$this->includes->isIncludeType($type->name) && !$this->includes->isEnumType($type->name)) {
                 throw new RuntimeException(\sprintf(
-                    'Unknown generic `%s<…>`. If it marks a key that is only sent when a request asks for it, list it in the `includes.types` config.',
+                    'Unknown generic `%s<…>`. If it marks a key that is only sent when a request asks for it, list it in the `includes.types` config; if it is a reference a request can expand, in `includes.refTypes`; if it wraps an enum, in `includes.enumTypes`.',
                     $type->name,
                 ));
             }
@@ -198,7 +201,9 @@ final readonly class TypeToTsConverter
                 throw new RuntimeException(\sprintf('`%s<…>` wraps one type; it was given %d.', $type->name, \count($type->arguments)));
             }
 
-            return $this->convert($type->arguments[0], $scope);
+            $inner = $this->convert($type->arguments[0], $scope);
+
+            return $isRef ? \sprintf('%s<%s>', TypeScriptEmitter::REF_TYPE, $inner) : $inner;
         }
 
         if ($type instanceof ClassConstantType) {

@@ -61,6 +61,34 @@ final class McpManifestBuilderTest extends TestCase
         ], $manifest);
     }
 
+    public function testNamesTheArgumentsThatGoInTheQueryStringWhateverTheMethod(): void
+    {
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $contract = new CollectedEndpointContract(
+            name: 'runCheck',
+            domain: 'checks',
+            controllerClass: 'App\\RunController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                query: new CollectedInputReference(null, 'App\\IncludeData', 'IncludeData', 'checks', [
+                    $this->scalarField('include', $text, required: false),
+                    $this->scalarField('expand', $text, required: false),
+                ]),
+                body: new CollectedInputReference(null, 'App\\RunData', 'RunData', 'checks', [
+                    $this->scalarField('reason', $text, required: false),
+                ]),
+            ),
+            mcp: new CollectedMcpTool(name: 'runCheck', description: 'Run a check.', httpMethod: 'POST', httpPath: '/checks/run', destructive: false),
+        );
+
+        $tool = (new McpManifestBuilder())->build(['checks' => [$contract]])['tools'][0];
+
+        self::assertSame(['include', 'expand'], $tool['query']);
+        self::assertSame(['include', 'expand', 'reason'], array_keys($tool['inputSchema']['properties']));
+        self::assertArrayNotHasKey('query', (new McpManifestBuilder())->build(['accounts' => [$this->setFeatureContract()]])['tools'][0], 'Only listed when there are any');
+    }
+
     public function testAnEnumFieldPublishesTheValuesItAccepts(): void
     {
         // A model cannot see a PHP enum. Without the values in the schema its only way to learn them
