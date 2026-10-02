@@ -83,6 +83,70 @@ final class TypeScriptEmitter
         type IncludeBelow<P extends string, K extends string> = P extends `${K}.${infer Rest}` ? Rest : never;
         TS;
 
+    /** The generic a `ref<T>` field emits as. */
+    public const string REF_TYPE = 'Ref';
+
+    /**
+     * `Ref<T>`, and `WithExpands<T, P>`: a type as sent when the request expanded paths P, with
+     * each reference they name swapped for the record it points at. P is checked against
+     * `ExpandPath<T>` — the references T has, and those inside what they expand to — so a path
+     * that names anything but a reference does not compile.
+     *
+     * `Ref<T>` is the record's id — typed as the record types its own `id` — flavoured with the
+     * record under a `~ref` key that is never sent: a plain id is still assignable to it, and it
+     * reads as one. A `~` key sorts last in completion lists, which is why Standard Schema marks its
+     * own `~standard` the same way.
+     */
+    public const string WITH_EXPANDS_HELPER = <<<'TS'
+        /** A related record's id. Expanding its path (`?expand=`) sends the record itself, T, instead. */
+        export type Ref<T> = (T extends { id: infer Id } ? Id : string) & { readonly '~ref'?: T };
+
+        /** The dotted paths `?expand=` can name on T: each reference, and the references inside what it expands to or sits beside. */
+        export type ExpandPath<T, Depth extends unknown[] = []> = Depth['length'] extends 5
+          ? never
+          : T extends readonly (infer Item)[]
+            ? ExpandPath<Item, Depth>
+            : T extends object
+              ? {
+                  [K in keyof T & string]-?: [RefTarget<ListItem<NonNullable<T[K]>>>] extends [never]
+                    ? NonNullable<T[K]> extends object
+                      ? `${K}.${ExpandPath<NonNullable<T[K]>, [...Depth, unknown]>}`
+                      : never
+                    : K | `${K}.${ExpandPath<RefTarget<ListItem<NonNullable<T[K]>>>, [...Depth, unknown]>}`;
+                }[keyof T & string]
+              : never;
+
+        /** T as sent when the request expanded paths P (`'checks.definition'`, or a list of them): each reference they name is its record. */
+        export type WithExpands<T, P extends ExpandPath<T> | readonly ExpandPath<T>[]> = WithExpandsAt<
+          T,
+          P extends readonly string[] ? P[number] : P
+        >;
+
+        type WithExpandsAt<T, P extends string> = [P] extends [never]
+          ? T
+          : T extends readonly (infer Item)[]
+            ? Array<WithExpandsAt<Item, P>>
+            : T extends object
+              ? { [K in keyof T]: K extends ExpandRoot<P> ? ExpandedValue<T[K], ExpandBelow<P, K & string>> : T[K] }
+              : T;
+
+        type ExpandedValue<V, P extends string> = V extends undefined
+          ? undefined
+          : V extends readonly (infer Item)[]
+            ? Array<ExpandedValue<Item, P>>
+            : [RefTarget<V>] extends [never]
+              ? WithExpandsAt<V, P>
+              : WithExpandsAt<RefTarget<V>, P>;
+
+        type RefTarget<V> = V extends unknown ? ('~ref' extends keyof V ? NonNullable<V['~ref' & keyof V]> : never) : never;
+
+        type ListItem<V> = V extends readonly (infer Item)[] ? Item : V;
+
+        type ExpandRoot<P extends string> = P extends `${infer Root}.${string}` ? Root : P;
+
+        type ExpandBelow<P extends string, K extends string> = P extends `${K}.${infer Rest}` ? Rest : never;
+        TS;
+
     private EmittedNames $names;
 
     private SymbolRegistry $symbols;
@@ -410,7 +474,7 @@ final class TypeScriptEmitter
             }
         }
 
-        $shared = [...$this->typeAliasBlocks($blocks), ...$this->withIncludesBlocks($blocks), ...$helpers];
+        $shared = [...$this->typeAliasBlocks($blocks), ...$this->withIncludesBlocks($blocks), ...$this->withExpandsBlocks($blocks), ...$helpers];
         if ($this->domainMapper->hasRootModule()) {
             // Declared once, in the root module; what this module uses — the aliases, `EndpointResult`
             // — is imported from it. The `WithIncludes` helper is only declared: consumers import it.
@@ -442,6 +506,25 @@ final class TypeScriptEmitter
         foreach ($blocks as $block) {
             if (1 === preg_match('/^export type \w+' . self::INCLUDED_SUFFIX . ' = /m', $block->code)) {
                 return [new EmittedBlock(15, '// Includes', self::WITH_INCLUDES_HELPER, 'WithIncludes')];
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * `Ref<T>` and `WithExpands<T, P>` for a module with a `ref<T>` field. Keyed by `Ref`, the one
+     * name the module itself mentions, so with a root module that is what it imports; consumers
+     * import `WithExpands` themselves.
+     *
+     * @param list<EmittedBlock> $blocks
+     * @return list<EmittedBlock>
+     */
+    private function withExpandsBlocks(array $blocks): array
+    {
+        foreach ($blocks as $block) {
+            if (1 === preg_match('/\b' . self::REF_TYPE . '</', $block->code)) {
+                return [new EmittedBlock(16, '// Expands', self::WITH_EXPANDS_HELPER, self::REF_TYPE)];
             }
         }
 

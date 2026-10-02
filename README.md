@@ -226,6 +226,7 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `(A \| B)`, `Base & array{...}` | `A \| B`, `interface … extends Base` |
 | `MoneyInterface`, `\Acme\Money` (a class) | the JSON it serialises to — see below |
 | `included<T>` — a generic listed in `includes.types` | `T`, on a key absent unless asked for — see below |
+| `ref<T>` — a generic listed in `includes.refTypes` | `Ref<T>`: an id a request can expand to T — see below |
 
 A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written.
 
@@ -269,11 +270,36 @@ response.data.definitions.length;      // there: a side-load asked for
 
 P is a dotted path, a union of them, or a list. Each is checked against `IncludePath<T>`, which covers every key path in T to five levels, so a misspelt path (`'checks.debgu'`) does not compile. That check is against the type, not the API's include vocabulary: a path to a key that is always sent still compiles, and it changes nothing.
 
-Any other generic TypeBridge does not know is an error that names `includes.types`.
+### References a request can expand
+
+A related record can go out as its id and, when the request expands its path (`?expand=checks.definition`), as the record itself — the server swapping one for the other. A shape marks such a key with a generic of its own, naming the shape the record is sent as: `definition?: ref<DefinitionData>`.
+
+```php
+'includes' => [
+    'types' => ['included'],
+    'refTypes' => ['ref'],                      // the reference generics
+],
+```
+
+It emits as `Ref<DefinitionData>`: the record's id, typed as the record types its own `id`, and flavoured with the record under a `~ref` key that is never sent. A plain id is still assignable to it and it reads as one, so a ref works as an id anywhere an id is wanted. `WithExpands<T, P>` swaps it for the record at the paths a request expanded — through lists, and on into the record, so `checks.definition.latestResult` expands a ref inside an expanded one:
+
+```ts
+export interface CheckData { name: string; definition?: Ref<DefinitionData>; }
+export interface DefinitionData { id: string; name: string; latestResult?: Ref<ResultData>; }
+
+type Checks = WithExpands<ListChecksResponse, ['checks.definition']>;
+declare const checks: Checks;
+checks.checks[0].definition?.name;          // the record
+checks.checks[0].definition?.latestResult;  // still an id: not expanded
+```
+
+P is checked against `ExpandPath<T>` — the refs in T, and the refs inside what they expand to, five levels deep — so a path that names anything but a reference does not compile. `Ref`, `ExpandPath` and `WithExpands` are declared beside `WithIncludes`, in the root module or in each module that has a ref. The two compose: `WithIncludes<WithExpands<T, X>, P>` includes keys inside expanded records.
+
+Any other generic TypeBridge does not know is an error that names `includes.types` and `includes.refTypes`.
 
 ### Shared declarations
 
-The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` helper are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
+The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` and `WithExpands` helpers are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
 
 ### Modules
 
