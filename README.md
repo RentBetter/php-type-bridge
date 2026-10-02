@@ -308,6 +308,17 @@ The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` and `WithExpand
 
 Each domain is one module: the directories a class sits in under the source root, `output.domainDepth` levels deep (default `1`). At 1, everything under `src/Admin/` is one `admin` module. At 2, `src/Admin/SystemChecks/` is a module of its own, `admin/systemChecks`, which keeps modules small in a codebase organised by subdomain. Modules import each other by relative path (`../../entity/genTypes`). A module that both the full pass and a discovered emitter write is written once, with the declarations of both.
 
+Types every domain shares — money, dates, an entity reference — belong beside the config aliases rather than in a module of their own. `output.rootSources` lists the paths under the source root whose types are declared in the root module: a directory covers everything beneath it, a file only itself. It needs `output.rootModule`.
+
+```php
+'output' => [
+    'rootModule' => 'genTypes.ts',
+    'rootSources' => ['_', 'Entity', 'Event/EntityRef.php'],
+],
+```
+
+Moving a class into or out of a root source moves its type on the next generate; the imports that name it follow.
+
 ### Classes in shapes
 
 PHPStan-typed code often holds objects in an array that json_encode then serialises — `array{total: MoneyInterface}` — so a shape may name a class, and it means the JSON that class serialises to:

@@ -38,6 +38,24 @@ final class DomainGuesserTest extends TestCase
         self::assertSame('Admin', (new DomainGuesser())->guess('/src', '/src/Admin/SystemChecks/Check.php'));
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function rootSourceFiles(): iterable
+    {
+        yield 'a file under a directory source, however deep' => ['_/Entity/Money/MoneyInterface.php', ''];
+        yield 'a file source' => ['Event/EntityRef.php', ''];
+        yield 'its sibling is not' => ['Event/EntityRefTrait.php', 'Event'];
+        yield 'nor a directory that only starts the same' => ['_x/Thing.php', '_x'];
+        yield 'nor anything else' => ['Admin/SystemChecks/Check.php', 'Admin/SystemChecks'];
+    }
+
+    #[DataProvider('rootSourceFiles')]
+    public function test_a_file_under_a_root_source_is_in_the_root_domain(string $file, string $domain): void
+    {
+        self::assertSame($domain, (new DomainGuesser(2, ['_', 'Event/EntityRef.php']))->guess('/src', '/src/' . $file));
+    }
+
     public function test_a_depth_below_one_is_refused(): void
     {
         $this->expectException(InvalidArgumentException::class);

@@ -30,6 +30,7 @@ use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Sorting\AlphabeticalOrder;
 use PTGS\TypeBridge\Sorting\SortStrategy;
 use PTGS\TypeBridge\Support\DomainMapper;
+use PTGS\TypeBridge\Support\RootSources;
 use ReflectionClass;
 use RuntimeException;
 
@@ -192,6 +193,7 @@ final class TypeScriptEmitter
      *   that references one, and registered in that domain's symbol map so a class-declared
      *   `@phpstan-type` of the same name collides loudly instead of shadowing it.
      * @param IncludeConvention $includes what marks the parts of a response sent only when asked for
+     * @param RootSources $rootSources re-homes what a discovered emitter places itself, by the rule the collectors place by
      */
     public function __construct(
         private readonly EnumResolver $enumResolver,
@@ -203,6 +205,7 @@ final class TypeScriptEmitter
         private readonly SortStrategy $importSort = new AlphabeticalOrder(),
         private readonly array $typeAliases = [],
         private readonly IncludeConvention $includes = new IncludeConvention(),
+        private readonly RootSources $rootSources = new RootSources(),
     ) {
         $this->naming = $naming ?? new TypeScriptNaming();
         $this->preserveNullIndex = array_fill_keys($preserveNull, true);
@@ -229,7 +232,7 @@ final class TypeScriptEmitter
     {
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses));
-        $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry);
+        $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
@@ -247,9 +250,15 @@ final class TypeScriptEmitter
             );
         }
 
+        // The root domain's own types — those under a root source — share the root module with
+        // what every module shares, so it is written once with both.
         $this->rootBlocks = $rootBlocks;
-        if ([] !== $rootBlocks) {
-            $output[''] = $this->assembler->assemble([], array_values($rootBlocks));
+        $root = \in_array('', $allDomains, true) ? $this->emittedModules[''] : null;
+        if (null !== $root || [] !== $rootBlocks) {
+            $output[''] = $this->assembler->assemble(
+                null === $root ? [] : $this->renderImportLines('', $root['imports'], $root['foreignAliases']),
+                [...($root['blocks'] ?? []), ...array_values($rootBlocks)],
+            );
         }
 
         return $output;
@@ -309,7 +318,7 @@ final class TypeScriptEmitter
                 }
 
                 $claimedByConvention[$registered->convention][] = $reflection;
-                $this->collectEmitted($registered->emitter->emit($reflection, $context), $blocksByDomain, $importsByDomain);
+                $this->collectEmitted($this->rootSources->placeEmitted($registered->emitter->emit($reflection, $context), $reflection), $blocksByDomain, $importsByDomain);
 
                 break;
             }
@@ -334,7 +343,7 @@ final class TypeScriptEmitter
         foreach ($domains as $domain) {
             // A module emit() also wrote — a subdomain holding both shapes and the enums a
             // discovered emitter claims — is written once, with both passes' declarations.
-            $emitted = '' === $domain ? null : ($this->emittedModules[$domain] ?? null);
+            $emitted = $this->emittedModules[$domain] ?? null;
             if (null !== $emitted) {
                 $imports = $emitted['imports'];
                 foreach ($importsByDomain[$domain] ?? [] as $import) {
@@ -480,7 +489,7 @@ final class TypeScriptEmitter
             // — is imported from it. The `WithIncludes` helper is only declared: consumers import it.
             foreach ($shared as $block) {
                 $rootBlocks[$block->sortKey ?? $block->code] = $block;
-                if ('WithIncludes' !== $block->sortKey && null !== $block->sortKey) {
+                if ('' !== $domain && 'WithIncludes' !== $block->sortKey && null !== $block->sortKey) {
                     $imports[''][] = $block->sortKey;
                 }
             }
@@ -725,7 +734,7 @@ final class TypeScriptEmitter
 
     private function enumIds(): EnumIdSymbolResolver
     {
-        return new EnumIdSymbolResolver($this->enumResolver, $this->registry);
+        return new EnumIdSymbolResolver($this->enumResolver, $this->registry, $this->rootSources);
     }
 
     /**

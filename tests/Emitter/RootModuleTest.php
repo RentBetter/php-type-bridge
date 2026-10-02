@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Emitter\Builtin\EndpointContractEmitter;
 use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
+use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\AlphaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
@@ -78,6 +79,36 @@ final class RootModuleTest extends TestCase
             self::assertStringNotContainsString('export type EndpointResult', $module, "{$domain} declares its own");
             self::assertMatchesRegularExpression("/import type \\{[^}]*\\bEndpointResult\\b[^}]*\\} from '\\.\\.\\/genTypes';/", $module, "{$domain} imports it");
         }
+    }
+
+    /**
+     * A type under a root source is declared in the root module beside the aliases: a domain
+     * imports it from there, and the root module imports what it uses from a domain.
+     */
+    public function test_a_root_source_declares_its_types_in_the_root_module(): void
+    {
+        $collected = (new PhpDocTypeCollector(domainGuesser: new DomainGuesser(rootSources: ['Shared'])))->collect(self::SRC);
+        $output = $this->emitter(new OutputStructure(rootModule: 'genTypes.ts'))->emit($collected);
+
+        self::assertArrayNotHasKey('Shared', $output);
+        self::assertStringContainsString('export interface Other', $output['']);
+        self::assertStringContainsString('export interface Pointer', $output['']);
+        self::assertStringContainsString('export type UuidStr = string;', $output['']);
+        self::assertStringContainsString("import type { LinkData } from './Links/genTypes';", $output['']);
+        self::assertStringNotContainsString("from '../genTypes'", $output[''], 'The root module imports nothing from itself');
+        self::assertStringContainsString("import type { Other } from '../genTypes';", $output['Links']);
+    }
+
+    public function test_the_discovered_pass_keeps_a_root_sources_types(): void
+    {
+        $emitter = $this->emitter(new OutputStructure(rootModule: 'genTypes.ts'), EmitterRegistry::fromAttributeScan([MarkedEmitter::class]));
+        $emitter->emit((new PhpDocTypeCollector(domainGuesser: new DomainGuesser(rootSources: ['Shared'])))->collect(self::SRC));
+        $root = $emitter->emitDiscovered([AlphaStatus::class])[''];
+
+        self::assertStringContainsString('export interface Base', $root);
+        self::assertStringContainsString('export interface Other', $root);
+        self::assertStringContainsString("import type { LinkData } from './Links/genTypes';", $root);
+        self::assertStringContainsString('export type UuidStr = string;', $root);
     }
 
     public function test_without_one_each_module_declares_its_own(): void

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Emitter;
 
 use PTGS\TypeBridge\Resolver\EnumResolver;
+use PTGS\TypeBridge\Support\RootSources;
 use ReflectionClass;
 use RuntimeException;
 
@@ -21,6 +22,7 @@ final readonly class EnumIdSymbolResolver
     public function __construct(
         private EnumResolver $enumResolver,
         private EmitterRegistry $registry,
+        private RootSources $rootSources = new RootSources(),
     ) {}
 
     public function resolve(string $enumClass): EmitImport
@@ -43,6 +45,6 @@ final readonly class EnumIdSymbolResolver
             ));
         }
 
-        return $owner->emitter->idSymbol($reflection);
+        return $this->rootSources->place($owner->emitter->idSymbol($reflection), $reflection);
     }
 }

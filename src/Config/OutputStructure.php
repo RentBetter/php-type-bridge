@@ -16,6 +16,13 @@ use RuntimeException;
  */
 final readonly class OutputStructure
 {
+    /**
+     * @param list<string> $rootSources paths under the source directory whose types are declared
+     *                                 in the root module rather than a domain's: a directory
+     *                                 covers everything beneath it, a file only itself. For the
+     *                                 types every domain shares, so they sit beside the config
+     *                                 aliases instead of in a module of their own.
+     */
     public function __construct(
         public SegmentCase $segmentCase = SegmentCase::AsIs,
         public ?string $rootModule = null,
@@ -25,6 +32,7 @@ final readonly class OutputStructure
         public SortOrder $declarationOrder = SortOrder::Declared,
         public SortOrder $importOrder = SortOrder::Name,
         public int $domainDepth = 1,
+        public array $rootSources = [],
     ) {}
 
     /**
@@ -32,7 +40,7 @@ final readonly class OutputStructure
      */
     public static function fromArray(array $config): self
     {
-        $allowedKeys = ['segmentCase', 'rootModule', 'importStrategy', 'aliasBase', 'header', 'declarationOrder', 'importOrder', 'domainDepth'];
+        $allowedKeys = ['segmentCase', 'rootModule', 'importStrategy', 'aliasBase', 'header', 'declarationOrder', 'importOrder', 'domainDepth', 'rootSources'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -57,6 +65,11 @@ final readonly class OutputStructure
             throw new RuntimeException('TypeBridge output config "domainDepth" must be a positive integer.');
         }
 
+        $rootSources = self::rootSourcesOption($config);
+        if ([] !== $rootSources && null === $rootModule) {
+            throw new RuntimeException('TypeBridge output config "rootSources" needs a "rootModule" to emit into.');
+        }
+
         if (ImportStrategy::Alias === $importStrategy && null === $aliasBase) {
             throw new RuntimeException('TypeBridge output config "aliasBase" is required when "importStrategy" is "alias".');
         }
@@ -70,7 +83,32 @@ final readonly class OutputStructure
             declarationOrder: $declarationOrder,
             importOrder: $importOrder,
             domainDepth: $domainDepth,
+            rootSources: $rootSources,
         );
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     *
+     * @return list<string>
+     */
+    private static function rootSourcesOption(array $config): array
+    {
+        $sources = $config['rootSources'] ?? [];
+        if (!\is_array($sources) || !array_is_list($sources)) {
+            throw new RuntimeException('TypeBridge output config "rootSources" must be a list of paths relative to the source directory.');
+        }
+
+        $paths = [];
+        foreach ($sources as $source) {
+            $path = \is_string($source) ? trim(str_replace('\\', '/', $source), '/') : '';
+            if ('' === $path) {
+                throw new RuntimeException('TypeBridge output config "rootSources" must be a list of non-empty paths relative to the source directory.');
+            }
+            $paths[] = $path;
+        }
+
+        return $paths;
     }
 
     /**

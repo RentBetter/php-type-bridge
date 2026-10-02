@@ -47,11 +47,12 @@ final readonly class DomainMapper
     /**
      * Relative import path from one domain's module to another's: up to the directory they share,
      * then down to the target — `../../entity/genTypes` from `http/v2`, `../tasks/genTypes` from
-     * `admin/systemChecks` to `admin/tasks`.
+     * `admin/systemChecks` to `admin/tasks`. From the root domain, `''`, it starts in the root
+     * module's directory: `./admin/tasks/genTypes`.
      */
     public function getRelativeImportPath(string $fromDomain, string $toDomain): string
     {
-        $from = explode('/', $this->dirName($fromDomain));
+        $from = '' === $fromDomain ? $this->rootDirectory() : explode('/', $this->dirName($fromDomain));
         $to = explode('/', $this->dirName($toDomain));
 
         $shared = 0;
@@ -77,6 +78,16 @@ final readonly class DomainMapper
         $depth = substr_count($this->dirName($fromDomain), '/') + 1;
 
         return str_repeat('../', $depth) . pathinfo($this->structure->rootModule ?? 'genTypes.ts', PATHINFO_FILENAME);
+    }
+
+    /**
+     * @return list<string> the root module's directory under the output directory, by segment
+     */
+    private function rootDirectory(): array
+    {
+        $directory = \dirname($this->structure->rootModule ?? 'genTypes.ts');
+
+        return '.' === $directory ? [] : explode('/', $directory);
     }
 
     private function dirName(string $domain): string
