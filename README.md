@@ -186,7 +186,7 @@ This first cut is focused on contract collection and code generation:
   - `#[ApiRequest]` on routed mutating API controller methods
   - returned/thrown typed response classes being declared in `#[ApiResponses]`
   - `ContractFormType<TData>` syncing with `data_class`, `_self`, mapped fields, `property_path`, nested custom forms, enums, dates, collections, and common scalar leaf types
-  - `_self` shape naming: no `Id` suffix on string reference fields, and no `entityType` / `entityId` pair (use a compound `entity: "{type}-{uuid}"`)
+  - `_self` shape naming: no `Id` suffix on string reference fields
 
 For request contracts, `query` and `body` point at Symfony form types directly. TypeBridge resolves the form's `data_class` and uses that class's `_self` definition as the generated wire contract.
 Custom forms participating in request contracts must implement `PTGS\TypeBridge\Contract\ContractFormType`.
