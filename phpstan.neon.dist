@@ -6,5 +6,7 @@ parameters:
     level: max
     paths:
         - src
+        # Uses IncludeMarkers, so PHPStan analyses the trait: one nothing in src uses is skipped.
+        - tests/Normalizer/Fixtures/MarkingNormalizer.php
     bootstrapFiles:
         - vendor/autoload.php
