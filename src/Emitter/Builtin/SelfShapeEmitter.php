@@ -92,7 +92,7 @@ final class SelfShapeEmitter implements TypeEmitter
         $keys = [];
         foreach ($shape->fields as $field) {
             if (!$field->optional && $context->converter->isIncluded($field->type)) {
-                $keys[] = "'" . $field->name . "'";
+                $keys[] = TypeToTsConverter::stringLiteral($field->name);
             }
         }
 
@@ -111,7 +111,7 @@ final class SelfShapeEmitter implements TypeEmitter
             $type = $type->inner;
         }
 
-        return \sprintf('  %s%s: %s;', $field->name, $optional ? '?' : '', $context->convert($type, $scope));
+        return \sprintf('  %s%s: %s;', TypeToTsConverter::propertyName($field->name), $optional ? '?' : '', $context->convert($type, $scope));
     }
 
     /**
