@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Config;
 
+use PTGS\TypeBridge\Routing\RoutePathResolver;
 use RuntimeException;
 
 /**
@@ -69,6 +70,20 @@ final readonly class TypeBridgeConfig
         public ?string $routing = null,
         public ?string $projectDir = null,
     ) {}
+
+    /**
+     * What resolves an endpoint's path to the one Symfony serves, when the config names a routing
+     * entrypoint; null otherwise. A resolver with no file would answer null for every method, which
+     * the collector refuses for an MCP tool as unrouted.
+     */
+    public function routePathResolver(): ?RoutePathResolver
+    {
+        if (null === $this->routing || null === $this->projectDir) {
+            return null;
+        }
+
+        return new RoutePathResolver($this->projectDir, $this->routing);
+    }
 
     public static function fromFile(string $path): self
     {

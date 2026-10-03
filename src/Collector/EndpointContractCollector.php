@@ -402,13 +402,6 @@ final class EndpointContractCollector
     }
 
     /**
-     * The path an MCP tool is published with. With a route resolver configured it is the served
-     * path, and both ways the router can fail to supply one are errors rather than fallbacks: a
-     * routing file that will not load, or a method the loaded collection does not route. Either
-     * would otherwise publish the attribute path as if it were served, and a tool pointing at a
-     * path the application answers 404 to is worse than no tool.
-     */
-    /**
      * The path a client calls an endpoint at: the one Symfony serves when the routing config is
      * given — its prefixes and any class-level #[Route] included — and the method attribute's own
      * otherwise. Unlike an MCP tool's, an endpoint the router does not know keeps its attribute
@@ -419,6 +412,13 @@ final class EndpointContractCollector
         return $this->routePathResolver?->pathFor($method->getDeclaringClass()->getName(), $method->getName()) ?? $attributePath;
     }
 
+    /**
+     * The path an MCP tool is published with. With a route resolver configured it is the served
+     * path, and both ways the router can fail to supply one are errors rather than fallbacks: a
+     * routing file that will not load, or a method the loaded collection does not route. Either
+     * would otherwise publish the attribute path as if it were served, and a tool pointing at a
+     * path the application answers 404 to is worse than no tool.
+     */
     private function servedPath(ReflectionMethod $method, string $attributePath): string
     {
         if (null === $this->routePathResolver) {
