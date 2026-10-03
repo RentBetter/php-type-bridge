@@ -12,7 +12,10 @@ use Closure;
  * IncludeMarkers::optional(); resolved or dropped by IncludeResolver. A shape declares such a
  * key as `included<T>`, which PHPStan reads as `T|Optional<T>` (includes.neon).
  *
- * @template T
+ * Covariant, as it only gives T back: a closure returning `array{seen: int}` fills a key declared
+ * `included<array<string, mixed>>`.
+ *
+ * @template-covariant T
  */
 final readonly class Optional
 {

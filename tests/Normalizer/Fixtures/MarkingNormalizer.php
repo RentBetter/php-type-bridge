@@ -11,14 +11,44 @@ use PTGS\TypeBridge\Http\Include\EnumCase;
 use PTGS\TypeBridge\Http\Include\Optional;
 use PTGS\TypeBridge\Http\Include\Ref;
 use PTGS\TypeBridge\Normalizer\IncludeMarkers;
+use PTGS\TypeBridge\Tests\Http\Include\Fixtures\CheckStatus;
+use PTGS\TypeBridge\Tests\Http\Include\Fixtures\Priority;
+use PTGS\TypeBridge\Tests\Http\Include\Fixtures\Thing;
 
 /**
  * Exposes the IncludeMarkers helpers to a test. phpstan.neon.dist analyses it too, which is what
- * has PHPStan look into the trait: nothing in src uses it.
+ * has PHPStan look into the trait — nothing in src uses it — and holds normalize() to a shape
+ * written with the include generics, as a consumer's would be.
+ *
+ * @phpstan-type _self = array{
+ *     id: string,
+ *     status: enum<CheckStatus>,
+ *     priority?: enum<Priority>,
+ *     thing?: ref<array{id: string}>,
+ *     things: list<ref<array{id: string}>>,
+ *     debug: included<array<string, mixed>>,
+ *     notes?: included<string>,
+ * }
  */
 final class MarkingNormalizer
 {
     use IncludeMarkers;
+
+    /**
+     * @return _self
+     */
+    public function normalize(Thing $thing, ?Priority $priority): array
+    {
+        return array_filter([
+            'id' => $thing->getId(),
+            'status' => $this->enum(CheckStatus::Ok),
+            'priority' => $this->enum($priority),
+            'thing' => $this->ref($thing),
+            'things' => $this->refs([$thing]),
+            'debug' => $this->optional(static fn (): array => ['seen' => 1]),
+            'notes' => $this->optional(static fn (): string => 'notes'),
+        ], static fn (mixed $value): bool => null !== $value);
+    }
 
     /**
      * @template T

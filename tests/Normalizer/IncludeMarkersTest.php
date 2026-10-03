@@ -6,6 +6,8 @@ namespace PTGS\TypeBridge\Tests\Normalizer;
 
 use LogicException;
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Http\Include\EnumCase;
+use PTGS\TypeBridge\Http\Include\Optional;
 use PTGS\TypeBridge\Http\Include\Ref;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\CheckStatus;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\Priority;
@@ -89,6 +91,16 @@ final class IncludeMarkersTest extends TestCase
     {
         self::assertSame(CheckStatus::Warning, $this->normalizer->exposeEnum(CheckStatus::Warning)->case);
         self::assertSame(Priority::High, $this->normalizer->exposeEnum(Priority::High)->case);
+    }
+
+    public function testAShapeWrittenWithTheMarkersHoldsThemAndDropsWhatIsAbsent(): void
+    {
+        $shape = $this->normalizer->normalize(new Thing('thing-1'), null);
+
+        self::assertArrayNotHasKey('priority', $shape);
+        self::assertInstanceOf(EnumCase::class, $shape['status']);
+        self::assertEquals(new Ref(Thing::class, 'thing-1'), $shape['thing'] ?? null);
+        self::assertInstanceOf(Optional::class, $shape['debug']);
     }
 
     public function testEachHelperGivesNullForNull(): void
