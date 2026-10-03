@@ -14,7 +14,8 @@ use RuntimeException;
  *   Shape      = 'array{' Fields Rest? '}' | 'array{' Type (',' Type)* Rest? '}'   (keyed, or a positional tuple)
  *   Rest       = ',' '...' ('<' Type (',' Type)? '>')?                         (unsealed: more keys may follow)
  *   Fields     = Field (',' Field)* ','?
- *   Field      = Ident '?'? ':' Type | '?' Ident ':' Type
+ *   Field      = Key '?'? ':' Type
+ *   Key        = Ident | StringLiteral                                         ('$type', "my-key": stored unquoted)
  *   Type       = Suffixed ('|' Suffixed)*
  *   Suffixed   = (SingleType | '(' TypeDef ')') '[]'*
  *   SingleType = '?' SingleType | 'value-of<' (ClassName | Const) '>' | 'id-of<' ClassName '>' | Refinement
@@ -176,7 +177,13 @@ final class PhpDocShapeParser
         }
 
         $keyed = false;
-        if (null !== $this->tryParseIdent()) {
+        try {
+            $key = $this->tryParseKey();
+        } catch (RuntimeException) {
+            // An unterminated quote: not a key. parseType() meets the same quote and says so.
+            $key = null;
+        }
+        if (null !== $key) {
             $this->skipWhitespace();
             if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
                 $this->pos++;
@@ -200,7 +207,7 @@ final class PhpDocShapeParser
         // nullable, so reading it as an optional key first required lookahead and backtracking
         // to tell `?name: string` from `?string`, and no other tool understood the result.
         $optional = false;
-        $fieldName = $this->parseIdent();
+        $fieldName = $this->tryParseKey() ?? $this->parseIdent();
 
         if ($this->pos < $this->len && '?' === $this->input[$this->pos]) {
             $this->pos++;
@@ -610,6 +617,21 @@ final class PhpDocShapeParser
         }
 
         return $ident;
+    }
+
+    /**
+     * A shape key: a bare identifier, or a quoted one — PHPStan's spelling for a key that is not
+     * an identifier, such as `'$type'` or `"my-key"`. A quoted key is returned unquoted, with its
+     * escapes resolved, because the quotes are PHPDoc syntax and not part of the name: `'id'` and
+     * `id` are the same key. Whoever writes the name out again quotes it as its own syntax needs.
+     */
+    private function tryParseKey(): ?string
+    {
+        if ($this->pos < $this->len && ("'" === $this->input[$this->pos] || '"' === $this->input[$this->pos])) {
+            return $this->parseStringLiteral();
+        }
+
+        return $this->tryParseIdent();
     }
 
     private function tryParseIdent(): ?string

@@ -41,6 +41,27 @@ final readonly class TypeToTsConverter
     public const string UNSEALED_INDEX = '[key: string]: unknown';
 
     /**
+     * A TypeScript property name TypeScript reads without quotes: an identifier — `$` counts, so
+     * `$type` stays bare — or a non-negative integer.
+     */
+    private const string BARE_PROPERTY_NAME = '/^(?:[A-Za-z_$][A-Za-z0-9_$]*|0|[1-9][0-9]*)$/';
+
+    /**
+     * A shape key as a TypeScript property name: as written when it can be (`id`, `$type`), and
+     * quoted when it cannot (`'my-key'`). The parser hands keys over unquoted, whatever the
+     * PHPDoc spelling, so this is the only place that decides.
+     */
+    public static function propertyName(string $name): string
+    {
+        return 1 === preg_match(self::BARE_PROPERTY_NAME, $name) ? $name : self::stringLiteral($name);
+    }
+
+    public static function stringLiteral(string $value): string
+    {
+        return "'" . str_replace(['\\', "'"], ['\\\\', "\\'"], $value) . "'";
+    }
+
+    /**
      * @param IncludeConvention $includes what marks a key that is only sent when asked for
      */
     public function __construct(
@@ -77,7 +98,7 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof LiteralType) {
             if (\is_string($type->value)) {
-                return "'" . str_replace(['\\', "'"], ['\\\\', "\\'"], $type->value) . "'";
+                return self::stringLiteral($type->value);
             }
 
             if (\is_bool($type->value)) {
@@ -169,7 +190,7 @@ final readonly class TypeToTsConverter
                     $fieldType = $fieldType->inner;
                 }
 
-                return \sprintf('%s%s: %s', $field->name, $optional ? '?' : '', $this->convert($fieldType, $scope));
+                return \sprintf('%s%s: %s', self::propertyName($field->name), $optional ? '?' : '', $this->convert($fieldType, $scope));
             }, $type->fields);
             if ($type->unsealed) {
                 $fields[] = self::UNSEALED_INDEX;

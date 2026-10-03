@@ -103,6 +103,34 @@ final class ShapeRendererTest extends TestCase
         self::assertEquals($original, $parser->parse($rendered));
     }
 
+    public function testKeysThatAreNotIdentifiersAreQuotedAndSurviveARoundTrip(): void
+    {
+        // The parser stores a quoted key unquoted, so the renderer has to put the quotes back
+        // or the shape it writes would no longer parse.
+        $shape = new ShapeType([
+            new ShapeField('$type', new ScalarType('string'), optional: false),
+            new ShapeField('content-type', new ScalarType('string'), optional: true),
+            new ShapeField("it's", new ScalarType('int'), optional: false),
+            new ShapeField('id', new ScalarType('string'), optional: false),
+        ]);
+        $renderer = new ShapeRenderer();
+
+        self::assertSame(
+            <<<'DOC'
+                /**
+                 * @phpstan-type _self = array{
+                 *     '$type': string,
+                 *     'content-type'?: string,
+                 *     'it\'s': int,
+                 *     id: string,
+                 * }
+                 */
+                DOC,
+            $renderer->renderSelfDocBlock($shape),
+        );
+        self::assertEquals($shape, (new PhpDocShapeParser())->parse($renderer->render($shape)));
+    }
+
     private function selfBody(string $source): string
     {
         preg_match('/@phpstan-type\s+_self\s*=\s*(array\{.*?\n\s*\*\s*\})/s', $source, $matches);

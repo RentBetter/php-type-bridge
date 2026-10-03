@@ -40,7 +40,7 @@ final class ShapeRenderer
     {
         $lines = ['/**', ' * @phpstan-type _self = array{'];
         foreach ($shape->fields as $field) {
-            $lines[] = self::INDENT . $field->name . ($field->optional ? '?' : '') . ': ' . $this->render($field->type) . ',';
+            $lines[] = self::INDENT . self::key($field->name) . ($field->optional ? '?' : '') . ': ' . $this->render($field->type) . ',';
         }
         if ($shape->unsealed) {
             $lines[] = self::INDENT . '...';
@@ -92,13 +92,27 @@ final class ShapeRenderer
     {
         $fields = [];
         foreach ($type->fields as $field) {
-            $fields[] = $field->name . ($field->optional ? '?' : '') . ': ' . $this->render($field->type);
+            $fields[] = self::key($field->name) . ($field->optional ? '?' : '') . ': ' . $this->render($field->type);
         }
         if ($type->unsealed) {
             $fields[] = '...';
         }
 
         return 'array{' . implode(', ', $fields) . '}';
+    }
+
+    /**
+     * A key as the parser reads it back: bare when it is a plain identifier, single-quoted when it
+     * is not (`'$type'`, `'my-key'`) — the parser stores a quoted key unquoted, so the quotes are
+     * put back here.
+     */
+    private static function key(string $name): string
+    {
+        if (1 === preg_match('/^[A-Za-z0-9_]+$/', $name)) {
+            return $name;
+        }
+
+        return "'" . str_replace(['\\', "'"], ['\\\\', "\\'"], $name) . "'";
     }
 
     private function renderLiteral(LiteralType $type): string
