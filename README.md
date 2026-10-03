@@ -314,6 +314,8 @@ The query parameters a request asks with are `includes.query`, each named with i
 
 Every endpoint whose success response has a body takes them, so no action declares them on its query form: its query type is `IncludeQuery` (declared once, beside `WithIncludes`), intersected with its form's type when it has one, and its MCP tool lists them among its arguments, sent in the query string. An endpoint that answers 204 has nothing to shape and takes none.
 
+The runtime that writes these keys out — optionals, refs and enum markers — is opt-in: see [Includes and expands at runtime](#includes-and-expands-at-runtime).
+
 ### Shared declarations
 
 The config `typeAliases` (`UuidStr`, …) and the `WithIncludes` and `WithExpands` helpers are the same everywhere. With a shared root module (`output.rootModule`) they are declared there once and each module imports what it uses; without one, each module declares its own copy. A module imports only the types it references — a class's `@phpstan-import-type` that none of its emitted shapes uses is left out.
@@ -345,6 +347,138 @@ PHPStan-typed code often holds objects in an array that json_encode then seriali
 The name resolves as PHP resolves it: through the file's `use` statements, in its namespace, or fully qualified. An alias of the same name always wins, so nothing that resolved before changes.
 
 Shapes that type PHP arrays which are never serialised — working data holding `DateTimeImmutable`s or entities — have no JSON to describe. Mark the class that declares them `#[PhpStanOnly]` and TypeBridge emits none of its aliases — or `#[PhpStanOnly(['Draft'])]` for only those named, when the class also declares shapes that are sent. One-argument `array<V>` is still refused: PHPStan reads it as `array<array-key, V>`, so write that — or `list<V>` / `array<string, V>` when that is what it is.
+
+## Includes and expands at runtime
+
+The sections above type a body the app writes. TypeBridge can also write it: an opt-in runtime turns the markers a normaliser returns into the body the request asked for — `?include=`, `?expand=` with field lists, and enums whole or as bare ids. Controllers return their response DTO as before and never see any of it.
+
+### Turning it on
+
+```yaml
+# config/packages/type_bridge.yaml
+type_bridge:
+    includes: true
+    # or, with its options:
+    # includes:
+    #     enum_format_header: X-Enum-Format                   # the header whose value `id` asks for bare ids
+    #     json_encoding_options: !php/const JSON_UNESCAPED_UNICODE   # json_encode() flags; JsonResponse's defaults otherwise
+```
+
+Off, the bundle behaves exactly as before. On, `IncludeResponseSubscriber` writes every `ApiSuccessResponse` that has a body, on `kernel.view` at priority 0, ahead of `TypeBridgeResponseSubscriber` (which still answers 204s). It reads `include` and `expand` from the query string whatever the method, so name those two in `includes.query` and TypeBridge publishes them on every such endpoint (see [References a request can expand](#references-a-request-can-expand)).
+
+### Marking a shape in the normaliser
+
+A normaliser uses the `IncludeMarkers` trait — a trait, so it sits beside whatever base class the normaliser already extends:
+
+```php
+use PTGS\TypeBridge\Normalizer\IncludeMarkers;
+
+/**
+ * @phpstan-type _self = array{
+ *     id: string,
+ *     name: string,
+ *     status: enum<CheckStatus>,
+ *     definition?: ref<DefinitionData>,
+ *     debug: included<array<string, mixed>>,
+ * }
+ *
+ * @implements ShapeNormalizer<Check, self>
+ */
+final class CheckNormalizer extends AbstractShapeNormalizer implements ShapeNormalizer
+{
+    use IncludeMarkers;
+
+    public function normalize(object $check): array
+    {
+        return $this->filterNulls([
+            'id' => $check->getId(),
+            'name' => $check->getName(),
+            'status' => $this->enum($check->getStatus()),
+            'definition' => $this->ref($check->getDefinition()),
+            'debug' => $this->optional(fn () => $check->getDebug()),
+        ]);
+    }
+}
+```
+
+| Helper | Shape key | Sent as |
+|---|---|---|
+| `optional(fn () => …)` | `included<T>` | absent unless `?include=` names its path; the closure runs only then |
+| `ref($entity)`, `refs($entities)` | `ref<RecordData>`, `list<ref<RecordData>>` | the id, or the record where `?expand=` names its path |
+| `enum($case)` | `enum<Status>` | an `ApiEnum`'s object, or its id on request; any other backed enum's value |
+
+`ref()`, `refs()` and `enum()` give null for null. `ref()` names the entity's class and its `getId()` (a string, an int or a `Stringable`, sent as a string); override `refClass()` or `refId()` for entities that carry their id another way, or write `new Ref(Definition::class, $id)` for a relation held only as an id. Keep an `optional()` closure to data in hand: it runs once per row, so one that queries is an N+1 — a related entity is a `ref()`.
+
+### Expanding a reference
+
+A normaliser that can send the record a ref points at implements `RefNormalizer`:
+
+```php
+final class DefinitionNormalizer implements ShapeNormalizer, RefNormalizer
+{
+    // normalize() as for any ShapeNormalizer, and:
+
+    public static function entityClass(): string
+    {
+        return Definition::class;
+    }
+
+    public function resolveMany(array $ids): array
+    {
+        return array_map($this->normalize(...), $this->definitions->findBy(['id' => $ids]));
+    }
+}
+```
+
+The bundle tags every autoconfigured implementation, and `RefRegistry` matches a ref's class with `is_a()`, so a Doctrine proxy finds its entity's normaliser. Each record carries its `id`. Every ref a request reaches at one level is fetched with one `resolveMany()` per entity, each id once, and the records are walked in turn: a path goes on into them (`checks.definition.latestResult`), `include` paths reach inside them, and a reference cycle is followed only as far as a path spells it out. A ref that no `RefNormalizer` claims, or a record it does not return, is a server bug (`LogicException`), not a 422.
+
+### Sending an enum whole
+
+An enum that goes out as an object implements `PTGS\TypeBridge\Enum\ApiEnum`, which asks for `id()` and `jsonSerialize(): array`:
+
+```php
+enum CheckStatus: string implements ApiEnum
+{
+    case Ok = 'ok';
+    case Warning = 'warning';
+
+    public function id(): string
+    {
+        return strtoupper($this->name);
+    }
+
+    public function jsonSerialize(): array
+    {
+        return ['id' => $this->id(), 'name' => ucfirst($this->value)];
+    }
+}
+```
+
+`status: enum<CheckStatus>` goes out as `{"id": "WARNING", "name": "Warning"}`, or as `"WARNING"` to a request sending `X-Enum-Format: id` — what an MCP client wants, since a model reads an id as well as a label and its tools take ids back. An expand naming the enum's path sends it whole even then, or cut to a field list: `checks(name,status(name))`. A backed enum that is not an `ApiEnum` goes out as its value either way.
+
+### Paths
+
+- Comma-separated dotted paths from the response's root. A path implies its prefixes, and a list's items sit at the list's own path.
+- `include`: `x.*` opens every optional key one level under x — never at the root, never mid-path.
+- `expand`: no `*`, since each expansion is a query. A field list narrows what is at a path to those keys and its `id`, keeping any key a deeper path goes on into: a record (`checks.definition(name)`), the rows themselves (`checks(name,status)`), or nested (`checks(name,status(name))`). The same path given twice merges its lists, a path without a list asks for the whole thing, and an unknown field is skipped.
+- A 422 for a root that is not a field of the response, a malformed path, a field list on `include`, or an expand that ends at something that is neither a ref, an `ApiEnum` nor narrowed by a list. It is the app's own 422: the subscriber builds it with the bound `ValidationErrorResponseFactory`, its path `include` or `expand`.
+
+Markers are found in the response's public properties and the arrays beneath them; any other object is left for `json_encode()`, and not looked into.
+
+### PHPStan
+
+```neon
+includes:
+    - vendor/ptgs/php-type-bridge/includes.neon
+```
+
+It reads `included<T>` as `T|Optional<T>`, `ref<T>` as a `Ref` and `enum<E>` as an `EnumCase<E>`, so PHPStan holds each normaliser to the shape it says it returns. It also registers `ShapeValuesRule` (`typeBridge.shapeValue`): a shape written by a normaliser that uses `IncludeMarkers` — one it declares, or its `ShapeNormalizer` owner's — holds scalars, lists, shapes and the markers, never an object, so every decision about what goes out is made in the normaliser. The generic names default to `included`, `ref` and `enum`; an app that names them otherwise mirrors its TypeBridge config, replacing the list:
+
+```neon
+parameters:
+    typeBridgeIncludes:
+        types!: [opt]
+```
 
 ## PHPStan
 
