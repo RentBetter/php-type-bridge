@@ -50,4 +50,27 @@ PHP);
         self::assertStringContainsString('export interface IProjectStatus {', $projects);
         self::assertStringContainsString('export type CreateProjectPayload = ICreateProjectRequestData;', $projects);
     }
+
+    /**
+     * The attribute says `/ping`; the fixture's routes.yaml prefixes the namespace with `/api`,
+     * so the constant carries the path Symfony serves.
+     */
+    public function test_an_endpoint_constant_takes_the_served_path_from_the_routing_config(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+        $fixture = __DIR__ . '/../Fixture/RoutedMcpFixtures';
+
+        $tester = new CommandTester(new GenerateTypesCommand());
+        $exitCode = $tester->execute([
+            'source' => $fixture,
+            'output' => $outputDir,
+            '--config' => $fixture . '/type-bridge.php',
+        ]);
+
+        self::assertSame(0, $exitCode);
+
+        $ping = file_get_contents($outputDir . '/Ping/genTypes.ts');
+        self::assertNotFalse($ping);
+        self::assertStringContainsString("export const Ping: Endpoint<PingEndpointMap> = {\n  method: 'GET',\n  path: '/api/ping',\n};", $ping);
+    }
 }

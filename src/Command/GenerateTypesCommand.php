@@ -84,6 +84,7 @@ final class GenerateTypesCommand extends Command
                     requirementTypes: $config->requirementTypes,
                     mcpDescriptionAttribute: $config->mcpDescriptionAttribute,
                     mcpDescriptionProperty: $config->mcpDescriptionProperty,
+                    routePathResolver: $config->routePathResolver(),
                 ))->collect($sourceDir, $responseCollector->collectIndex($sourceDir)),
             );
         }
