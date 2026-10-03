@@ -92,11 +92,6 @@ services:
             - phpstan.rules.rule
 
     -
-        class: PTGS\TypeBridge\PHPStan\Rules\Shape\NoTypeIdPairRule
-        tags:
-            - phpstan.rules.rule
-
-    -
         class: PTGS\TypeBridge\PHPStan\Rules\Shape\SelfImportMustBeAliasedRule
         tags:
             - phpstan.rules.rule

@@ -843,7 +843,6 @@ The static-analysis layer is the enforcement mechanism.
 - typed `ApiErrorResponse` throws in controller bodies must be listed in `#[ApiResponses([...])]` (`ApiResponseDeclarationRule`)
 - `ContractFormType<TData>` must stay aligned with its configured `data_class`, `_self`, mapped fields, `property_path`, and nested custom forms (`ContractFormTypeRule`)
 - `_self` shape naming: no `Id` suffix on string reference fields (`NoIdSuffixRule`)
-- `_self` shape naming: no paired `entityType` / `entityId` fields — use a compound `entity: "{type}-{uuid}"` (`NoTypeIdPairRule`)
 
 The remaining rules below are still part of the intended direction.
 
