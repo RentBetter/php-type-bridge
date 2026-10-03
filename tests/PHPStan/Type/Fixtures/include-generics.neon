@@ -1,0 +1,7 @@
+includes:
+    - ../../../../includes.neon
+
+# Lists merge: `lazy` joins `included` as an include generic, as an app's own name would.
+parameters:
+    typeBridgeIncludes:
+        types: [lazy]

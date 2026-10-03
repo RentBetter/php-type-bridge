@@ -1,0 +1,43 @@
+# Opt-in: the static side of the include/expand runtime (src/Http/Include).
+#
+# NOT auto-loaded (extension.neon is). Include it once an application's normalisers use
+# IncludeMarkers and its shapes write `included<T>`, `ref<T>` and `enum<E>`:
+#
+#   includes:
+#       - vendor/ptgs/php-type-bridge/includes.neon
+#
+# It teaches PHPStan those generics — `included<T>` is T|Optional<T>, `ref<T>` a Ref, `enum<E>`
+# an EnumCase<E> — under the names in typeBridgeIncludes, which mirror `includes.types`,
+# `includes.refTypes` and `includes.enumTypes` in the TypeBridge config. The names below are the
+# conventional ones; neon merges lists, so an app that names its generics otherwise replaces a
+# list with `types!: [...]`.
+#
+# It also registers ShapeValuesRule (typeBridge.shapeValue): a shape a normaliser using
+# IncludeMarkers writes holds scalars, lists, shapes and the markers, never an object.
+parameters:
+    typeBridgeIncludes:
+        types: [included]
+        refTypes: [ref]
+        enumTypes: [enum]
+
+parametersSchema:
+    typeBridgeIncludes: structure([
+        types: listOf(string()),
+        refTypes: listOf(string()),
+        enumTypes: listOf(string())
+    ])
+
+services:
+    -
+        class: PTGS\TypeBridge\PHPStan\Type\IncludeTypeNodeResolverExtension
+        arguments:
+            types: %typeBridgeIncludes.types%
+            refTypes: %typeBridgeIncludes.refTypes%
+            enumTypes: %typeBridgeIncludes.enumTypes%
+        tags:
+            - phpstan.phpDoc.typeNodeResolverExtension
+
+    -
+        class: PTGS\TypeBridge\PHPStan\Rules\Normalizer\ShapeValuesRule
+        tags:
+            - phpstan.rules.rule

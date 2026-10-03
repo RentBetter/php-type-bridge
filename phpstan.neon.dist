@@ -1,6 +1,7 @@
 includes:
     - extension.neon
     - rules.neon
+    - includes.neon
 
 parameters:
     level: max
