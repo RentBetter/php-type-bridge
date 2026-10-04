@@ -13,6 +13,9 @@ use PTGS\TypeBridge\Model\CollectedEndpointRequest;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
+use PTGS\TypeBridge\Parser\IntersectionType;
+use PTGS\TypeBridge\Parser\PhpDocShapeParser;
+use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\DomainGuesser;
@@ -22,6 +25,7 @@ use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
+use Throwable;
 
 final class EndpointContractCollector
 {
@@ -59,6 +63,7 @@ final class EndpointContractCollector
         private readonly ?string $mcpDescriptionAttribute = null,
         private readonly ?string $mcpDescriptionProperty = null,
         private readonly ?RoutePathResolver $routePathResolver = null,
+        private readonly PhpDocShapeParser $shapeParser = new PhpDocShapeParser(),
     ) {
         $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
     }
@@ -598,7 +603,28 @@ final class EndpointContractCollector
             typeName: $this->emittedTypeName($ownerClass),
             domain: $this->domainGuesser->guess($srcDir, $file),
             fields: $fields,
+            contract: $this->declaredShape($definitions['_self']),
         );
+    }
+
+    /**
+     * The keys an input class declares, when its `_self` is a shape. An intersection gives the
+     * keys it adds: the ones it inherits are named elsewhere and are not read here, so a field
+     * among them is left to its form.
+     */
+    private function declaredShape(string $self): ?ShapeType
+    {
+        try {
+            $parsed = $this->shapeParser->parse($self);
+        } catch (Throwable) {
+            return null;
+        }
+
+        return match (true) {
+            $parsed instanceof ShapeType => $parsed,
+            $parsed instanceof IntersectionType => $parsed->extra,
+            default => null,
+        };
     }
 
     /**

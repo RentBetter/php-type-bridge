@@ -16,6 +16,11 @@ use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
+use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\NullableType;
+use PTGS\TypeBridge\Parser\ScalarType;
+use PTGS\TypeBridge\Parser\ShapeField;
+use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
@@ -571,6 +576,145 @@ final class McpManifestBuilderTest extends TestCase
 
         self::assertSame(['include', 'name', 'expand'], $tool['query']);
         self::assertSame(['include', 'name', 'expand'], array_keys($tool['inputSchema']['properties']));
+    }
+
+    public function testAFilterTheContractMakesOptionalIsNotRequiredWhateverItsFormSays(): void
+    {
+        // A form field is `required` unless it says otherwise, and a filter form rarely does. Read
+        // off the form, every filter of a list would be mandatory, and a model could list nothing
+        // without inventing a value for each.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $tool = $this->toolTaking(
+            fields: [
+                $this->scalarField('assignee', $text, required: true),
+                $this->scalarField('project', $text, required: true),
+            ],
+            contract: new ShapeType([
+                new ShapeField('assignee', new ScalarType('string'), optional: true),
+                new ShapeField('project', new ScalarType('string'), optional: true),
+            ]),
+        );
+
+        self::assertSame(['assignee', 'project'], array_keys($tool['inputSchema']['properties']));
+        self::assertArrayNotHasKey('required', $tool['inputSchema']);
+    }
+
+    public function testAKeyTheContractRequiresIsRequiredEvenWhereItsFormIsLenient(): void
+    {
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $tool = $this->toolTaking(
+            fields: [
+                $this->scalarField('title', $text, required: false),
+                $this->scalarField('notes', $text, required: false),
+            ],
+            contract: new ShapeType([
+                new ShapeField('title', new ScalarType('non-empty-string'), optional: false),
+                new ShapeField('notes', new ScalarType('string'), optional: true),
+            ]),
+        );
+
+        self::assertSame(['title'], $tool['inputSchema']['required']);
+    }
+
+    public function testAFieldTheContractDoesNotDeclareIsLeftToItsForm(): void
+    {
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $fields = [
+            $this->scalarField('insisted', $text, required: true),
+            $this->scalarField('offered', $text, required: false),
+        ];
+
+        // No readable contract at all, and a contract that names neither field: the form decides.
+        self::assertSame(['insisted'], $this->toolTaking($fields, contract: null)['inputSchema']['required']);
+        self::assertSame(['insisted'], $this->toolTaking($fields, contract: new ShapeType([]))['inputSchema']['required']);
+    }
+
+    public function testAScalarIsTheTypeTheContractDeclares(): void
+    {
+        // A form type's name is a guess at the JSON type: a CheckboxType binds a boolean and says
+        // so nowhere in its name, and a custom type says nothing at all.
+        $tool = $this->toolTaking(
+            fields: [
+                $this->scalarField('unscoped', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CheckboxType', required: true),
+                $this->scalarField('page', 'App\\Form\\PageType', required: true),
+                $this->scalarField('ratio', 'App\\Form\\RatioType', required: true),
+                $this->scalarField('dueFrom', 'App\\Form\\FlexibleDateType', required: true),
+                $this->scalarField('search', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\IntegerType', required: true),
+                $this->scalarField('tags', 'App\\Form\\CommaSeparatedType', required: true),
+            ],
+            contract: new ShapeType([
+                new ShapeField('unscoped', new ScalarType('bool'), optional: true),
+                new ShapeField('page', new ScalarType('positive-int'), optional: true),
+                new ShapeField('ratio', new NullableType(new ScalarType('float'), optional: false), optional: true),
+                new ShapeField('dueFrom', new ScalarType('string'), optional: true),
+                new ShapeField('search', new ScalarType('string'), optional: true),
+                // Not a scalar: what a list or a shape looks like is still the form's to say.
+                new ShapeField('tags', new ListType(new ScalarType('string')), optional: true),
+            ]),
+        );
+
+        self::assertSame([
+            'unscoped' => ['type' => 'boolean'],
+            'page' => ['type' => 'integer'],
+            'ratio' => ['type' => 'number'],
+            'dueFrom' => ['type' => 'string'],
+            'search' => ['type' => 'string'],
+            'tags' => ['type' => 'string'],
+        ], $tool['inputSchema']['properties']);
+    }
+
+    public function testACollectedFilterFormPublishesWhatItsDataClassDeclares(): void
+    {
+        // End to end over the fixture project: ProjectFiltersData declares three optional keys, one
+        // of them a bool bound by a CheckboxType.
+        $srcDir = __DIR__ . '/../Fixture/Fixtures';
+        $contracts = (new EndpointContractCollector())->collect($srcDir, (new ResponseClassCollector())->collectIndex($srcDir));
+
+        $list = null;
+        foreach ($contracts['Projects'] as $contract) {
+            if ('listProjectsAction' === $contract->methodName) {
+                $list = $contract;
+            }
+        }
+        self::assertNotNull($list);
+
+        $query = $list->request?->query;
+        self::assertNotNull($query);
+        self::assertNotNull($query->contract);
+        self::assertSame(['search', 'page', 'archived'], array_map(static fn (ShapeField $key): string => $key->name, $query->contract->fields));
+
+        $tool = $this->toolTaking($query->fields, $query->contract);
+        self::assertSame([
+            'search' => ['type' => 'string'],
+            'page' => ['type' => 'integer'],
+            'archived' => ['type' => 'boolean'],
+        ], $tool['inputSchema']['properties']);
+        self::assertArrayNotHasKey('required', $tool['inputSchema']);
+    }
+
+    /**
+     * The tool a list endpoint becomes when its query form has these fields and its data class
+     * declares this contract.
+     *
+     * @param list<CollectedFormField> $fields
+     *
+     * @return array<string, mixed>
+     */
+    private function toolTaking(array $fields, ?ShapeType $contract): array
+    {
+        $endpoint = new CollectedEndpointContract(
+            name: 'listTasks',
+            domain: 'tasks',
+            controllerClass: 'App\\ListController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                query: new CollectedInputReference(null, 'App\\TaskFilterData', 'TaskFilterData', 'tasks', $fields, $contract),
+            ),
+            mcp: new CollectedMcpTool(name: 'listTasks', description: 'The tasks.', httpMethod: 'GET', httpPath: '/tasks', destructive: false),
+        );
+
+        return (new McpManifestBuilder())->build(['tasks' => [$endpoint]])['tools'][0];
     }
 
     private function response(int $status): CollectedApiResponseClass
