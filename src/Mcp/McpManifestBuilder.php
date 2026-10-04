@@ -8,13 +8,20 @@ use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Parser\NullableType;
+use PTGS\TypeBridge\Parser\ParsedType;
+use PTGS\TypeBridge\Parser\ScalarType;
+use PTGS\TypeBridge\Parser\ShapeField;
 
 /**
  * Builds the MCP tool manifest (the `tools.json` structure) from collected endpoint contracts.
  * Only contracts carrying #[McpTool] (i.e. `->mcp !== null`) become tools.
  *
  * Each tool's `inputSchema` is a JSON Schema object assembled from the endpoint's path params,
- * query and body fields — the arguments an MCP client supplies. The HTTP method + path tell the
+ * query and body fields — the arguments an MCP client supplies. Whether an argument is required,
+ * and which scalar it is, come from the request contract the input class declares (`_self`), the
+ * same shape the generated TypeScript is typed from, so a tool and a typed client never disagree
+ * about one endpoint; the form speaks only for what the contract does not say. The HTTP method + path tell the
  * runtime how to call the API, and `query` (when there are any) names the arguments it sends in the
  * query string whatever the method — a POST can take query parameters as well as a body; `destructive` is the safety hint; `scopes` (when the project
  * configures a scope attribute) names the auth scopes the calling token must hold, letting the
@@ -144,18 +151,40 @@ final class McpManifestBuilder
             return;
         }
 
+        $declared = [];
+        foreach ($reference->contract->fields ?? [] as $key) {
+            $declared[$key->name] = $key;
+        }
+
         foreach ($reference->fields as $field) {
-            $properties[$field->name] = $this->fieldSchema($field);
-            if ($field->required) {
+            $key = $declared[$field->name] ?? null;
+            $properties[$field->name] = $this->fieldSchema($field, $key?->type);
+            if ($this->isRequired($field, $key)) {
                 $required[] = $field->name;
             }
         }
     }
 
     /**
+     * A key the contract declares is required exactly when the contract says so: `name: string`
+     * is, `name?: string` is not.
+     *
+     * The form's own `required` option cannot answer this. It defaults to true and nothing
+     * enforces it on a submitted request, so a filter form that never mentions it would publish
+     * every filter as mandatory, and a model could not list anything without inventing a value
+     * for each. It is the fallback for a field the contract does not declare.
+     */
+    private function isRequired(CollectedFormField $field, ?ShapeField $key): bool
+    {
+        return null === $key ? $field->required : !$key->optional;
+    }
+
+    /**
+     * @param ParsedType|null $declared the type the request contract gives this field, if it names it
+     *
      * @return array<string, mixed>
      */
-    private function fieldSchema(CollectedFormField $field): array
+    private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null): array
     {
         // A collection is compound too, but its shape is its entry's, repeated.
         if (null !== $field->entryTypeClass) {
@@ -189,7 +218,29 @@ final class McpManifestBuilder
             return $schema;
         }
 
-        return ['type' => $this->scalarType($field)];
+        return ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
+    }
+
+    /**
+     * The JSON Schema type of a scalar the contract declares. A form type's name is a guess at
+     * this (a CheckboxType binds a boolean and says so nowhere in its name); the contract states it.
+     */
+    private function declaredScalar(?ParsedType $declared): ?string
+    {
+        if ($declared instanceof NullableType) {
+            $declared = $declared->inner;
+        }
+        if (!$declared instanceof ScalarType) {
+            return null;
+        }
+
+        return match ($declared->base()) {
+            'string' => 'string',
+            'int' => 'integer',
+            'float' => 'number',
+            'bool' => 'boolean',
+            default => null,
+        };
     }
 
     /**

@@ -48,6 +48,17 @@ final class EndpointContractCollectorTest extends TestCase
         self::assertSame('search', $index->request->query->fields[0]->name);
         self::assertSame(TextType::class, $index->request->query->fields[0]->formTypeClass);
         self::assertFalse($index->request->query->fields[0]->required);
+        // The keys the data class declares as `_self` travel with the reference: they are the
+        // request contract, and what an MCP tool reads to say which arguments are required.
+        self::assertNotNull($index->request->query->contract);
+        self::assertSame(
+            ['search' => true, 'page' => true, 'archived' => true],
+            array_column(
+                array_map(static fn($key): array => ['name' => $key->name, 'optional' => $key->optional], $index->request->query->contract->fields),
+                'optional',
+                'name',
+            ),
+        );
 
         $show = current(array_filter(
             $contracts['Projects'],
