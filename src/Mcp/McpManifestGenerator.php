@@ -33,6 +33,6 @@ final class McpManifestGenerator
         );
         $contracts = $collector->collect($sourceDir, (new ResponseClassCollector())->collectIndex($sourceDir));
 
-        return (new McpManifestBuilder($config->includes))->build($contracts);
+        return (new McpManifestBuilder($config->includes, $config->mcpParamDescriptions()))->build($contracts);
     }
 }

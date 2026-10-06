@@ -18,6 +18,7 @@ use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
+use PTGS\TypeBridge\Support\AttributeText;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
@@ -31,6 +32,8 @@ final class EndpointContractCollector
 {
     /** @var array<string, string> requirement regex => TS type */
     private readonly array $requirementTypes;
+
+    private readonly ?AttributeText $toolDescriptions;
 
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
@@ -61,11 +64,14 @@ final class EndpointContractCollector
         private readonly ?string $mcpScopeAttribute = null,
         private readonly ?string $mcpScopeProperty = null,
         private readonly ?string $mcpDescriptionAttribute = null,
-        private readonly ?string $mcpDescriptionProperty = null,
+        ?string $mcpDescriptionProperty = null,
         private readonly ?RoutePathResolver $routePathResolver = null,
         private readonly PhpDocShapeParser $shapeParser = new PhpDocShapeParser(),
     ) {
         $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
+        $this->toolDescriptions = null === $mcpDescriptionAttribute
+            ? null
+            : new AttributeText($mcpDescriptionAttribute, $mcpDescriptionProperty, 'mcpDescriptionProperty');
     }
 
     /**
@@ -194,7 +200,7 @@ final class EndpointContractCollector
     private function resolveMcpDescription(ReflectionMethod $method, McpTool $tool): string
     {
         $description = $this->text($tool->description)
-            ?? $this->documentedDescription($method)
+            ?? $this->toolDescriptions?->on($method)
             ?? $this->docblockSummary($method);
         if (null !== $description) {
             return $description;
@@ -208,59 +214,6 @@ final class EndpointContractCollector
                 ? 'no documentation attribute configured (mcpDescriptionAttribute)'
                 : \sprintf('no #[%s] on the method', $this->mcpDescriptionAttribute),
         ));
-    }
-
-    /**
-     * The text of the configured documentation attribute on the method, or null when the method
-     * carries none (or it is blank). The property is a string or a list of strings — the shape
-     * of property-api's Spec\Api, where a list is the description in paragraphs — joined with a
-     * space.
-     */
-    private function documentedDescription(ReflectionMethod $method): ?string
-    {
-        if (null === $this->mcpDescriptionAttribute) {
-            return null;
-        }
-
-        $attributes = $method->getAttributes($this->mcpDescriptionAttribute);
-        if ([] === $attributes) {
-            return null;
-        }
-
-        $reflection = new \ReflectionObject($instance = $attributes[0]->newInstance());
-        $propertyName = $this->mcpDescriptionProperty ?? 'description';
-        if (!$reflection->hasProperty($propertyName)) {
-            throw new RuntimeException(\sprintf(
-                'Attribute #[%s] on "%s::%s" has no property "%s" (%s).',
-                $this->mcpDescriptionAttribute,
-                $method->getDeclaringClass()->getName(),
-                $method->getName(),
-                $propertyName,
-                null === $this->mcpDescriptionProperty
-                    ? 'the default; name the right one with the mcpDescriptionProperty config'
-                    : 'named by the mcpDescriptionProperty config',
-            ));
-        }
-
-        $value = $reflection->getProperty($propertyName)->getValue($instance);
-        $parts = [];
-        foreach (\is_array($value) ? $value : [$value] as $part) {
-            if (!\is_string($part)) {
-                throw new RuntimeException(\sprintf(
-                    'Attribute #[%s] on "%s::%s": property "%s" must hold a string or a list of strings to describe an MCP tool.',
-                    $this->mcpDescriptionAttribute,
-                    $method->getDeclaringClass()->getName(),
-                    $method->getName(),
-                    $propertyName,
-                ));
-            }
-
-            if (null !== $part = $this->text($part)) {
-                $parts[] = $part;
-            }
-        }
-
-        return [] === $parts ? null : implode(' ', $parts);
     }
 
     /**

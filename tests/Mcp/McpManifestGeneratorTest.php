@@ -7,20 +7,23 @@ namespace PTGS\TypeBridge\Tests\Mcp;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Mcp\McpManifestGenerator;
+use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Spec\Param;
 use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use RuntimeException;
 
 /**
  * The generator is what both `typebridge:mcp` and a container-compiled manifest go through, so
  * this is where the config's keys are proven to reach the tools: `routing`, because a tool's
- * path must be the one Symfony serves, which the method attribute alone does not give; and
- * `mcpDescriptionAttribute`, because a tool's description comes from the endpoint's own docs.
+ * path must be the one Symfony serves, which the method attribute alone does not give;
+ * `mcpDescriptionAttribute`, because a tool's description comes from the endpoint's own docs; and
+ * `mcpParamDescriptionAttribute`, because an argument's comes from the property it binds.
  */
 final class McpManifestGeneratorTest extends TestCase
 {
     private const string ROUTED = __DIR__ . '/../Fixture/RoutedMcpFixtures';
     private const string UNROUTED = __DIR__ . '/../Fixture/UnroutedMcpFixtures';
     private const string DESCRIBED = __DIR__ . '/../Fixture/DescribedMcpFixtures';
+    private const string ARGUMENTS = __DIR__ . '/../Fixture/ArgumentMcpFixtures';
 
     public function testTheDescriptionAttributeReachesTheToolsThroughTheConfig(): void
     {
@@ -30,6 +33,18 @@ final class McpManifestGeneratorTest extends TestCase
         );
 
         self::assertSame('List the pings. Newest first.', array_column($manifest['tools'], 'description', 'name')['ListPings']);
+    }
+
+    public function testTheParameterDescriptionAttributeReachesTheArgumentsThroughTheConfig(): void
+    {
+        $manifest = (new McpManifestGenerator())->generate(
+            self::ARGUMENTS,
+            TypeBridgeConfig::fromArray(['mcpParamDescriptionAttribute' => Param::class]),
+        );
+
+        $verdict = array_column($manifest['tools'], 'inputSchema', 'name')['RecordVerdict'];
+        self::assertIsArray($verdict);
+        self::assertSame('The verdict.', $verdict['properties']['status']['description']);
     }
 
     public function testPublishesTheServedPathWhenRoutingIsConfigured(): void

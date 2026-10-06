@@ -6,7 +6,10 @@ namespace PTGS\TypeBridge\Support;
 
 use PTGS\TypeBridge\Contract\ContractFormType;
 use PTGS\TypeBridge\Model\CollectedFormField;
+use ReflectionAttribute;
+use ReflectionProperty;
 use RuntimeException;
+use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
@@ -16,7 +19,10 @@ use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\FormTypeInterface;
 use Symfony\Component\Form\Forms;
 use Symfony\Component\OptionsResolver\Exception\ExceptionInterface as OptionsException;
+use Symfony\Component\Validator\Constraint;
+use Symfony\Component\Validator\Constraints\Choice;
 use Symfony\Component\Validator\Validation;
+use Throwable;
 
 final class FormTypeInspector
 {
@@ -77,6 +83,7 @@ final class FormTypeInspector
     private function collectFields(FormBuilderInterface $builder): array
     {
         $fields = [];
+        $ownerClass = $builder->getFormConfig()->getDataClass();
 
         foreach ($builder->all() as $name => $child) {
             $config = $child->getFormConfig();
@@ -85,6 +92,10 @@ final class FormTypeInspector
                 $this->assertContractFormType($formTypeClass);
             }
 
+            $propertyPath = $this->resolvePropertyPath($config, $name);
+            $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
+            $constraints = $this->collectConstraints($config, $property);
+
             $fields[] = new CollectedFormField(
                 name: $name,
                 formTypeClass: $formTypeClass,
@@ -92,7 +103,7 @@ final class FormTypeInspector
                 mapped: $config->getMapped(),
                 compound: $config->getCompound(),
                 dataClass: $config->getDataClass(),
-                propertyPath: $this->resolvePropertyPath($config, $name),
+                propertyPath: $propertyPath,
                 entryTypeClass: $this->resolveEntryTypeClass($config),
                 entryDataClass: $this->resolveEntryDataClass($config),
                 enumClass: $this->resolveStringOption($config, 'class'),
@@ -102,10 +113,125 @@ final class FormTypeInspector
                 hasViewTransformers: [] !== $config->getViewTransformers(),
                 children: $this->collectFields($child),
                 entryChildren: $this->collectEntryFields($config),
+                choiceValues: $this->resolveChoiceValues($config, $constraints),
+                constraints: $constraints,
+                ownerClass: $property?->getDeclaringClass()->getName(),
             );
         }
 
         return $fields;
+    }
+
+    /**
+     * The values a choice field accepts, as its built form reads a submitted one: the values of
+     * its choice list. They are what a request sends whatever the choices themselves are — an
+     * enum's backing value under Symfony's EnumType, whatever `choice_value` reads off each
+     * choice where a type sets it (an id, say), the choices themselves in a plain list — so
+     * reading them here answers every type in the choice family the same way, its own included.
+     *
+     * An `Assert\Choice` with explicit `choices` narrows them. Its choices are model data, an
+     * enum case rather than its id, so they become values through the same choice list; with
+     * `match: false` they are the ones refused instead.
+     *
+     * Null for a field with no choice list, and for one that loads its choices: a loader may
+     * query (EntityType's does), and inspection never runs one.
+     *
+     * @param FormConfigInterface<mixed> $config
+     * @param list<Constraint>           $constraints
+     *
+     * @return list<string>|null
+     */
+    private function resolveChoiceValues(FormConfigInterface $config, array $constraints): ?array
+    {
+        if (!$config->hasAttribute('choice_list') || null !== $this->resolveOption($config, 'choice_loader')) {
+            return null;
+        }
+
+        $choiceList = $config->getAttribute('choice_list');
+        if (!$choiceList instanceof ChoiceListInterface) {
+            return null;
+        }
+
+        $values = $choiceList->getValues();
+        foreach ($constraints as $constraint) {
+            if (!$constraint instanceof Choice || null === $constraint->choices) {
+                continue;
+            }
+
+            $named = $choiceList->getValuesForChoices($constraint->choices);
+            $values = $constraint->match ? array_intersect($values, $named) : array_diff($values, $named);
+        }
+
+        return array_values($values);
+    }
+
+    /**
+     * The constraints a submitted value is held to: the field's own `constraints` option, then
+     * the constraint attributes on the data-class property it binds. A constraint confined to
+     * groups other than Default is left out — a request may never be validated against it.
+     *
+     * @param FormConfigInterface<mixed> $config
+     * @param ReflectionProperty|null    $property the data-class property the field binds, if any
+     *
+     * @return list<Constraint>
+     */
+    private function collectConstraints(FormConfigInterface $config, ?ReflectionProperty $property): array
+    {
+        $constraints = [];
+        $option = $this->resolveOption($config, 'constraints');
+        foreach (\is_array($option) ? $option : [$option] as $constraint) {
+            if ($constraint instanceof Constraint) {
+                $constraints[] = $constraint;
+            }
+        }
+
+        if (null !== $property) {
+            $constraints = [...$constraints, ...$this->propertyConstraints($property)];
+        }
+
+        return array_values(array_filter($constraints, static function (Constraint $constraint): bool {
+            $groups = $constraint->groups;
+
+            return null === $groups || \in_array(Constraint::DEFAULT_GROUP, $groups, true);
+        }));
+    }
+
+    /**
+     * @return list<Constraint>
+     */
+    private function propertyConstraints(ReflectionProperty $property): array
+    {
+        $constraints = [];
+        foreach ($property->getAttributes(Constraint::class, ReflectionAttribute::IS_INSTANCEOF) as $attribute) {
+            try {
+                $constraints[] = $attribute->newInstance();
+            } catch (Throwable $exception) {
+                // The application cannot validate against it either; named here rather than
+                // left to abandon a PHPStan run, as a form that cannot be built is.
+                throw new RuntimeException(\sprintf(
+                    'Constraint #[%s] on "%s::$%s" cannot be read for inspection: %s',
+                    $attribute->getName(),
+                    $property->getDeclaringClass()->getName(),
+                    $property->getName(),
+                    $exception->getMessage(),
+                ), previous: $exception);
+            }
+        }
+
+        return $constraints;
+    }
+
+    /**
+     * The property a field's value is written to, when its path names one directly on the data
+     * class. A deeper path (`address.street`) or an index (`[street]`) binds no property of its own.
+     */
+    private function boundProperty(?string $ownerClass, string $propertyPath): ?ReflectionProperty
+    {
+        if (null === $ownerClass || !class_exists($ownerClass) || 1 !== preg_match('/^\w+$/', $propertyPath) || !property_exists($ownerClass, $propertyPath)) {
+            return null;
+        }
+
+        return new ReflectionProperty($ownerClass, $propertyPath);
     }
 
     /**
@@ -290,12 +416,18 @@ final class FormTypeInspector
      */
     private function resolveStringOption(FormConfigInterface $config, string $option): ?string
     {
-        if (!$config->hasOption($option)) {
-            return null;
-        }
-
-        $value = $config->getOption($option);
+        $value = $this->resolveOption($config, $option);
 
         return \is_string($value) ? $value : null;
+    }
+
+    /**
+     * An option's value, or null where the field's type does not define it.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private function resolveOption(FormConfigInterface $config, string $option): mixed
+    {
+        return $config->hasOption($option) ? $config->getOption($option) : null;
     }
 }

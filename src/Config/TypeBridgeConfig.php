@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Config;
 
 use PTGS\TypeBridge\Routing\RoutePathResolver;
+use PTGS\TypeBridge\Support\AttributeText;
 use RuntimeException;
 
 /**
@@ -40,6 +41,13 @@ final readonly class TypeBridgeConfig
      *   none of the three has text.
      * @param string|null $mcpDescriptionProperty name of the property on that attribute holding
      *   the text: a string, or a list of strings joined with a space. `description` when omitted.
+     * @param string|null $mcpParamDescriptionAttribute FQCN of the project's parameter-documentation
+     *   attribute (e.g. a Spec\Param attribute), a property-level attribute on a request's data
+     *   class. When set, each MCP tool argument a form field binds to a property carrying it is
+     *   described by its text, read as the tool's is: a parameter is documented once, where its
+     *   value lands.
+     * @param string|null $mcpParamDescriptionProperty name of the property on that attribute
+     *   holding the text, as `mcpDescriptionProperty` is for the tool's. `description` when omitted.
      * @param array<string, string> $typeAliases project-wide alias name => TypeScript type (e.g.
      *   "UuidStr" => "string"). Declared here rather than as a @phpstan-type on a class, so a
      *   shape can reference the name without every file importing it.
@@ -65,6 +73,8 @@ final readonly class TypeBridgeConfig
         public ?string $mcpScopeProperty = null,
         public ?string $mcpDescriptionAttribute = null,
         public ?string $mcpDescriptionProperty = null,
+        public ?string $mcpParamDescriptionAttribute = null,
+        public ?string $mcpParamDescriptionProperty = null,
         public array $typeAliases = [],
         public IncludeConvention $includes = new IncludeConvention(),
         public ?string $routing = null,
@@ -83,6 +93,19 @@ final readonly class TypeBridgeConfig
         }
 
         return new RoutePathResolver($this->projectDir, $this->routing);
+    }
+
+    /**
+     * What reads an MCP tool argument's description off the property it binds, when the config
+     * names a parameter-documentation attribute; null otherwise.
+     */
+    public function mcpParamDescriptions(): ?AttributeText
+    {
+        if (null === $this->mcpParamDescriptionAttribute) {
+            return null;
+        }
+
+        return new AttributeText($this->mcpParamDescriptionAttribute, $this->mcpParamDescriptionProperty, 'mcpParamDescriptionProperty');
     }
 
     public static function fromFile(string $path): self
@@ -105,7 +128,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config, ?string $projectDir = null): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'typeAliases', 'includes', 'routing'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'mcpParamDescriptionAttribute', 'mcpParamDescriptionProperty', 'typeAliases', 'includes', 'routing'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -128,6 +151,8 @@ final readonly class TypeBridgeConfig
         $mcpScopeProperty = self::attributePropertyName($config['mcpScopeProperty'] ?? null, 'mcpScopeProperty', $mcpScopeAttribute, 'mcpScopeAttribute');
         $mcpDescriptionAttribute = self::attributeClassName($config['mcpDescriptionAttribute'] ?? null, 'mcpDescriptionAttribute');
         $mcpDescriptionProperty = self::attributePropertyName($config['mcpDescriptionProperty'] ?? null, 'mcpDescriptionProperty', $mcpDescriptionAttribute, 'mcpDescriptionAttribute');
+        $mcpParamDescriptionAttribute = self::attributeClassName($config['mcpParamDescriptionAttribute'] ?? null, 'mcpParamDescriptionAttribute');
+        $mcpParamDescriptionProperty = self::attributePropertyName($config['mcpParamDescriptionProperty'] ?? null, 'mcpParamDescriptionProperty', $mcpParamDescriptionAttribute, 'mcpParamDescriptionAttribute');
         $typeAliases = self::typeAliasesMap($config['typeAliases'] ?? []);
         $includes = IncludeConvention::fromArray(self::stringKeyedArray($config['includes'] ?? [], 'includes'));
         $routing = self::routingPath($config['routing'] ?? null, $projectDir);
@@ -141,6 +166,8 @@ final readonly class TypeBridgeConfig
             mcpScopeProperty: $mcpScopeProperty,
             mcpDescriptionAttribute: $mcpDescriptionAttribute,
             mcpDescriptionProperty: $mcpDescriptionProperty,
+            mcpParamDescriptionAttribute: $mcpParamDescriptionAttribute,
+            mcpParamDescriptionProperty: $mcpParamDescriptionProperty,
             typeAliases: $typeAliases,
             includes: $includes,
             routing: $routing,
@@ -189,7 +216,7 @@ final readonly class TypeBridgeConfig
 
     /**
      * A config key naming one of the project's attributes (`mcpScopeAttribute`,
-     * `mcpDescriptionAttribute`): a non-empty class name, or absent.
+     * `mcpDescriptionAttribute`, `mcpParamDescriptionAttribute`): a non-empty class name, or absent.
      */
     private static function attributeClassName(mixed $value, string $key): ?string
     {
