@@ -21,7 +21,8 @@ use PTGS\TypeBridge\Parser\ShapeField;
  * query and body fields — the arguments an MCP client supplies. Whether an argument is required,
  * and which scalar it is, come from the request contract the input class declares (`_self`), the
  * same shape the generated TypeScript is typed from, so a tool and a typed client never disagree
- * about one endpoint; the form speaks only for what the contract does not say. The HTTP method + path tell the
+ * about one endpoint; the form speaks only for what the contract does not say, and for the values a
+ * choice field accepts, which only the built form knows. The HTTP method + path tell the
  * runtime how to call the API, and `query` (when there are any) names the arguments it sends in the
  * query string whatever the method — a POST can take query parameters as well as a body; `destructive` is the safety hint; `scopes` (when the project
  * configures a scope attribute) names the auth scopes the calling token must hold, letting the
@@ -191,11 +192,14 @@ final class McpManifestBuilder
             return ['type' => 'array', 'items' => $this->entrySchema($field)];
         }
 
-        // An enum field takes one of a known set, and a model has no other way to learn them: the
+        // A choice field takes one of a known set, and a model has no other way to learn them: the
         // values go in the schema, so a wrong one is refused by the client rather than by a 422 the
         // model has to guess its way out of. `multiple` means a list of them (a status filter).
-        if (null !== $field->enumClass) {
-            $leaf = $this->enumSchema($field->enumClass);
+        //
+        // They are the form's own values, what it reads a submitted one as, so they are strings
+        // whatever the contract declares the key as: an int-backed enum's form reads 1 as "1".
+        if (null !== $field->choiceValues && [] !== $field->choiceValues) {
+            $leaf = ['type' => 'string', 'enum' => $field->choiceValues];
 
             return $field->multiple ? ['type' => 'array', 'items' => $leaf] : $leaf;
         }
@@ -269,22 +273,6 @@ final class McpManifestBuilder
         }
 
         return $schema;
-    }
-
-    /**
-     * The values a backed enum allows, typed by what it is backed with.
-     *
-     * @return array{type: string, enum: list<int|string>}
-     */
-    private function enumSchema(string $enumClass): array
-    {
-        if (!is_a($enumClass, \BackedEnum::class, allow_string: true)) {
-            throw new \RuntimeException(\sprintf('`%s` is used as a form field\'s enum but is not a backed enum.', $enumClass));
-        }
-
-        $values = array_map(static fn (\BackedEnum $case): int|string => $case->value, $enumClass::cases());
-
-        return ['type' => [] !== $values && is_int($values[0]) ? 'integer' : 'string', 'enum' => $values];
     }
 
     private function scalarType(CollectedFormField $field): string

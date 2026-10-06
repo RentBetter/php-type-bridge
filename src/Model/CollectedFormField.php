@@ -14,6 +14,10 @@ final readonly class CollectedFormField
      * @param list<CollectedFormField> $entryChildren the fields of a collection field's compound entry type —
      *                                                collections have no children of their own at build time,
      *                                                only a prototype, so the entry's shape is inspected separately
+     * @param list<string>|null        $choiceValues  the values a choice field accepts, as its built form reads
+     *                                                a submitted one — its choice list's values, narrowed by an
+     *                                                `Assert\Choice` naming its choices; null for a field with no
+     *                                                choice list
      */
     public function __construct(
         public string $name,
@@ -32,5 +36,6 @@ final readonly class CollectedFormField
         public bool $hasViewTransformers = false,
         public array $children = [],
         public array $entryChildren = [],
+        public ?array $choiceValues = null,
     ) {}
 }

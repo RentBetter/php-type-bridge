@@ -96,7 +96,7 @@ final class McpManifestBuilderTest extends TestCase
         self::assertArrayNotHasKey('query', (new McpManifestBuilder())->build(['accounts' => [$this->setFeatureContract()]])['tools'][0], 'Only listed when there are any');
     }
 
-    public function testAnEnumFieldPublishesTheValuesItAccepts(): void
+    public function testAChoiceFieldPublishesTheValuesItAccepts(): void
     {
         // A model cannot see a PHP enum. Without the values in the schema its only way to learn them
         // is a 422, and a filter it gets wrong reads as "nothing matched" rather than as a mistake.
@@ -108,7 +108,7 @@ final class McpManifestBuilderTest extends TestCase
         );
     }
 
-    public function testAMultipleEnumFieldPublishesAListOfThoseValues(): void
+    public function testAMultipleChoiceFieldPublishesAListOfThoseValues(): void
     {
         $manifest = (new McpManifestBuilder())->build(['projects' => [$this->filterContract(multiple: true)]]);
 
@@ -116,6 +116,34 @@ final class McpManifestBuilderTest extends TestCase
             ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['draft', 'active']]],
             $manifest['tools'][0]['inputSchema']['properties']['status'],
         );
+    }
+
+    public function testEveryChoiceTypePublishesTheValuesItsBuiltFormAccepts(): void
+    {
+        // What a request sends is the choice list's values, whatever the choices are: an id where
+        // the type matches on one, a backing value under Symfony's EnumType, the choice itself in a
+        // plain list. An int-backed enum's values are strings like any other, whatever `_self`
+        // declares the key as, since that is what the form reads a submitted one as.
+        $properties = $this->argumentTools()['ListChecks']['inputSchema']['properties'];
+
+        self::assertSame(['type' => 'string', 'enum' => ['SECURITY', 'COST']], $properties['area']);
+        self::assertSame(['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['security', 'cost']]], $properties['areas']);
+        self::assertSame(['type' => 'string', 'enum' => ['0', '1', '2', '3', '-1']], $properties['rank']);
+        self::assertSame(['type' => 'string', 'enum' => ['low', 'high']], $properties['level']);
+
+        // A loader may query, so the choices it would load are not published: its loader throws.
+        self::assertSame(['type' => 'string'], $properties['owner']);
+    }
+
+    public function testAnAssertChoiceNarrowsTheValuesToTheOnesItAllows(): void
+    {
+        // On the form or on the data class, its choices are enum cases; what is published is the id
+        // each one is sent as. `match: false` names the ones refused, and a Choice in a group of its
+        // own narrows nothing a request can count on.
+        $properties = $this->argumentTools()['RecordVerdict']['inputSchema']['properties'];
+
+        self::assertSame(['type' => 'string', 'enum' => ['OK', 'WARNING', 'ERROR']], $properties['status']);
+        self::assertSame(['type' => 'string', 'enum' => ['OK', 'WARNING', 'ERROR', 'CRITICAL']], $properties['floor']);
     }
 
     public function testSortsToolsByName(): void
@@ -407,6 +435,19 @@ final class McpManifestBuilderTest extends TestCase
     }
 
     /**
+     * The ArgumentMcpFixtures tools, collected from their forms, keyed by name.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function argumentTools(): array
+    {
+        $srcDir = __DIR__ . '/../Fixture/ArgumentMcpFixtures';
+        $contracts = (new EndpointContractCollector())->collect($srcDir, (new ResponseClassCollector())->collectIndex($srcDir));
+
+        return array_column((new McpManifestBuilder())->build($contracts)['tools'], null, 'name');
+    }
+
+    /**
      * @param list<CollectedFormField> $entryChildren
      */
     private function collectionField(string $name, string $entryTypeClass, bool $required, array $entryChildren = []): CollectedFormField
@@ -462,6 +503,7 @@ final class McpManifestBuilderTest extends TestCase
                             dataClass: null,
                             enumClass: ProjectStatus::class,
                             multiple: $multiple,
+                            choiceValues: ['draft', 'active'],
                         ),
                     ],
                 ),
