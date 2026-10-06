@@ -9,10 +9,11 @@ use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectNoteType;
-use Symfony\Component\Form\Extension\Core\Type\TextType;
 use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NestedBrokenRequestType;
 use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NonContractRootType;
 use RuntimeException;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\Validator\Constraints\NotBlank;
 
 final class FormTypeInspectorTest extends TestCase
 {
@@ -47,6 +48,9 @@ final class FormTypeInspectorTest extends TestCase
         self::assertSame(['text', 'author'], array_map(static fn ($field) => $field->name, $notes->entryChildren));
         self::assertTrue($notes->entryChildren[0]->required);
         self::assertFalse($notes->entryChildren[1]->required);
+        // What a field's constraints refuse is read as well as what its form says.
+        self::assertInstanceOf(NotBlank::class, $notes->entryChildren[0]->constraints[0] ?? null, 'text carries NotBlank');
+        self::assertSame([], $notes->entryChildren[1]->constraints);
 
         // A scalar entry has no fields to collect.
         self::assertSame('labels', $labels->name);

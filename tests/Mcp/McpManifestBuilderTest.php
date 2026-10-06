@@ -28,6 +28,7 @@ use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Authorize;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
+use Symfony\Component\Validator\Constraints\NotBlank;
 
 final class McpManifestBuilderTest extends TestCase
 {
@@ -700,6 +701,25 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['title'], $tool['inputSchema']['required']);
     }
 
+    public function testARequestThatMakesSomethingRequiresWhatItsFormRefusesBlank(): void
+    {
+        // One contract serves a create and an update, so it declares every key optional: right for
+        // the update, which changes only what it is sent, and wrong for the create, which refuses a
+        // name it isn't given. The field's NotBlank is what says so.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $fields = [
+            new CollectedFormField(name: 'name', formTypeClass: $text, required: true, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]),
+            $this->scalarField('notes', $text, required: true),
+        ];
+        $contract = new ShapeType([
+            new ShapeField('name', new ScalarType('string'), optional: true),
+            new ShapeField('notes', new ScalarType('string'), optional: true),
+        ]);
+
+        self::assertSame(['name'], $this->toolWithBody('POST', $fields, $contract)['inputSchema']['required']);
+        self::assertArrayNotHasKey('required', $this->toolWithBody('PUT', $fields, $contract)['inputSchema']);
+    }
+
     public function testAFieldTheContractDoesNotDeclareIsLeftToItsForm(): void
     {
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
@@ -799,6 +819,31 @@ final class McpManifestBuilderTest extends TestCase
         );
 
         return (new McpManifestBuilder())->build(['tasks' => [$endpoint]])['tools'][0];
+    }
+
+    /**
+     * The tool an endpoint becomes when its body form has these fields and its data class declares
+     * this contract.
+     *
+     * @param list<CollectedFormField> $fields
+     *
+     * @return array<string, mixed>
+     */
+    private function toolWithBody(string $httpMethod, array $fields, ShapeType $contract): array
+    {
+        $endpoint = new CollectedEndpointContract(
+            name: 'saveProject',
+            domain: 'projects',
+            controllerClass: 'App\\ProjectController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                body: new CollectedInputReference(null, 'App\\ProjectData', 'ProjectData', 'projects', $fields, $contract),
+            ),
+            mcp: new CollectedMcpTool(name: 'saveProject', description: 'Save a project.', httpMethod: $httpMethod, httpPath: '/projects', destructive: true),
+        );
+
+        return (new McpManifestBuilder())->build(['projects' => [$endpoint]])['tools'][0];
     }
 
     private function response(int $status): CollectedApiResponseClass

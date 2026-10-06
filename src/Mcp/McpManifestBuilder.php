@@ -22,6 +22,8 @@ use Symfony\Component\Validator\Constraints\GreaterThanOrEqual;
 use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\LessThan;
 use Symfony\Component\Validator\Constraints\LessThanOrEqual;
+use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\NotNull;
 use Symfony\Component\Validator\Constraints\Range;
 
 /**
@@ -33,7 +35,10 @@ use Symfony\Component\Validator\Constraints\Range;
  * and which scalar it is, come from the request contract the input class declares (`_self`), the
  * same shape the generated TypeScript is typed from, so a tool and a typed client never disagree
  * about one endpoint; the form speaks only for what the contract does not say, and for the values a
- * choice field accepts, which only the built form knows. Each argument also carries what its
+ * choice field accepts, which only the built form knows. One exception: the body of a POST — a
+ * request that makes something — requires a field its constraints refuse blank (NotBlank, NotNull),
+ * since a contract the request shares with an update declares every key optional, and a model would
+ * otherwise learn what it can't leave out only from a 422. Each argument also carries what its
  * validation bounds it by (a number's range, a string's length, a list's size) and, when the
  * project configures a parameter-documentation attribute, the description on the property it
  * binds. The HTTP method + path tell the runtime how to call the API, and `query` (when there are
@@ -104,7 +109,7 @@ final class McpManifestBuilder
         if ([] !== $mcp->scopes) {
             $tool['scopes'] = $mcp->scopes;
         }
-        $tool['inputSchema'] = $this->inputSchema($contract);
+        $tool['inputSchema'] = $this->inputSchema($contract, $mcp->httpMethod);
 
         $query = array_map(static fn (CollectedFormField $field): string => $field->name, $contract->request?->query->fields ?? []);
         $query = array_values(array_unique([...$query, ...array_keys($this->includeQuery($contract))]));
@@ -129,7 +134,7 @@ final class McpManifestBuilder
     /**
      * @return array<string, mixed>
      */
-    private function inputSchema(CollectedEndpointContract $contract): array
+    private function inputSchema(CollectedEndpointContract $contract, string $httpMethod): array
     {
         $properties = [];
         $required = [];
@@ -144,7 +149,7 @@ final class McpManifestBuilder
             }
 
             $this->addFields($request->query, $properties, $required);
-            $this->addFields($request->body, $properties, $required);
+            $this->addFields($request->body, $properties, $required, makes: 'POST' === strtoupper($httpMethod));
         }
 
         foreach ($this->includeQuery($contract) as $name => $description) {
@@ -167,8 +172,10 @@ final class McpManifestBuilder
     /**
      * @param array<string, mixed> $properties
      * @param list<string>         $required
+     * @param bool                 $makes      whether the request makes something (a POST body), so a
+     *                                         field its constraints refuse blank is one it can't go without
      */
-    private function addFields(?CollectedInputReference $reference, array &$properties, array &$required): void
+    private function addFields(?CollectedInputReference $reference, array &$properties, array &$required, bool $makes = false): void
     {
         if (null === $reference) {
             return;
@@ -182,10 +189,25 @@ final class McpManifestBuilder
         foreach ($reference->fields as $field) {
             $key = $declared[$field->name] ?? null;
             $properties[$field->name] = $this->fieldSchema($field, $key?->type);
-            if ($this->isRequired($field, $key)) {
+            if ($this->isRequired($field, $key) || ($makes && $this->refusesBlank($field))) {
                 $required[] = $field->name;
             }
         }
+    }
+
+    /**
+     * Whether a submitted value is refused blank or missing: a NotBlank or a NotNull among the
+     * constraints it is validated against.
+     */
+    private function refusesBlank(CollectedFormField $field): bool
+    {
+        foreach ($field->constraints as $constraint) {
+            if ($constraint instanceof NotBlank || $constraint instanceof NotNull) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
