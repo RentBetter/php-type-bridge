@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Checks\Input;
 
 use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Enum\Area;
 use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Enum\Severity;
+use Symfony\Component\Validator\Constraints as Assert;
 
 /**
  * `rank` is declared an int, as its backing value is, which its form still reads as a string.
@@ -23,6 +24,7 @@ final class ListChecksFilterData
     public ?Area $area = null;
 
     /** @var list<Area> */
+    #[Assert\Count(max: 2)]
     public array $areas = [];
 
     public ?Severity $rank = null;

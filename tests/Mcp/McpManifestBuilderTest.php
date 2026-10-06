@@ -21,6 +21,8 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Support\AttributeText;
+use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Spec\Param;
 use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
@@ -127,7 +129,7 @@ final class McpManifestBuilderTest extends TestCase
         $properties = $this->argumentTools()['ListChecks']['inputSchema']['properties'];
 
         self::assertSame(['type' => 'string', 'enum' => ['SECURITY', 'COST']], $properties['area']);
-        self::assertSame(['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['security', 'cost']]], $properties['areas']);
+        self::assertSame(['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['security', 'cost']], 'maxItems' => 2], $properties['areas']);
         self::assertSame(['type' => 'string', 'enum' => ['0', '1', '2', '3', '-1']], $properties['rank']);
         self::assertSame(['type' => 'string', 'enum' => ['low', 'high']], $properties['level']);
 
@@ -144,6 +146,46 @@ final class McpManifestBuilderTest extends TestCase
 
         self::assertSame(['type' => 'string', 'enum' => ['OK', 'WARNING', 'ERROR']], $properties['status']);
         self::assertSame(['type' => 'string', 'enum' => ['OK', 'WARNING', 'ERROR', 'CRITICAL']], $properties['floor']);
+    }
+
+    public function testAnArgumentIsBoundedAsItsValidationBoundsIt(): void
+    {
+        // A model that knows the limits sends a value inside them, rather than learning each from a
+        // 422. Both places a constraint is written count, the form's option and the data class's
+        // property; of two on one side, the tighter holds. A bound the schema can only misstate is
+        // left out: one read off another property, or a length counted in bytes.
+        $properties = $this->argumentTools()['RecordVerdict']['inputSchema']['properties'];
+
+        self::assertSame(['type' => 'integer', 'minimum' => 1, 'maximum' => 5, 'exclusiveMaximum' => 4], $properties['retries']);
+        self::assertSame(['type' => 'number', 'minimum' => 0.5], $properties['ratio']);
+        self::assertSame(['type' => 'string', 'maxLength' => 255, 'minLength' => 3], $properties['note']);
+
+        $readings = $properties['readings'];
+        self::assertSame(1, $readings['minItems']);
+        self::assertSame(20, $readings['maxItems']);
+        self::assertSame(['type' => 'string', 'maxLength' => 80], $readings['items']['properties']['label']);
+    }
+
+    public function testAnArgumentIsDescribedByTheParameterAttributeOnItsProperty(): void
+    {
+        // Read as a tool's own description is, a list joined with a space; an entry's fields are
+        // described off the entry's data class. A property without the attribute has no description.
+        $properties = $this->argumentTools(new AttributeText(Param::class, null, 'mcpParamDescriptionProperty'))['RecordVerdict']['inputSchema']['properties'];
+
+        self::assertSame(['type' => 'string', 'enum' => ['OK', 'WARNING', 'ERROR'], 'description' => 'The verdict.'], $properties['status']);
+        self::assertSame('The lowest status that alerts. Never SKIPPED.', $properties['floor']['description']);
+        self::assertSame('The evidence, one entry per figure.', $properties['readings']['description']);
+        self::assertSame(['type' => 'string', 'maxLength' => 80, 'description' => 'What was measured.'], $properties['readings']['items']['properties']['label']);
+        self::assertSame('The figure as read. With its unit, where it has one.', $properties['readings']['items']['properties']['value']['description']);
+        self::assertArrayNotHasKey('description', $properties['note']);
+    }
+
+    public function testFailsWhenTheNamedParameterDescriptionPropertyDoesNotExist(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('on "PTGS\\TypeBridge\\Tests\\Fixture\\ArgumentMcpFixtures\\Checks\\Input\\RecordVerdictData::$status" has no property "summary" (named by the mcpParamDescriptionProperty config)');
+
+        $this->argumentTools(new AttributeText(Param::class, 'summary', 'mcpParamDescriptionProperty'));
     }
 
     public function testSortsToolsByName(): void
@@ -439,12 +481,12 @@ final class McpManifestBuilderTest extends TestCase
      *
      * @return array<string, array<string, mixed>>
      */
-    private function argumentTools(): array
+    private function argumentTools(?AttributeText $paramDescriptions = null): array
     {
         $srcDir = __DIR__ . '/../Fixture/ArgumentMcpFixtures';
         $contracts = (new EndpointContractCollector())->collect($srcDir, (new ResponseClassCollector())->collectIndex($srcDir));
 
-        return array_column((new McpManifestBuilder())->build($contracts)['tools'], null, 'name');
+        return array_column((new McpManifestBuilder(paramDescriptions: $paramDescriptions))->build($contracts)['tools'], null, 'name');
     }
 
     /**

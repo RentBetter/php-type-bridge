@@ -163,6 +163,31 @@ final class TypeBridgeConfigTest extends TestCase
         TypeBridgeConfig::fromArray(['mcpDescriptionProperty' => 'summary']);
     }
 
+    public function test_parses_mcp_param_description_attribute_and_property(): void
+    {
+        $config = TypeBridgeConfig::fromArray([]);
+        self::assertNull($config->mcpParamDescriptionAttribute);
+        self::assertNull($config->mcpParamDescriptions());
+
+        $config = TypeBridgeConfig::fromArray([
+            'mcpParamDescriptionAttribute' => 'App\\Spec\\Param',
+            'mcpParamDescriptionProperty' => 'summary',
+        ]);
+
+        self::assertSame('App\\Spec\\Param', $config->mcpParamDescriptionAttribute);
+        self::assertSame('summary', $config->mcpParamDescriptionProperty);
+        self::assertSame('App\\Spec\\Param', $config->mcpParamDescriptions()?->attribute);
+        self::assertSame('summary', $config->mcpParamDescriptions()->property);
+    }
+
+    public function test_rejects_mcp_param_description_property_without_an_attribute(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('"mcpParamDescriptionAttribute", which is not set');
+
+        TypeBridgeConfig::fromArray(['mcpParamDescriptionProperty' => 'summary']);
+    }
+
     public function test_from_file_loads_php_array(): void
     {
         $path = sys_get_temp_dir() . '/type-bridge-config-' . bin2hex(random_bytes(6)) . '.php';

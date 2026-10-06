@@ -93,7 +93,8 @@ final class FormTypeInspector
             }
 
             $propertyPath = $this->resolvePropertyPath($config, $name);
-            $constraints = $this->collectConstraints($config, $ownerClass, $propertyPath);
+            $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
+            $constraints = $this->collectConstraints($config, $property);
 
             $fields[] = new CollectedFormField(
                 name: $name,
@@ -113,6 +114,8 @@ final class FormTypeInspector
                 children: $this->collectFields($child),
                 entryChildren: $this->collectEntryFields($config),
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
+                constraints: $constraints,
+                ownerClass: $property?->getDeclaringClass()->getName(),
             );
         }
 
@@ -168,11 +171,11 @@ final class FormTypeInspector
      * groups other than Default is left out — a request may never be validated against it.
      *
      * @param FormConfigInterface<mixed> $config
-     * @param string|null                $ownerClass the data class the field's form binds to
+     * @param ReflectionProperty|null    $property the data-class property the field binds, if any
      *
      * @return list<Constraint>
      */
-    private function collectConstraints(FormConfigInterface $config, ?string $ownerClass, string $propertyPath): array
+    private function collectConstraints(FormConfigInterface $config, ?ReflectionProperty $property): array
     {
         $constraints = [];
         $option = $this->resolveOption($config, 'constraints');
@@ -182,7 +185,6 @@ final class FormTypeInspector
             }
         }
 
-        $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
         if (null !== $property) {
             $constraints = [...$constraints, ...$this->propertyConstraints($property)];
         }
