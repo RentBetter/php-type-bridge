@@ -12,6 +12,7 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
+use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\AttributeText;
 use ReflectionProperty;
 use Symfony\Component\Validator\Constraint;
@@ -38,7 +39,9 @@ use Symfony\Component\Validator\Constraints\Range;
  * choice field accepts, which only the built form knows. One exception: the body of a POST — a
  * request that makes something — requires a field its constraints refuse blank (NotBlank, NotNull),
  * since a contract the request shares with an update declares every key optional, and a model would
- * otherwise learn what it can't leave out only from a 422. Each argument also carries what its
+ * otherwise learn what it can't leave out only from a 422. A key the contract declares as a scalar or
+ * a shape (a record's id, or the fields to make one) is published as either (`anyOf`), though its form
+ * shows only the shape. Each argument also carries what its
  * validation bounds it by (a number's range, a string's length, a list's size) and, when the
  * project configures a parameter-documentation attribute, the description on the property it
  * binds. The HTTP method + path tell the runtime how to call the API, and `query` (when there are
@@ -235,6 +238,15 @@ final class McpManifestBuilder
     {
         $schema = $this->valueSchema($field, $declared);
         $schema = [...$schema, ...$this->bounds($field->constraints, $schema['type'])];
+
+        // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
+        // is a compound form with a scalar the form lifts out before submit; the form shows only the
+        // object, the contract both. Published as either, or a model could never send the id.
+        $alternatives = 'object' === $schema['type'] ? $this->declaredScalars($declared) : [];
+        if ([] !== $alternatives) {
+            $schema = ['anyOf' => [...array_map(static fn (string $type): array => ['type' => $type], $alternatives), $schema]];
+        }
+
         if (null !== $description = $this->description($field)) {
             $schema['description'] = $description;
         }
@@ -285,6 +297,32 @@ final class McpManifestBuilder
         }
 
         return ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
+    }
+
+    /**
+     * The JSON Schema types of the scalars in a union the contract declares (`string|array{…}` ->
+     * `['string']`); none when it declares no union.
+     *
+     * @return list<string>
+     */
+    private function declaredScalars(?ParsedType $declared): array
+    {
+        if ($declared instanceof NullableType) {
+            $declared = $declared->inner;
+        }
+        if (!$declared instanceof UnionType) {
+            return [];
+        }
+
+        $types = [];
+        foreach ($declared->types as $member) {
+            $type = $this->declaredScalar($member);
+            if (null !== $type) {
+                $types[] = $type;
+            }
+        }
+
+        return array_values(array_unique($types));
     }
 
     /**

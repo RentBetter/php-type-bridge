@@ -21,6 +21,7 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\AttributeText;
 use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Spec\Param;
 use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
@@ -718,6 +719,33 @@ final class McpManifestBuilderTest extends TestCase
 
         self::assertSame(['name'], $this->toolWithBody('POST', $fields, $contract)['inputSchema']['required']);
         self::assertArrayNotHasKey('required', $this->toolWithBody('PUT', $fields, $contract)['inputSchema']);
+    }
+
+    public function testAKeyThatTakesAnIdOrTheFieldsToMakeOneIsPublishedAsEither(): void
+    {
+        // The form binds only the object; a string is lifted out before submit. The contract says
+        // both, and a model must be able to send either.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $artefact = new CollectedFormField(
+            name: 'artefact',
+            formTypeClass: 'App\\EmbeddedArtefactType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\ArtefactData',
+            children: [$this->scalarField('name', $text, required: true)],
+        );
+        $contract = new ShapeType([
+            new ShapeField('artefact', new UnionType([new ScalarType('string'), new ShapeType([new ShapeField('name', new ScalarType('string'), optional: false)])]), optional: false),
+        ]);
+
+        $tool = $this->toolWithBody('POST', [$artefact], $contract);
+
+        self::assertSame(
+            ['anyOf' => [['type' => 'string'], ['type' => 'object', 'properties' => ['name' => ['type' => 'string']], 'required' => ['name']]]],
+            $tool['inputSchema']['properties']['artefact'],
+        );
+        self::assertSame(['artefact'], $tool['inputSchema']['required']);
     }
 
     public function testAFieldTheContractDoesNotDeclareIsLeftToItsForm(): void
