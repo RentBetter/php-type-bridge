@@ -12,6 +12,7 @@ use PTGS\TypeBridge\Response\ValidationErrorResponse;
 use PTGS\TypeBridge\Tests\Form\Fixtures\CustomValidationError;
 use PTGS\TypeBridge\Tests\Form\Fixtures\CustomValidationErrorResponseFactory;
 use PTGS\TypeBridge\Tests\Form\Fixtures\SampleData;
+use PTGS\TypeBridge\Tests\Form\Fixtures\SampleFilterType;
 use PTGS\TypeBridge\Tests\Form\Fixtures\SampleType;
 use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\Forms;
@@ -110,6 +111,35 @@ final class RequestFormProcessorTest extends TestCase
             // The body had no block prefix, so neither does the path: the root form is
             // unnamed, as Symfony makes any form bound straight to the request body.
             self::assertSame('count', $error->errors[0]['path']);
+        }
+    }
+
+    public function test_a_query_form_populates_the_dto_from_the_query_string(): void
+    {
+        $processor = new RequestFormProcessor($this->formFactory(), new DefaultValidationErrorResponseFactory());
+
+        $data = $processor->processQueryForm(SampleFilterType::class, Request::create('/', 'GET', ['name' => 'Acme', 'count' => '7', 'unrelated' => 'x']));
+
+        self::assertInstanceOf(SampleData::class, $data);
+        self::assertSame('Acme', $data->name);
+        self::assertSame(7, $data->count);
+    }
+
+    /**
+     * A filter value the form refuses is a validation failure like a body field's — the
+     * same 422 response, addressed by the parameter's name — not a 400 carrying only the
+     * first message.
+     */
+    public function test_a_query_form_throws_the_validation_response_addressed_by_parameter(): void
+    {
+        $processor = new RequestFormProcessor($this->formFactory(), new DefaultValidationErrorResponseFactory());
+
+        try {
+            $processor->processQueryForm(SampleFilterType::class, Request::create('/', 'GET', ['count' => 'not-a-number']));
+            self::fail('Expected a validation error to be thrown.');
+        } catch (ValidationErrorResponse $error) {
+            self::assertSame('count', $error->errors[0]['path']);
+            self::assertArrayHasKey('message', $error->errors[0]);
         }
     }
 

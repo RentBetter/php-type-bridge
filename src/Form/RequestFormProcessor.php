@@ -17,12 +17,13 @@ use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
  *
  * Two distinct failure modes:
  *
- *  - Malformed input (bad JSON, non-object body, invalid query params) throws a
- *    Symfony BadRequestHttpException (400). Apps that want a richer 400 envelope can
- *    catch and re-shape it, or rely on their own kernel.exception handling.
- *  - JSON-body field-validation failures throw whatever the injected
- *    ValidationErrorResponseFactory produces (a ThrowableApiResponse, rendered by
- *    TypeBridgeThrowableListener), so the 422 envelope is app-specific.
+ *  - Malformed input (bad JSON, a body that is not an object) throws a Symfony
+ *    BadRequestHttpException (400). Apps that want a richer 400 envelope can catch
+ *    and re-shape it, or rely on their own kernel.exception handling.
+ *  - Field-validation failures — a JSON body field's or a query parameter's — throw
+ *    whatever the injected ValidationErrorResponseFactory produces (a
+ *    ThrowableApiResponse, rendered by TypeBridgeThrowableListener), so the 422
+ *    envelope is app-specific. A query parameter's error is addressed by its name.
  */
 final readonly class RequestFormProcessor
 {
@@ -33,7 +34,8 @@ final readonly class RequestFormProcessor
 
     /**
      * Submits query-string parameters through a filter form. Returns the populated DTO
-     * on success; throws BadRequestHttpException on validation failure.
+     * on success; throws the validation-error response on validation failure, as a body
+     * does — a filter value the form refuses is the same 422 as a body field it refuses.
      *
      * @template T of object
      *
@@ -49,9 +51,7 @@ final readonly class RequestFormProcessor
         $form->submit($request->query->all());
 
         if (!$form->isValid()) {
-            $errors = new FormErrors($form);
-
-            throw new BadRequestHttpException($errors->first('Invalid query parameters.'));
+            throw $this->validationErrorResponseFactory->create((new FormErrors($form))->allWithPath());
         }
 
         /** @var T $processedData */
