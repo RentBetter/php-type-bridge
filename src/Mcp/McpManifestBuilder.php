@@ -8,10 +8,15 @@ use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Parser\IdOfType;
+use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\LiteralType;
+use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
+use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\AttributeText;
 use ReflectionProperty;
@@ -41,7 +46,8 @@ use Symfony\Component\Validator\Constraints\Range;
  * since a contract the request shares with an update declares every key optional, and a model would
  * otherwise learn what it can't leave out only from a 422. A key the contract declares as a scalar or
  * a shape (a record's id, or the fields to make one) is published as either (`anyOf`), though its form
- * shows only the shape. Each argument also carries what its
+ * shows only the shape. A compound field with no children, whose type reads the value sent whole, is
+ * published as the shape its data class declares, since its form shows nothing. Each argument also carries what its
  * validation bounds it by (a number's range, a string's length, a list's size) and, when the
  * project configures a parameter-documentation attribute, the description on the property it
  * binds. The HTTP method + path tell the runtime how to call the API, and `query` (when there are
@@ -278,6 +284,12 @@ final class McpManifestBuilder
             return $field->multiple ? ['type' => 'array', 'items' => $leaf] : $leaf;
         }
 
+        // A compound field with no children reads what is sent whole, so its form says nothing of
+        // what it takes: the shape its data class declares does, where every part of it can be said.
+        if (null !== $field->contract && null !== $contract = $this->shapeSchema($field->contract)) {
+            return $contract;
+        }
+
         if ($field->compound && [] !== $field->children) {
             $properties = [];
             $required = [];
@@ -329,6 +341,104 @@ final class McpManifestBuilder
      * The JSON Schema type of a scalar the contract declares. A form type's name is a guess at
      * this (a CheckboxType binds a boolean and says so nowhere in its name); the contract states it.
      */
+    /**
+     * A declared shape as JSON Schema, or null when any part of it names a type stated elsewhere
+     * (an alias, a generic, a class constant) that the builder cannot read here.
+     *
+     * @return array{type: 'object', properties?: array<string, array<string, mixed>>, required?: list<string>}|null
+     */
+    private function shapeSchema(ShapeType $shape): ?array
+    {
+        $properties = [];
+        $required = [];
+        foreach ($shape->fields as $key) {
+            $schema = $this->typeSchema($key->type);
+            if (null === $schema) {
+                return null;
+            }
+
+            $properties[$key->name] = $schema;
+            if (!$key->optional) {
+                $required[] = $key->name;
+            }
+        }
+
+        $schema = ['type' => 'object'];
+        if ([] !== $properties) {
+            $schema['properties'] = $properties;
+        }
+        if ([] !== $required) {
+            $schema['required'] = $required;
+        }
+
+        return $schema;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function typeSchema(ParsedType $type): ?array
+    {
+        if ($type instanceof NullableType) {
+            return $this->typeSchema($type->inner);
+        }
+
+        $scalar = $this->declaredScalar($type);
+        if (null !== $scalar) {
+            return ['type' => $scalar];
+        }
+
+        if ($type instanceof ListType || $type instanceof MapType) {
+            $items = $this->typeSchema($type instanceof ListType ? $type->inner : $type->value);
+            if (null === $items) {
+                return null;
+            }
+
+            return $type instanceof ListType ? ['type' => 'array', 'items' => $items] : ['type' => 'object', 'additionalProperties' => $items];
+        }
+
+        return match (true) {
+            $type instanceof ShapeType => $this->shapeSchema($type),
+            $type instanceof UnionType => $this->unionSchema($type),
+            $type instanceof LiteralType => ['enum' => [$type->value]],
+            // An enum's ids are its own to say and can't be read statically; that it is a string can.
+            $type instanceof IdOfType => ['type' => 'string'],
+            default => null,
+        };
+    }
+
+    /**
+     * A union of literals is the values it allows; anything else is either of its members. A
+     * `null` member is dropped: a key that may be null is one a request leaves out.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function unionSchema(UnionType $union): ?array
+    {
+        $members = [];
+        $values = [];
+        foreach ($union->types as $member) {
+            if ($member instanceof ScalarType && 'null' === $member->base()) {
+                continue;
+            }
+
+            $schema = $this->typeSchema($member);
+            if (null === $schema) {
+                return null;
+            }
+            $members[] = $schema;
+            if ($member instanceof LiteralType) {
+                $values[] = $member->value;
+            }
+        }
+
+        if ([] !== $members && \count($values) === \count($members)) {
+            return ['enum' => array_values(array_unique($values, \SORT_REGULAR))];
+        }
+
+        return 1 === \count($members) ? $members[0] : ['anyOf' => $members];
+    }
+
     private function declaredScalar(?ParsedType $declared): ?string
     {
         if ($declared instanceof NullableType) {

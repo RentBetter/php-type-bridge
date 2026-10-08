@@ -42,7 +42,8 @@ final class RecordVerdictType extends AbstractFormType
                 'entry_type' => ReadingType::class,
                 'allow_add' => true,
                 'required' => false,
-            ]);
+            ])
+            ->add('labels', LabelsType::class, ['required' => false]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

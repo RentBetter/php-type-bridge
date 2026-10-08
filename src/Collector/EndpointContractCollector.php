@@ -10,6 +10,7 @@ use PTGS\TypeBridge\Attribute\McpTool;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
+use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
@@ -512,8 +513,52 @@ final class EndpointContractCollector
             ownerClass: $resolvedForm['dataClass'],
             srcDir: $srcDir,
             classFiles: $classFiles,
-            fields: $resolvedForm['fields'],
+            fields: $this->withDeclaredContracts($resolvedForm['fields'], $classFiles),
         );
+    }
+
+    /**
+     * The fields, each compound one with no children carrying the `_self` shape its data class
+     * declares. Such a field's type reads the submitted value whole (a listener, a transformer),
+     * so the built form shows nothing of what it takes and the contract is the only place that
+     * says. Every other field is left to its form.
+     *
+     * @param list<CollectedFormField> $fields
+     * @param array<string, string>    $classFiles
+     *
+     * @return list<CollectedFormField>
+     */
+    private function withDeclaredContracts(array $fields, array $classFiles): array
+    {
+        return array_map(
+            fn (CollectedFormField $field): CollectedFormField => $field->withDeclared(
+                children: $this->withDeclaredContracts($field->children, $classFiles),
+                entryChildren: $this->withDeclaredContracts($field->entryChildren, $classFiles),
+                contract: $field->compound && [] === $field->children && null !== $field->dataClass
+                    ? $this->contractOf($field->dataClass, $classFiles)
+                    : null,
+            ),
+            $fields,
+        );
+    }
+
+    /**
+     * The `_self` shape a class in the source tree declares, or null when it is outside the tree,
+     * declares none, or declares one that is not a shape.
+     *
+     * @param array<string, string> $classFiles
+     */
+    private function contractOf(string $class, array $classFiles): ?ShapeType
+    {
+        $file = $classFiles[$class] ?? null;
+        $content = null === $file ? false : file_get_contents($file);
+        if (false === $content) {
+            return null;
+        }
+
+        $self = $this->docHelper->extractPhpStanTypes($content)['_self'] ?? null;
+
+        return null === $self ? null : $this->declaredShape($self);
     }
 
     /**

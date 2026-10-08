@@ -10,6 +10,7 @@ use Symfony\Component\Validator\Constraints as Assert;
 
 /**
  * @phpstan-import-type _self from ReadingData as Reading
+ * @phpstan-import-type _self from LabelOperations as Labels
  *
  * @phpstan-type _self = array{
  *     status: string,
@@ -18,6 +19,7 @@ use Symfony\Component\Validator\Constraints as Assert;
  *     ratio?: float,
  *     note?: string,
  *     readings?: list<Reading>,
+ *     labels?: Labels,
  * }
  */
 final class RecordVerdictData
@@ -50,4 +52,6 @@ final class RecordVerdictData
     #[Param('The evidence, one entry per figure.')]
     #[Assert\Count(min: 1, max: 20)]
     public array $readings = [];
+
+    public ?LabelOperations $labels = null;
 }
