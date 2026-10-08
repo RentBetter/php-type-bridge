@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Model;
 
+use PTGS\TypeBridge\Parser\ShapeType;
 use Symfony\Component\Validator\Constraint;
 
 final readonly class CollectedFormField
@@ -26,6 +27,10 @@ final readonly class CollectedFormField
      * @param string|null              $ownerClass    the data class declaring the property the field binds,
      *                                                named by `$propertyPath`; null when it binds none directly
      *                                                (unmapped, or a deeper path)
+     * @param ShapeType|null           $contract      the `_self` shape its data class declares, for a compound
+     *                                                field with no children: one whose type reads the submitted
+     *                                                value whole, so the form shows nothing of what it takes.
+     *                                                Null for any other field, and where `_self` is not a shape
      */
     public function __construct(
         public string $name,
@@ -47,5 +52,39 @@ final readonly class CollectedFormField
         public ?array $choiceValues = null,
         public array $constraints = [],
         public ?string $ownerClass = null,
+        public ?ShapeType $contract = null,
     ) {}
+
+    /**
+     * This field with what only the source files say: its contract, and the same for the fields
+     * under it. Everything the built form said stays as it was.
+     *
+     * @param list<CollectedFormField> $children
+     * @param list<CollectedFormField> $entryChildren
+     */
+    public function withDeclared(array $children, array $entryChildren, ?ShapeType $contract): self
+    {
+        return new self(
+            name: $this->name,
+            formTypeClass: $this->formTypeClass,
+            required: $this->required,
+            mapped: $this->mapped,
+            compound: $this->compound,
+            dataClass: $this->dataClass,
+            propertyPath: $this->propertyPath,
+            entryTypeClass: $this->entryTypeClass,
+            entryDataClass: $this->entryDataClass,
+            enumClass: $this->enumClass,
+            input: $this->input,
+            multiple: $this->multiple,
+            hasModelTransformers: $this->hasModelTransformers,
+            hasViewTransformers: $this->hasViewTransformers,
+            children: $children,
+            entryChildren: $entryChildren,
+            choiceValues: $this->choiceValues,
+            constraints: $this->constraints,
+            ownerClass: $this->ownerClass,
+            contract: $contract,
+        );
+    }
 }

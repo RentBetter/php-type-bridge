@@ -17,6 +17,7 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
@@ -746,6 +747,47 @@ final class McpManifestBuilderTest extends TestCase
             $tool['inputSchema']['properties']['artefact'],
         );
         self::assertSame(['artefact'], $tool['inputSchema']['required']);
+    }
+
+    public function testAFieldWhoseTypeReadsItWholeIsPublishedAsItsDataClassDeclares(): void
+    {
+        // LabelsType reads what is sent before Symfony maps anything, so its form has no children
+        // and once published as a string, which a client checking arguments refused in every form
+        // the endpoint accepts. Its data class's `_self` is the only thing that says what it takes.
+        $labels = $this->argumentTools()['RecordVerdict']['inputSchema']['properties']['labels'];
+
+        self::assertSame([
+            'type' => 'object',
+            'properties' => [
+                'set' => ['type' => 'array', 'items' => ['anyOf' => [
+                    ['type' => 'string'],
+                    ['type' => 'object', 'properties' => ['name' => ['type' => 'string'], 'colour' => ['type' => 'string']], 'required' => ['name']],
+                ]]],
+                'remove' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'mode' => ['enum' => ['merge', 'replace']],
+            ],
+        ], $labels);
+    }
+
+    public function testAWholeValueFieldWhoseContractNamesATypeStatedElsewhereIsLeftToItsForm(): void
+    {
+        // An alias is resolved by the emitter, not here; publishing half a shape would refuse the
+        // half it left out.
+        $labels = new CollectedFormField(
+            name: 'labels',
+            formTypeClass: 'App\\LabelsType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\LabelOperations',
+            contract: new ShapeType([
+                new ShapeField('set', new ListType(new NameRefType('Label')), optional: true),
+            ]),
+        );
+
+        $tool = $this->toolWithBody('PUT', [$labels], new ShapeType([]));
+
+        self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['labels']);
     }
 
     public function testAFieldTheContractDoesNotDeclareIsLeftToItsForm(): void
