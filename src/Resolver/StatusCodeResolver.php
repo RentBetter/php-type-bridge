@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Status\HttpBadRequest;
 use PTGS\TypeBridge\Status\HttpConflict;
 use PTGS\TypeBridge\Status\HttpCreated;
 use PTGS\TypeBridge\Status\HttpForbidden;
+use PTGS\TypeBridge\Status\HttpGone;
 use PTGS\TypeBridge\Status\HttpInternalServerError;
 use PTGS\TypeBridge\Status\HttpNoContent;
 use PTGS\TypeBridge\Status\HttpNotFound;
@@ -33,6 +34,7 @@ final class StatusCodeResolver
         HttpForbidden::class => 403,
         HttpNotFound::class => 404,
         HttpConflict::class => 409,
+        HttpGone::class => 410,
         HttpUnprocessableEntity::class => 422,
         HttpInternalServerError::class => 500,
     ];

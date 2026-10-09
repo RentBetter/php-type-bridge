@@ -114,6 +114,7 @@ interface HttpUnauthorized extends ApiErrorResponse {}
 interface HttpForbidden extends ApiErrorResponse {}
 interface HttpNotFound extends ApiErrorResponse {}
 interface HttpConflict extends ApiErrorResponse {}
+interface HttpGone extends ApiErrorResponse {}
 interface HttpUnprocessableEntity extends ApiErrorResponse {}
 interface HttpInternalServerError extends ApiErrorResponse {}
 ```
