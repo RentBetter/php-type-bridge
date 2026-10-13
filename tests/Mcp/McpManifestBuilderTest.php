@@ -31,6 +31,7 @@ use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Authorize;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
 use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\Range;
 
 final class McpManifestBuilderTest extends TestCase
 {
@@ -835,6 +836,43 @@ final class McpManifestBuilderTest extends TestCase
             'search' => ['type' => 'string'],
             'tags' => ['type' => 'string'],
         ], $tool['inputSchema']['properties']);
+    }
+
+    public function testABodyKeyTheContractTypesTOrNullTakesNull(): void
+    {
+        // An update's "clear this": left out, the field keeps its value; sent as null, it is
+        // cleared. The contract says so with `T|null` (a project's preserveNull), where `?T` is a
+        // key only ever left out — and a model told the key is a plain string could never send it.
+        $fields = [
+            $this->scalarField('description', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextareaType', required: false),
+            new CollectedFormField(name: 'priority', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\IntegerType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Range(min: 1, max: 5)]),
+            new CollectedFormField(name: 'size', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\EnumType', required: false, mapped: true, compound: false, dataClass: null, choiceValues: ['S', 'M', 'L']),
+            $this->scalarField('title', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false),
+        ];
+        $contract = new ShapeType([
+            new ShapeField('description', new NullableType(new ScalarType('string'), optional: false), optional: true),
+            new ShapeField('priority', new NullableType(new ScalarType('int'), optional: false), optional: true),
+            new ShapeField('size', new NullableType(new ScalarType('string'), optional: false), optional: true),
+            // `?T`: left out, never sent as null.
+            new ShapeField('title', new NullableType(new ScalarType('string'), optional: true), optional: true),
+        ]);
+
+        self::assertSame([
+            'description' => ['type' => ['string', 'null']],
+            'priority' => ['type' => ['integer', 'null'], 'minimum' => 1, 'maximum' => 5],
+            'size' => ['type' => ['string', 'null'], 'enum' => ['S', 'M', 'L', null]],
+            'title' => ['type' => 'string'],
+        ], $this->toolWithBody('PUT', $fields, $contract)['inputSchema']['properties']);
+    }
+
+    public function testAQueryKeyTypedTOrNullStaysItsTypeForAQueryStringCannotSendNull(): void
+    {
+        $tool = $this->toolTaking(
+            fields: [$this->scalarField('ratio', 'App\\Form\\RatioType', required: false)],
+            contract: new ShapeType([new ShapeField('ratio', new NullableType(new ScalarType('float'), optional: false), optional: true)]),
+        );
+
+        self::assertSame(['type' => 'number'], $tool['inputSchema']['properties']['ratio']);
     }
 
     public function testACollectedFilterFormPublishesWhatItsDataClassDeclares(): void

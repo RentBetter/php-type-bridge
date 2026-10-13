@@ -44,7 +44,8 @@ use Symfony\Component\Validator\Constraints\Range;
  * choice field accepts, which only the built form knows. One exception: the body of a POST — a
  * request that makes something — requires a field its constraints refuse blank (NotBlank, NotNull),
  * since a contract the request shares with an update declares every key optional, and a model would
- * otherwise learn what it can't leave out only from a 422. A key the contract declares as a scalar or
+ * otherwise learn what it can't leave out only from a 422. A body key the contract types `T|null` takes
+ * null — an update's "clear this" — where `?T` is only ever left out. A key the contract declares as a scalar or
  * a shape (a record's id, or the fields to make one) is published as either (`anyOf`), though its form
  * shows only the shape. A compound field with no children, whose type reads the value sent whole, is
  * published as the shape its data class declares, since its form shows nothing. Each argument also carries what its
@@ -158,7 +159,7 @@ final class McpManifestBuilder
             }
 
             $this->addFields($request->query, $properties, $required);
-            $this->addFields($request->body, $properties, $required, makes: 'POST' === strtoupper($httpMethod));
+            $this->addFields($request->body, $properties, $required, makes: 'POST' === strtoupper($httpMethod), json: true);
         }
 
         foreach ($this->includeQuery($contract) as $name => $description) {
@@ -183,8 +184,10 @@ final class McpManifestBuilder
      * @param list<string>         $required
      * @param bool                 $makes      whether the request makes something (a POST body), so a
      *                                         field its constraints refuse blank is one it can't go without
+     * @param bool                 $json       whether the fields are sent as JSON (a body), which can carry a
+     *                                         null; a query string cannot
      */
-    private function addFields(?CollectedInputReference $reference, array &$properties, array &$required, bool $makes = false): void
+    private function addFields(?CollectedInputReference $reference, array &$properties, array &$required, bool $makes = false, bool $json = false): void
     {
         if (null === $reference) {
             return;
@@ -198,6 +201,9 @@ final class McpManifestBuilder
         foreach ($reference->fields as $field) {
             $key = $declared[$field->name] ?? null;
             $properties[$field->name] = $this->fieldSchema($field, $key?->type);
+            if ($json && $this->takesNull($key)) {
+                $properties[$field->name] = self::withNull($properties[$field->name]);
+            }
             if ($this->isRequired($field, $key) || ($makes && $this->refusesBlank($field))) {
                 $required[] = $field->name;
             }
@@ -217,6 +223,43 @@ final class McpManifestBuilder
         }
 
         return false;
+    }
+
+    /**
+     * Whether the contract types the key `T|null` — a null that is sent and means something, an
+     * update's "clear this" — rather than `?T`, a key only ever left out. A project lists such keys
+     * in `preserveNull`, and its PHPStan rule holds every other nullable key to `?T`, so the
+     * contract alone says which they are.
+     */
+    private function takesNull(?ShapeField $key): bool
+    {
+        return $key?->type instanceof NullableType && !$key->type->optional;
+    }
+
+    /**
+     * The schema with null among what it accepts: a `null` type beside its own (in `anyOf`, or as
+     * a type list), and in its `enum` when it lists its values, which would refuse null otherwise.
+     *
+     * @param array<string, mixed> $schema
+     *
+     * @return array<string, mixed>
+     */
+    private static function withNull(array $schema): array
+    {
+        if (isset($schema['anyOf']) && \is_array($schema['anyOf'])) {
+            $schema['anyOf'][] = ['type' => 'null'];
+
+            return $schema;
+        }
+
+        if (isset($schema['type']) && \is_string($schema['type'])) {
+            $schema['type'] = [$schema['type'], 'null'];
+        }
+        if (isset($schema['enum']) && \is_array($schema['enum'])) {
+            $schema['enum'][] = null;
+        }
+
+        return $schema;
     }
 
     /**
