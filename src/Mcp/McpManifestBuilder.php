@@ -31,6 +31,7 @@ use Symfony\Component\Validator\Constraints\LessThanOrEqual;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\NotNull;
 use Symfony\Component\Validator\Constraints\Range;
+use Symfony\Component\Validator\Constraints\Regex;
 
 /**
  * Builds the MCP tool manifest (the `tools.json` structure) from collected endpoint contracts.
@@ -51,7 +52,8 @@ use Symfony\Component\Validator\Constraints\Range;
  * published as the shape its data class declares, since its form shows nothing. Each argument also carries what its
  * validation bounds it by (a number's range, a string's length, a list's size) and, when the
  * project configures a parameter-documentation attribute, the description on the property it
- * binds. The HTTP method + path tell the runtime how to call the API, and `query` (when there are
+ * binds, and a string what it must look like (`pattern`) — from its route requirement or its Regex
+ * constraint, when that reads the same in JSON Schema's regex dialect. The HTTP method + path tell the runtime how to call the API, and `query` (when there are
  * any) names the arguments it sends in the query string whatever the method — a POST can take
  * query parameters as well as a body; `destructive` is the safety hint; `scopes` (when the project
  * configures a scope attribute) names the auth scopes the calling token must hold, letting the
@@ -153,8 +155,13 @@ final class McpManifestBuilder
         if (null !== $request) {
             foreach ($request->pathParams ?? [] as $param) {
                 // A path param's tsType ('string'/'number') doubles as its JSON Schema type, and
-                // a path segment is always required.
+                // a path segment is always required. A string's route requirement says what it
+                // must look like, so a model learns a ticket is `SO-12` before the router's 404.
                 $properties[$param->name] = ['type' => $param->tsType];
+                $pattern = 'string' === $param->tsType && null !== $param->requirement ? self::anchoredPattern($param->requirement) : null;
+                if (null !== $pattern) {
+                    $properties[$param->name]['pattern'] = $pattern;
+                }
                 $required[] = $param->name;
             }
 
@@ -286,7 +293,7 @@ final class McpManifestBuilder
     private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null): array
     {
         $schema = $this->valueSchema($field, $declared);
-        $schema = [...$schema, ...$this->bounds($field->constraints, $schema['type'])];
+        $schema = [...$schema, ...$this->bounds($field->constraints, $schema['type']), ...$this->patternOf($field->constraints, $schema['type'])];
 
         // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
         // is a compound form with a scalar the form lifts out before submit; the form shows only the
@@ -555,6 +562,62 @@ final class McpManifestBuilder
         }
 
         return $bounds;
+    }
+
+    /**
+     * A string's Regex constraint as the schema's `pattern`, when it has exactly one that reads the
+     * same in JSON Schema's regex dialect. Symfony's own HTML-pattern conversion strips the
+     * delimiters and anchors, and gives up on what it cannot carry over (flags after the delimiter).
+     *
+     * @param list<Constraint> $constraints
+     *
+     * @return array{pattern?: string}
+     */
+    private function patternOf(array $constraints, string $type): array
+    {
+        if ('string' !== $type) {
+            return [];
+        }
+
+        $patterns = [];
+        foreach ($constraints as $constraint) {
+            if ($constraint instanceof Regex) {
+                $html = $constraint->getHtmlPattern();
+                $patterns[] = null === $html ? null : self::anchoredPattern($html);
+            }
+        }
+
+        // Two patterns are both to be met, which `pattern` cannot say; one that can't be carried
+        // over would leave the other claiming to be the whole rule.
+        return 1 === \count($patterns) && null !== $patterns[0] ? ['pattern' => $patterns[0]] : [];
+    }
+
+    /**
+     * A whole-value regex fragment (a route requirement, an HTML pattern — both matched whole) as a
+     * JSON Schema `pattern`, which matches anywhere unless anchored. Null when the fragment may not
+     * read the same, or compile at all, as an ECMA-262 regex in Unicode mode — how Ajv compiles one,
+     * and an argument check that can't compile refuses every call:
+     *
+     * - any `(?` group but `(?:` — an inline flag, a lookaround, a named or atomic group;
+     * - a possessive quantifier (`a++`) or a POSIX class (`[[:alpha:]]`);
+     * - an escape other than `\d \D \w \W \s \S \b \B \n \r \t \f \v`, a backreference, or an
+     *   escaped syntax character — `\A`, `\h`, `\p{…}`, `\x{…}` and an escaped letter or `_` are
+     *   PCRE's, or an error under Unicode mode;
+     * - a brace that is not a `{n}`, `{n,}` or `{n,m}` quantifier.
+     *
+     * It errs toward no pattern: a client checks no value against a rule other than the server's.
+     */
+    private static function anchoredPattern(string $fragment): ?string
+    {
+        if ('' === $fragment
+            || 1 === preg_match('/\(\?(?!:)|[+*?}]\+|\[\[:/', $fragment)
+            || 1 === preg_match('/\\\\[^dDwWsSbBnrtfv0-9^$\\\\.*+?()[\]{}|\/-]/', $fragment)
+            || 1 === preg_match('/(?<!\\\\)[{}]/', (string) preg_replace('/(?<!\\\\)\{\d+(?:,\d*)?\}/', '', $fragment))
+        ) {
+            return null;
+        }
+
+        return '^(?:' . $fragment . ')$';
     }
 
     private function tighter(string $keyword, int|float $current, int|float $limit): int|float

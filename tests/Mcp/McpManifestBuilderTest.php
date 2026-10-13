@@ -32,6 +32,7 @@ use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Aut
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\Range;
+use Symfony\Component\Validator\Constraints\Regex;
 
 final class McpManifestBuilderTest extends TestCase
 {
@@ -873,6 +874,75 @@ final class McpManifestBuilderTest extends TestCase
         );
 
         self::assertSame(['type' => 'number'], $tool['inputSchema']['properties']['ratio']);
+    }
+
+    public function testAPathSegmentCarriesItsRouteRequirementAsAnAnchoredPattern(): void
+    {
+        $endpoint = new CollectedEndpointContract(
+            name: 'showCheck',
+            domain: 'checks',
+            controllerClass: 'App\\CheckController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(pathParams: [
+                new CollectedPathParam('ticketCode', 'string', '[A-Z]{1,5}-[0-9]+'),
+                new CollectedPathParam('checkNumber', 'number', '[0-9]+'),
+                // PCRE reads `(?i)` as a flag; JSON Schema's dialect has none, so no pattern at all.
+                new CollectedPathParam('slug', 'string', '(?i)[a-z-]+'),
+                // An escaped `_` and a lone brace are PCRE's; Unicode-mode ECMA regex (Ajv's) refuses
+                // to compile them, and an argument check that can't compile refuses every call.
+                new CollectedPathParam('handle', 'string', 'user\\_[a-z]+'),
+                new CollectedPathParam('braced', 'string', '{[a-z]+}'),
+                new CollectedPathParam('year', 'string', '\\d{4}'),
+                new CollectedPathParam('anything', 'string'),
+            ]),
+            mcp: new CollectedMcpTool(name: 'showCheck', description: 'A check.', httpMethod: 'GET', httpPath: '/tickets/{ticketCode}/checks/{checkNumber}/{slug}/{handle}/{braced}/{year}/{anything}', destructive: false),
+        );
+
+        $properties = (new McpManifestBuilder())->build(['checks' => [$endpoint]])['tools'][0]['inputSchema']['properties'];
+
+        self::assertSame([
+            'ticketCode' => ['type' => 'string', 'pattern' => '^(?:[A-Z]{1,5}-[0-9]+)$'],
+            'checkNumber' => ['type' => 'number'],
+            'slug' => ['type' => 'string'],
+            'handle' => ['type' => 'string'],
+            'braced' => ['type' => 'string'],
+            'year' => ['type' => 'string', 'pattern' => '^(?:\\d{4})$'],
+            'anything' => ['type' => 'string'],
+        ], $properties);
+    }
+
+    public function testAStringsRegexConstraintIsItsPatternWhenItReadsTheSameInJsonSchema(): void
+    {
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $field = static fn (string $name, array $constraints): CollectedFormField => new CollectedFormField(
+            name: $name,
+            formTypeClass: $text,
+            required: false,
+            mapped: true,
+            compound: false,
+            dataClass: null,
+            constraints: $constraints,
+        );
+        $fields = [
+            $field('product', [new Regex('/^[A-Z]{1,5}$/')]),
+            // Symfony anchors an unanchored pattern's HTML form with `.*`, which still says it whole.
+            $field('slug', [new Regex('/[a-z]+-[a-z]+/')]),
+            // A flag after the delimiter can't be carried over.
+            $field('caseless', [new Regex('/^[a-z]+$/i')]),
+            // Both must hold, which one `pattern` cannot say.
+            $field('both', [new Regex('/^[A-Z]+$/'), new Regex('/^.{2,5}$/')]),
+            // Matching must fail: a lookahead, left out like every `(?` group but `(?:`.
+            $field('notDigits', [new Regex(pattern: '/^[0-9]+$/', match: false)]),
+        ];
+
+        $properties = $this->toolWithBody('PUT', $fields, new ShapeType([]))['inputSchema']['properties'];
+
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]{1,5})$'], $properties['product']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:.*[a-z]+-[a-z]+.*)$'], $properties['slug']);
+        self::assertSame(['type' => 'string'], $properties['caseless']);
+        self::assertSame(['type' => 'string'], $properties['both']);
+        self::assertSame(['type' => 'string'], $properties['notDigits']);
     }
 
     public function testACollectedFilterFormPublishesWhatItsDataClassDeclares(): void
