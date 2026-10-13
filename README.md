@@ -206,7 +206,7 @@ export const UpdateProject: Endpoint<UpdateProjectEndpointMap, { path: UpdatePro
 };
 ```
 
-The inputs are `path` when the route has placeholders, `body` when the request has one, and `query`, which a caller may leave out. `types` is never set; it is there for a helper to read the endpoint's types off it: `E extends Endpoint<infer M, infer I>`. The path is the one Symfony serves when the `routing` config is given, its prefixes and any class-level `#[Route]` included. Without it, the path is the method attribute's own. TypeBridge sends nothing itself: how a request is made, and what an error status does, is the client's to decide.
+The inputs are `path` when the route has placeholders, `body` when the request has one, and `query` — `query?`, which a caller may leave out, unless the query's contract requires a key (`product: string`), when it is `query` and a call without it does not compile. `types` is never set; it is there for a helper to read the endpoint's types off it: `E extends Endpoint<infer M, infer I>`. The path is the one Symfony serves when the `routing` config is given, its prefixes and any class-level `#[Route]` included. Without it, the path is the method attribute's own. TypeBridge sends nothing itself: how a request is made, and what an error status does, is the client's to decide.
 
 ### PHPStan types in shapes
 

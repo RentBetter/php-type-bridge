@@ -162,6 +162,23 @@ final class EndpointContractEmitter implements TypeEmitter
     }
 
     /**
+     * Whether a caller cannot leave the query out: its contract requires a key (`product: string`),
+     * so a call without one is refused. The include parameters are all optional, and a query whose
+     * contract cannot be read as a shape stays optional — its form's `required` defaults to true
+     * for every filter and would make nearly every query mandatory.
+     */
+    private static function requiresQuery(CollectedEndpointContract $contract): bool
+    {
+        foreach ($contract->request?->query?->contract->fields ?? [] as $key) {
+            if (!$key->optional) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Renders route-derived path params as an inline object type, e.g. `{ accountId: string }`.
      *
      * @param list<CollectedPathParam> $params
@@ -194,7 +211,8 @@ final class EndpointContractEmitter implements TypeEmitter
     /**
      * `export const ListProjects: Endpoint<ListProjectsEndpointMap, { query?: ListProjectsQuery }> = {…}`:
      * the method and path to call, typed with the endpoint's responses and the inputs it takes —
-     * its path params and body when it has them, and its query, which a caller may leave out.
+     * its path params and body when it has them, and its query: `query?` when a caller may leave it
+     * out, `query` when its contract requires a key.
      */
     private function renderEndpoint(CollectedEndpointContract $contract, EmitContext $context): string
     {
@@ -213,7 +231,7 @@ final class EndpointContractEmitter implements TypeEmitter
             $inputs[] = 'path: ' . $context->naming->pathAliasName($contract->name);
         }
         if (null !== $this->queryType($contract, $context)) {
-            $inputs[] = 'query?: ' . $context->naming->queryAliasName($contract->name);
+            $inputs[] = (self::requiresQuery($contract) ? 'query: ' : 'query?: ') . $context->naming->queryAliasName($contract->name);
         }
         if (null !== $request?->body) {
             $inputs[] = 'body: ' . $context->naming->bodyAliasName($contract->name);
