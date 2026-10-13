@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Collector;
 use PTGS\TypeBridge\Contract\ApiResponse;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedResponseProperty;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
@@ -20,6 +21,9 @@ use ReflectionUnionType;
 
 final class ResponseClassCollector
 {
+    /** @var array<string, array{imports: array<string, ImportedType>, classImports: array<string, string>, localAliases: list<string>}> */
+    private array $typeContexts = [];
+
     public function __construct(
         private readonly StatusCodeResolver $statusCodeResolver = new StatusCodeResolver(),
         private readonly PhpDocShapeParser $parser = new PhpDocShapeParser(),
@@ -52,6 +56,7 @@ final class ResponseClassCollector
         $classFiles = $this->classLocator->classesIn($srcDir);
         $shortNameMap = $this->buildShortNameMap(array_keys($classFiles));
         $responses = [];
+        $this->typeContexts = [];
 
         foreach ($classFiles as $className => $file) {
             if (!$this->classLocator->isLoadable($className)) {
@@ -64,35 +69,42 @@ final class ResponseClassCollector
             }
 
             $this->statusCodeResolver->assertResponseClass($reflection);
-            $content = file_get_contents($file);
-            if (false === $content) {
+            $context = $this->typeContext($className, $file, $srcDir, $classFiles, $shortNameMap);
+            if (null === $context) {
                 continue;
             }
 
-            $imports = $this->docHelper->extractImportedTypes(
-                content: $content,
-                ownerClass: $className,
-                srcDir: $srcDir,
-                classFiles: $classFiles,
-                shortNameMap: $shortNameMap,
-                domainGuesser: $this->domainGuesser,
-            );
-            $classImports = $this->docHelper->classImports($content);
-            $localAliases = array_keys($this->docHelper->extractPhpStanTypes($content));
-
+            $imports = $context['imports'];
             $properties = [];
             foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
-                if ($property->getDeclaringClass()->getName() !== $className || $property->isStatic()) {
+                if ($property->isStatic()) {
                     continue;
+                }
+
+                // An inherited property is on the wire as much as the class's own — the response
+                // subscriber writes every public property — so it is published too, typed as the
+                // file that declares it says. Only a class in the source tree counts: a library's
+                // base class is not part of the contract.
+                $declaringClass = $property->getDeclaringClass()->getName();
+                $declared = $context;
+                if ($declaringClass !== $className) {
+                    $declaringFile = $classFiles[$declaringClass] ?? null;
+                    $declared = null === $declaringFile ? null : $this->typeContext($declaringClass, $declaringFile, $srcDir, $classFiles, $shortNameMap);
+                    if (null === $declared) {
+                        continue;
+                    }
+                    foreach ($declared['imports'] as $alias => $import) {
+                        $imports[$alias] ??= $import;
+                    }
                 }
 
                 $rawType = $this->resolvePropertyType($property);
                 $parsed = $this->docHelper->resolveImportedNames(
                     $this->parser->parse($rawType),
-                    $imports,
-                    $className,
-                    $classImports,
-                    $localAliases,
+                    $declared['imports'],
+                    $declaringClass,
+                    $declared['classImports'],
+                    $declared['localAliases'],
                 );
                 $properties[] = new CollectedResponseProperty(
                     name: $property->getName(),
@@ -120,6 +132,39 @@ final class ResponseClassCollector
         ksort($responses);
 
         return $responses;
+    }
+
+    /**
+     * What a class's file says its types mean: the types it imports, the classes it `use`s, and
+     * the aliases it declares — what a property's annotation in that file is read against.
+     *
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
+     * @return array{imports: array<string, ImportedType>, classImports: array<string, string>, localAliases: list<string>}|null
+     */
+    private function typeContext(string $className, string $file, string $srcDir, array $classFiles, array $shortNameMap): ?array
+    {
+        if (isset($this->typeContexts[$className])) {
+            return $this->typeContexts[$className];
+        }
+
+        $content = file_get_contents($file);
+        if (false === $content) {
+            return null;
+        }
+
+        return $this->typeContexts[$className] = [
+            'imports' => $this->docHelper->extractImportedTypes(
+                content: $content,
+                ownerClass: $className,
+                srcDir: $srcDir,
+                classFiles: $classFiles,
+                shortNameMap: $shortNameMap,
+                domainGuesser: $this->domainGuesser,
+            ),
+            'classImports' => $this->docHelper->classImports($content),
+            'localAliases' => array_keys($this->docHelper->extractPhpStanTypes($content)),
+        ];
     }
 
     /**
