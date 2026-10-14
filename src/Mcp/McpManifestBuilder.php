@@ -158,7 +158,7 @@ final class McpManifestBuilder
                 // a path segment is always required. A string's route requirement says what it
                 // must look like, so a model learns a ticket is `SO-12` before the router's 404.
                 $properties[$param->name] = ['type' => $param->tsType];
-                $pattern = 'string' === $param->tsType && null !== $param->requirement ? self::routePattern($param->requirement) : null;
+                $pattern = 'string' === $param->tsType && null !== $param->requirement ? self::routePattern($param->requirement, $param->utf8) : null;
                 if (null !== $pattern) {
                     $properties[$param->name]['pattern'] = $pattern;
                 }
@@ -322,7 +322,7 @@ final class McpManifestBuilder
     private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null, bool $json = false): array
     {
         $schema = $this->valueSchema($field, $declared, $json);
-        $schema = [...$schema, ...$this->bounds($field->constraints, $schema['type']), ...$this->patternOf($field->constraints, $schema['type'])];
+        $schema = [...$schema, ...$this->bounds($field->constraints, $schema['type']), ...$this->patternOf($field, $schema['type'])];
 
         // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
         // is a compound form with a scalar the form lifts out before submit; the form shows only the
@@ -348,7 +348,7 @@ final class McpManifestBuilder
     {
         // A collection is compound too, but its shape is its entry's, repeated.
         if (null !== $field->entryTypeClass) {
-            return ['type' => 'array', 'items' => $this->entrySchema($field)];
+            return ['type' => 'array', 'items' => $this->entrySchema($field, self::listItem($declared), $json)];
         }
 
         // A choice field takes one of a known set, and a model has no other way to learn them: the
@@ -370,10 +370,9 @@ final class McpManifestBuilder
         }
 
         if ($field->compound && [] !== $field->children) {
-            $properties = [];
+            $properties = $this->childSchemas($field->children, self::shapeKeys($declared), $json);
             $required = [];
             foreach ($field->children as $child) {
-                $properties[$child->name] = $this->fieldSchema($child, json: $json);
                 if ($child->required) {
                     $required[] = $child->name;
                 }
@@ -549,20 +548,25 @@ final class McpManifestBuilder
     }
 
     /**
+     * A collection's entry: its type, or for a compound entry its fields — each taking null, sent
+     * as JSON, where the entry's declared shape types it `T|null`.
+     *
+     * @param ParsedType|null $item the type the contract gives an entry (`list<T>`'s T), if it does
+     *
      * @return array<string, mixed>
      */
-    private function entrySchema(CollectedFormField $field): array
+    private function entrySchema(CollectedFormField $field, ?ParsedType $item = null, bool $json = false): array
     {
         if ([] === $field->entryChildren) {
             \assert(null !== $field->entryTypeClass);
+            $schema = ['type' => $this->scalarTypeOf($field->entryTypeClass)];
 
-            return ['type' => $this->scalarTypeOf($field->entryTypeClass)];
+            return $json && null !== $item && self::admitsNull($item) ? self::withNull($schema) : $schema;
         }
 
-        $properties = [];
+        $properties = $this->childSchemas($field->entryChildren, self::shapeKeys($item), $json);
         $required = [];
         foreach ($field->entryChildren as $child) {
-            $properties[$child->name] = $this->fieldSchema($child);
             if ($child->required) {
                 $required[] = $child->name;
             }
@@ -574,6 +578,61 @@ final class McpManifestBuilder
         }
 
         return $schema;
+    }
+
+    /**
+     * The schemas of a compound form's fields, each with the type its declared key gives it and,
+     * sent as JSON, null where that key takes one.
+     *
+     * @param list<CollectedFormField> $children
+     * @param array<string, ShapeField> $keys the keys the compound's declared shape names
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function childSchemas(array $children, array $keys, bool $json): array
+    {
+        $properties = [];
+        foreach ($children as $child) {
+            $key = $keys[$child->name] ?? null;
+            $schema = $this->fieldSchema($child, $key?->type, $json);
+            $properties[$child->name] = $json && $this->takesNull($key, $child) ? self::withNull($schema) : $schema;
+        }
+
+        return $properties;
+    }
+
+    /**
+     * The keys of the shape a type declares — itself, or the one shape of a nullable or a union.
+     *
+     * @return array<string, ShapeField>
+     */
+    private static function shapeKeys(?ParsedType $type): array
+    {
+        if ($type instanceof NullableType) {
+            $type = $type->inner;
+        }
+        if ($type instanceof UnionType) {
+            $shapes = array_values(array_filter($type->types, static fn (ParsedType $member): bool => $member instanceof ShapeType));
+            $type = 1 === \count($shapes) ? $shapes[0] : null;
+        }
+
+        return $type instanceof ShapeType ? array_column(array_map(static fn (ShapeField $key): array => ['name' => $key->name, 'key' => $key], $type->fields), 'key', 'name') : [];
+    }
+
+    /**
+     * The type of a list's items — of the list itself, or the one list of a nullable or a union.
+     */
+    private static function listItem(?ParsedType $type): ?ParsedType
+    {
+        if ($type instanceof NullableType) {
+            $type = $type->inner;
+        }
+        if ($type instanceof UnionType) {
+            $lists = array_values(array_filter($type->types, static fn (ParsedType $member): bool => $member instanceof ListType));
+            $type = 1 === \count($lists) ? $lists[0] : null;
+        }
+
+        return $type instanceof ListType ? $type->inner : null;
     }
 
     /**
@@ -611,21 +670,19 @@ final class McpManifestBuilder
      * `pattern` cannot say; one that can't be carried over would leave the other claiming to be the
      * whole rule.
      *
-     * @param list<Constraint> $constraints
-     *
      * @return array{pattern?: string}
      */
-    private function patternOf(array $constraints, string $type): array
+    private function patternOf(CollectedFormField $field, string $type): array
     {
         if ('string' !== $type) {
             return [];
         }
 
-        $regexes = array_values(array_filter($constraints, static fn (Constraint $constraint): bool => $constraint instanceof Regex));
+        $regexes = array_values(array_filter($field->constraints, static fn (Constraint $constraint): bool => $constraint instanceof Regex));
         if (1 !== \count($regexes)) {
             return [];
         }
-        $pattern = self::regexPattern($regexes[0]);
+        $pattern = self::regexPattern($regexes[0], $field);
 
         return null === $pattern ? [] : ['pattern' => $pattern];
     }
@@ -635,9 +692,10 @@ final class McpManifestBuilder
      * anchored (`^(?:…)$`), after the leading `^`/`\A` and trailing `$`/`\z` Symfony itself strips.
      * Null for a requirement holding a `%…%` container placeholder, which the router resolves and the
      * literal text is not, and for one that does not read the same in JSON Schema's dialect
-     * ({@see self::readsTheSameInEcma()}).
+     * ({@see self::readsTheSameInEcma()}) under the route's `utf8` option — or under either, when
+     * the route leaves it to the router's default.
      */
-    private static function routePattern(string $requirement): ?string
+    private static function routePattern(string $requirement, ?bool $utf8): ?string
     {
         // Route::sanitizeRequirement(), as Symfony does it.
         if (str_starts_with($requirement, '^')) {
@@ -651,7 +709,7 @@ final class McpManifestBuilder
             $requirement = substr($requirement, 0, -2);
         }
 
-        if (str_contains($requirement, '%') || !self::readsTheSameInEcma($requirement, alternationOutsideGroups: true)) {
+        if (str_contains($requirement, '%') || !self::readsTheSameInEcma($requirement, alternationOutsideGroups: true, unicode: $utf8)) {
             return null;
         }
 
@@ -659,14 +717,19 @@ final class McpManifestBuilder
     }
 
     /**
-     * A Regex constraint as a `pattern`, when it means the same there. Only a whole-value rule
-     * carries over: anchored at both ends (`/^…$/`) — unanchored, PCRE matches anywhere and across
-     * lines, which no padding with `.*` reproduces — with no alternation outside a group (`^a|b$` is
-     * `(^a)|(b$)`), no flag but `D` and `u`, a value matched as sent (no normaliser) and a match that
-     * must succeed. PCRE's `$` without `D` also matches before a final newline, so the published rule
-     * allows one (`\n?$`).
+     * A Regex constraint as a `pattern`, describing every value the server takes. Only a whole-value
+     * rule carries over: anchored at both ends (`/^…$/`) — unanchored, PCRE matches anywhere and
+     * across lines, which no padding with `.*` reproduces — with no alternation outside a group
+     * (`^a|b$` is `(^a)|(b$)`), no flag but `D` and `u`, the value matched as the form hands it on
+     * (no normaliser) and a match that must succeed.
+     *
+     * Around the rule goes what reaches it. The form trims the value first (its `trim` option, on by
+     * default), with Symfony's own StringUtil::trim — `[\pZ\p{Cc}\p{Cf}]` from either end — so the
+     * pattern allows that padding, unless the rule could match the padding itself, which then can't
+     * be told apart. The validator lets a blank value through, which only a NotBlank refuses. And
+     * PCRE's `$` without `D` also matches before a final newline, which trimming leaves none of.
      */
-    private static function regexPattern(Regex $regex): ?string
+    private static function regexPattern(Regex $regex, CollectedFormField $field): ?string
     {
         if (!$regex->match || null !== $regex->normalizer) {
             return null;
@@ -700,11 +763,28 @@ final class McpManifestBuilder
         }
         $inner = substr($body, 1, -1);
 
-        if (!self::readsTheSameInEcma($inner, alternationOutsideGroups: false)) {
+        if (!self::readsTheSameInEcma($inner, alternationOutsideGroups: false, unicode: str_contains($flags, 'u'))) {
             return null;
         }
 
-        return '^(?:' . $inner . ')' . (str_contains($flags, 'D') ? '' : '\n?') . '$';
+        $blank = [] === array_filter($field->constraints, static fn (Constraint $constraint): bool => $constraint instanceof NotBlank);
+
+        if ($field->trim) {
+            // A space, a control character or a negated class could match what trimming takes off.
+            if (1 === preg_match('/ |\\\\[nrtfb]|\[\^/', $inner)) {
+                return null;
+            }
+            $padding = '[\p{Z}\p{Cc}\p{Cf}]*';
+
+            return '^' . $padding . '(?:' . $inner . ')' . ($blank ? '?' : '') . $padding . '$';
+        }
+
+        $newline = str_contains($flags, 'D') ? '' : '\n?';
+        if ($blank) {
+            return '' === $newline ? '^(?:' . $inner . ')?$' : '^(?:(?:' . $inner . ')' . $newline . ')?$';
+        }
+
+        return '^(?:' . $inner . ')' . $newline . '$';
     }
 
     /**
@@ -723,11 +803,27 @@ final class McpManifestBuilder
      *   repeat, each optionally lazy — not possessive;
      * - no `.` (PCRE's matches `\r`, and a route's a newline too; ECMA's neither), no `^` or `$`
      *   (the caller anchors the whole), and `|` outside a group only where the caller wraps it.
+     *
+     * And what PCRE's mode changes. Without `u` it matches bytes, ECMA code points: alike only where
+     * nothing can match a byte of a multibyte character — no negated class, `\D` or `\W`. With `u`,
+     * PHP's PCRE reads `\d \w \b` and their negations as Unicode (UCP), ECMA as ASCII: none of them.
+     * Not knowing the mode (`$unicode` null), neither.
      */
-    private static function readsTheSameInEcma(string $fragment, bool $alternationOutsideGroups): bool
+    private static function readsTheSameInEcma(string $fragment, bool $alternationOutsideGroups, ?bool $unicode): bool
     {
         if ('' === $fragment || 1 === preg_match('/[^\x20-\x7E]/', $fragment)) {
             return false;
+        }
+
+        $byteSafe = true !== $unicode;
+        $classEscapes = 'dDwW';
+        $boundaries = 'bB';
+        if ($byteSafe) {
+            $classEscapes = str_replace(['D', 'W'], '', $classEscapes);
+        }
+        if (false !== $unicode) {
+            $classEscapes = '';
+            $boundaries = '';
         }
 
         $length = \strlen($fragment);
@@ -739,9 +835,9 @@ final class McpManifestBuilder
 
             if ('\\' === $char) {
                 $escaped = $fragment[$i + 1] ?? '';
-                if ('' !== $escaped && str_contains('dDwWnrtf', $escaped)) {
+                if ('' !== $escaped && str_contains($classEscapes . 'nrtf', $escaped)) {
                     $repeatable = true;
-                } elseif ('' !== $escaped && str_contains('bB', $escaped)) {
+                } elseif ('' !== $escaped && str_contains($boundaries, $escaped)) {
                     $repeatable = false;
                 } elseif ('' !== $escaped && str_contains('^$\.*+?()[]{}|/', $escaped)) {
                     $repeatable = true;
@@ -754,7 +850,7 @@ final class McpManifestBuilder
             }
 
             if ('[' === $char) {
-                $close = self::classEnd($fragment, $i);
+                $close = self::classEnd($fragment, $i, $classEscapes, negatable: !$byteSafe);
                 if (null === $close) {
                     return false;
                 }
@@ -836,15 +932,19 @@ final class McpManifestBuilder
 
     /**
      * Where the class opening at `$open` closes, when every part of it reads the same in both
-     * dialects: literals, escaped syntax characters and `\n \r \t \f \b \-`, the class escapes
-     * `\d \D \w \W`, and ranges between two literals in order. Null otherwise — a `[` inside (a POSIX
-     * class, or nesting), a range from or to a class escape, an empty class.
+     * dialects: literals, escaped syntax characters and `\n \r \t \f \b \-`, the class escapes the
+     * mode allows (`$classEscapes`), and ranges between two literals in order — and negated only
+     * where the mode matches code points (`$negatable`). Null otherwise: a `[` inside (a POSIX class,
+     * or nesting), a range from or to a class escape, an empty class.
      */
-    private static function classEnd(string $fragment, int $open): ?int
+    private static function classEnd(string $fragment, int $open, string $classEscapes, bool $negatable): ?int
     {
         $length = \strlen($fragment);
         $i = $open + 1;
         if ('^' === ($fragment[$i] ?? '')) {
+            if (!$negatable) {
+                return null;
+            }
             ++$i;
         }
         if (']' === ($fragment[$i] ?? '')) {
@@ -860,7 +960,7 @@ final class McpManifestBuilder
             }
             if ('\\' === $char) {
                 $escaped = $fragment[$i + 1] ?? '';
-                if ('' !== $escaped && str_contains('dDwW', $escaped)) {
+                if ('' !== $escaped && str_contains($classEscapes, $escaped)) {
                     $atoms[] = ['kind' => 'set', 'char' => $escaped];
                 } elseif ('' !== $escaped && str_contains('nrtfb', $escaped)) {
                     $atoms[] = ['kind' => 'literal', 'char' => ['n' => "\n", 'r' => "\r", 't' => "\t", 'f' => "\f", 'b' => "\x08"][$escaped]];

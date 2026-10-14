@@ -116,6 +116,7 @@ final class FormTypeInspector
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
+                trim: false !== $this->resolveOption($config, 'trim'),
             );
         }
 

@@ -523,7 +523,11 @@ parameters:
 
 Mirror the same list in `type-bridge.php` so the emitter validates at codegen time too (the emitter throws on the same mismatch).
 
-In a request contract, `T|null` is an update's "clear this": left out, the field keeps its value; sent as null, it is cleared. An MCP tool publishes such a body key as taking null (`type: [T, "null"]`, or `null` in its `enum`), at any depth of a shape, unless the field's NotNull, or a NotBlank that doesn't allow null, refuses it. A query key never takes null — a query string can't carry one. A key valued `?T` (`product: ?string`) may be left out, in the TypeScript, the tool's `required` and an Endpoint's `query` alike.
+In a request contract, `T|null` is an update's "clear this": left out, the field keeps its value; sent as null, it is cleared. An MCP tool publishes such a body key as taking null (`type: [T, "null"]`, or `null` in its `enum`), at any depth — a shape's keys, an embedded form's fields, a collection's entries — unless the field's NotNull, or a NotBlank that doesn't allow null, refuses it. A query key never takes null — a query string can't carry one. A key valued `?T` (`product: ?string`) may be left out, in the TypeScript, the tool's `required` and an Endpoint's `query` alike.
+
+### Patterns in a tool's schema
+
+A string argument publishes a `pattern` from its route requirement or its one `Regex` constraint, only where JSON Schema's dialect — ECMA-262 in Unicode mode, as Ajv compiles it — accepts exactly the values the server does; otherwise it has none. The fragment is read against a grammar both dialects agree on (ASCII literals, `\d \w \b`, classes of literal ranges, plain and `(?:` groups, bounded quantifiers; no dot, `\s` or `\v`), under PCRE's mode: byte by byte without `u` (no negated class, `\D`, `\W`), Unicode with it (no `\d \w \b`, which PHP then reads as Unicode), and both when a route leaves `utf8` to the router's default. A Regex carries over only as a whole-value rule (`/^…$/`, flags `D` and `u` at most, no normaliser), wrapped in what reaches it: the form's trim (`[\p{Z}\p{Cc}\p{Cf}]*` either side), a blank value the validator lets through unless the field has a NotBlank, and PCRE's `$` before a final newline when untrimmed and without `D`. A requirement holding a `%…%` placeholder has none.
 
 ## Testing
 

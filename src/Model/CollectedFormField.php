@@ -31,6 +31,8 @@ final readonly class CollectedFormField
      *                                                field with no children: one whose type reads the submitted
      *                                                value whole, so the form shows nothing of what it takes.
      *                                                Null for any other field, and where `_self` is not a shape
+     * @param bool                     $trim          the field's `trim` option: whether the form trims what it is
+     *                                                 sent (Symfony's StringUtil::trim) before it is validated
      */
     public function __construct(
         public string $name,
@@ -53,6 +55,7 @@ final readonly class CollectedFormField
         public array $constraints = [],
         public ?string $ownerClass = null,
         public ?ShapeType $contract = null,
+        public bool $trim = true,
     ) {}
 
     /**
