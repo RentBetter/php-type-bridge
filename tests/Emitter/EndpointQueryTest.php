@@ -33,6 +33,21 @@ final class EndpointQueryTest extends TestCase
         self::assertStringContainsString('export const ListReports: Endpoint<ListReportsEndpointMap, { query?: ListReportsQuery }> = {', $this->emit()['Reports']);
     }
 
+    public function test_a_required_key_inherited_through_an_intersection_makes_the_query_required(): void
+    {
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString('export const ShowWeeklyReport: Endpoint<ShowWeeklyReportEndpointMap, { query: ShowWeeklyReportQuery }> = {', $reports);
+    }
+
+    public function test_a_key_valued_question_mark_t_is_optional_and_so_is_the_query(): void
+    {
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString("export interface NullableProductFilterData {\n  product?: string;\n}", $reports);
+        self::assertStringContainsString('export const ListProductReports: Endpoint<ListProductReportsEndpointMap, { query?: ListProductReportsQuery }> = {', $reports);
+    }
+
     /**
      * @return array<string, string>
      */

@@ -57,6 +57,50 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString("export interface ListNotesResponse {\n  notes: string[];\n  total: number;\n}", $output['Notes']);
     }
 
+    public function test_a_base_classs_import_types_only_its_own_property_though_the_child_imports_a_shape_of_the_same_name(): void
+    {
+        // Both files import a shape the emitter calls `Meta`: the child's own, and the base's from
+        // another domain. Each property is read in the file that declares it.
+        $notes = self::emit(self::fixtures('InheritedSameNameFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ListNotesResponse {\n  meta: Meta;\n  page: CommonMeta;\n}", $notes);
+        self::assertStringContainsString("export interface Meta {\n  author: string;\n}", $notes);
+        self::assertMatchesRegularExpression('/import type \\{[^}]*\\bMeta as CommonMeta\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
+    }
+
+    public function test_an_alias_the_base_class_declares_itself_is_imported_where_the_child_is_emitted(): void
+    {
+        $output = self::emit(self::fixtures('InheritedLocalAliasFixtures'));
+
+        self::assertStringContainsString("export interface NoteGoneResponse {\n  error: Envelope;\n}", $output['Notes']);
+        self::assertMatchesRegularExpression('/import type \\{[^}]*\\bEnvelope\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $output['Notes']);
+        self::assertStringContainsString('export type Envelope = {', $output['Common']);
+    }
+
+    public function test_the_same_alias_in_the_base_and_the_child_names_each_files_own_shape(): void
+    {
+        $notes = self::emit(self::fixtures('InheritedAliasClashFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface NoteRejectedResponse {\n  note: NoteBody;\n  error: ErrorBody;\n}", $notes);
+        self::assertMatchesRegularExpression('/import type \\{[^}]*\\bErrorBody\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
+    }
+
+    public function test_a_base_classs_import_from_outside_the_source_tree_is_no_matter_when_no_published_property_uses_it(): void
+    {
+        $output = self::emit(self::fixtures('InheritedOutOfTreeImportFixtures'));
+
+        self::assertStringContainsString("export interface ListAuditedNotesResponse {\n  total: number;\n}", $output['Notes']);
+    }
+
+    public function test_a_source_tree_is_read_once_however_often_it_is_asked_for(): void
+    {
+        $collector = new ResponseClassCollector();
+        $first = $collector->collectIndex(self::SRC);
+
+        self::assertSame($first, $collector->collectIndex(self::SRC));
+        self::assertSame($first[NotFoundResponse::class], $collector->collect(self::SRC)['Common'][array_search(NotFoundResponse::class, array_map(static fn(CollectedApiResponseClass $response): string => $response->className, $collector->collect(self::SRC)['Common']), true)]);
+    }
+
     /**
      * @return array<string, string>
      */
@@ -68,22 +112,27 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         );
     }
 
+    private static function fixtures(string $directory): string
+    {
+        return __DIR__ . '/../Fixture/' . $directory;
+    }
+
     /**
      * @return array<string, string>
      */
-    private static function emit(): array
+    private static function emit(string $src = self::SRC): array
     {
         $responseCollector = new ResponseClassCollector();
         $enumResolver = new EnumResolver();
-        $enumResolver->scanDirectory(self::SRC);
+        $enumResolver->scanDirectory($src);
 
         return (new TypeScriptEmitter(
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
         ))->emit(
-            (new PhpDocTypeCollector())->collect(self::SRC),
-            $responseCollector->collect(self::SRC),
-            (new EndpointContractCollector())->collect(self::SRC, $responseCollector->collectIndex(self::SRC)),
+            (new PhpDocTypeCollector())->collect($src),
+            $responseCollector->collect($src),
+            (new EndpointContractCollector())->collect($src, $responseCollector->collectIndex($src)),
         );
     }
 }
