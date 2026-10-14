@@ -162,15 +162,17 @@ final class EndpointContractEmitter implements TypeEmitter
     }
 
     /**
-     * Whether a caller cannot leave the query out: its contract requires a key (`product: string`),
-     * so a call without one is refused. The include parameters are all optional, and a query whose
-     * contract cannot be read as a shape stays optional — its form's `required` defaults to true
-     * for every filter and would make nearly every query mandatory.
+     * Whether a caller cannot leave the query out: its contract requires a key (`product: string`,
+     * not `product?: string` nor `product: ?string`), its own or one an intersection takes from the
+     * shape it extends, so a call without one is refused. The include parameters are all optional,
+     * and a query whose contract cannot be read as a shape stays optional — its form's `required`
+     * defaults to true for every filter and would make nearly every query mandatory.
      */
     private static function requiresQuery(CollectedEndpointContract $contract): bool
     {
-        foreach ($contract->request?->query?->contract->fields ?? [] as $key) {
-            if (!$key->optional) {
+        $query = $contract->request?->query;
+        foreach ([...$query?->contract->fields ?? [], ...$query?->inheritedContract->fields ?? []] as $key) {
+            if (!$key->mayBeLeftOut()) {
                 return true;
             }
         }

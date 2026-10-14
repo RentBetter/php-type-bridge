@@ -602,7 +602,68 @@ final class EndpointContractCollector
             domain: $this->domainGuesser->guess($srcDir, $file),
             fields: $fields,
             contract: $this->declaredShape($definitions['_self']),
+            inheritedContract: $this->inheritedShape($definitions['_self'], $content, $ownerClass, $srcDir, $classFiles),
         );
+    }
+
+    /**
+     * The keys an intersection (`Base & array{…}`) takes from the shape it extends, read where that
+     * shape is declared — the same file, or the class it is imported from — and through that
+     * shape's own base in turn. Null for a `_self` that is not an intersection, or whose base can't
+     * be read as a shape.
+     *
+     * @param array<string, string> $classFiles
+     */
+    private function inheritedShape(string $self, string $content, string $ownerClass, string $srcDir, array $classFiles, int $depth = 0): ?ShapeType
+    {
+        try {
+            $parsed = $this->shapeParser->parse($self);
+        } catch (Throwable) {
+            return null;
+        }
+        if (!$parsed instanceof IntersectionType || $depth > 8) {
+            return null;
+        }
+
+        $alias = $parsed->base->name;
+        $baseSelf = $this->docHelper->extractPhpStanTypes($content)[$alias] ?? null;
+        $baseContent = $content;
+        $baseClass = $ownerClass;
+        if (null === $baseSelf) {
+            $import = $this->docHelper->extractImportedTypesLeniently($content, $ownerClass, $srcDir, $classFiles, $this->shortNameMap($classFiles), $this->domainGuesser)['imports'][$alias] ?? null;
+            $file = null === $import ? null : $classFiles[$import->targetClass] ?? null;
+            $read = null === $file ? false : file_get_contents($file);
+            if (null === $import || false === $read) {
+                return null;
+            }
+            $definitions = $this->docHelper->extractPhpStanTypes($read);
+            $baseSelf = $definitions[$import->targetTypeName] ?? $definitions['_self'] ?? null;
+            $baseContent = $read;
+            $baseClass = $import->targetClass;
+        }
+
+        if (null === $baseSelf || null === $own = $this->declaredShape($baseSelf)) {
+            return null;
+        }
+        $further = $this->inheritedShape($baseSelf, $baseContent, $baseClass, $srcDir, $classFiles, $depth + 1);
+
+        return new ShapeType([...$further->fields ?? [], ...$own->fields]);
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     *
+     * @return array<string, list<string>> short class name => the classes that have it
+     */
+    private function shortNameMap(array $classFiles): array
+    {
+        $map = [];
+        foreach (array_keys($classFiles) as $class) {
+            $position = strrpos($class, '\\');
+            $map[false === $position ? $class : substr($class, $position + 1)][] = $class;
+        }
+
+        return $map;
     }
 
     /**

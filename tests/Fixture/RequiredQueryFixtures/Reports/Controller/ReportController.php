@@ -7,7 +7,9 @@ namespace PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Controller
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\MonthlyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\NullableProductFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\QuarterlyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportListFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\WeeklyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Response\ReportResponse;
@@ -39,6 +41,22 @@ final class ReportController
     #[ApiRequest(query: WeeklyReportFilterType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function showWeeklyReport(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/quarterly', methods: ['GET'])]
+    #[ApiRequest(query: QuarterlyReportFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function showQuarterlyReport(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/monthly', methods: ['GET'])]
+    #[ApiRequest(query: MonthlyReportFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function showMonthlyReport(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

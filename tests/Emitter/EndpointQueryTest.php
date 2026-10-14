@@ -9,6 +9,8 @@ use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
+use PTGS\TypeBridge\Parser\ShapeField;
+use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
 
@@ -38,6 +40,30 @@ final class EndpointQueryTest extends TestCase
         $reports = $this->emit()['Reports'];
 
         self::assertStringContainsString('export const ShowWeeklyReport: Endpoint<ShowWeeklyReportEndpointMap, { query: ShowWeeklyReportQuery }> = {', $reports);
+    }
+
+    public function test_the_keys_an_intersection_inherits_are_read_where_its_base_is_declared(): void
+    {
+        $responses = (new ResponseClassCollector())->collectIndex(self::SRC);
+        $queries = [];
+        foreach ((new EndpointContractCollector())->collect(self::SRC, $responses)['Reports'] as $contract) {
+            $queries[$contract->name] = $contract->request?->query;
+        }
+        $keys = static fn(?ShapeType $shape): array => array_map(static fn(ShapeField $key): string => $key->name, $shape->fields ?? []);
+
+        // Imported from another class.
+        self::assertSame(['week'], $keys($queries['ShowWeeklyReport']?->contract));
+        self::assertSame(['product'], $keys($queries['ShowWeeklyReport']?->inheritedContract));
+        // Through a base that is an intersection itself.
+        self::assertSame(['product', 'team'], $keys($queries['ShowQuarterlyReport']?->inheritedContract));
+        // Declared in the same file.
+        self::assertSame(['product'], $keys($queries['ShowMonthlyReport']?->inheritedContract));
+        // Not an intersection.
+        self::assertNull($queries['ShowReport']?->inheritedContract);
+
+        $reports = $this->emit()['Reports'];
+        self::assertStringContainsString('export const ShowQuarterlyReport: Endpoint<ShowQuarterlyReportEndpointMap, { query: ShowQuarterlyReportQuery }> = {', $reports);
+        self::assertStringContainsString('export const ShowMonthlyReport: Endpoint<ShowMonthlyReportEndpointMap, { query: ShowMonthlyReportQuery }> = {', $reports);
     }
 
     public function test_a_key_valued_question_mark_t_is_optional_and_so_is_the_query(): void
