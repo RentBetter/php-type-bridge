@@ -125,4 +125,27 @@ final class EndpointContractCollectorTest extends TestCase
 
         (new EndpointContractCollector())->collect($srcDir, $responses);
     }
+
+    public function test_an_intersection_follows_a_reimported_alias_to_the_shape_it_names(): void
+    {
+        $src = __DIR__ . '/../Fixture/ReimportedScopeFixtures';
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
+        $byName = array_column($contracts['Reports'], null, 'name');
+
+        $inherited = $byName['ShowScopedReport']->request?->query?->inheritedContract;
+        self::assertNotNull($inherited);
+        self::assertSame(['product'], array_map(static fn(object $key): string => $key->name, $inherited->fields), "ProductScopeData's keys, not ReportScopes' own");
+    }
+
+    public function test_a_path_parameter_knows_whether_its_route_matches_utf8(): void
+    {
+        $src = __DIR__ . '/../Fixture/ReimportedScopeFixtures';
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
+        $byName = array_column($contracts['Reports'], null, 'name');
+        $utf8 = static fn(string $name): ?bool => $byName[$name]->request?->pathParams[0]->utf8 ?? 'no param';
+
+        self::assertTrue($utf8('ShowReport'), 'utf8: true on the route');
+        self::assertFalse($utf8('ShowRawReport'), "options: ['utf8' => false]");
+        self::assertNull($utf8('ShowPlainReport'), 'Not stated: the router\'s default decides');
+    }
 }

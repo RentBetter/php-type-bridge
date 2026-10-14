@@ -74,4 +74,12 @@ final class FormTypeInspectorTest extends TestCase
 
         (new FormTypeInspector())->inspect(NestedBrokenRequestType::class);
     }
+
+    public function test_it_records_whether_the_form_trims_a_fields_value(): void
+    {
+        $fields = array_column((new FormTypeInspector())->inspect(\PTGS\TypeBridge\Tests\Fixture\ReimportedScopeFixtures\Reports\Form\ScopedReportFilterType::class)['fields'], null, 'name');
+
+        self::assertTrue($fields['product']->trim, 'Symfony trims by default');
+        self::assertFalse($fields['period']->trim);
+    }
 }

@@ -1044,7 +1044,38 @@ final class McpManifestBuilderTest extends TestCase
     #[DataProvider('routeRequirements')]
     public function testAStringPathSegmentPublishesItsRouteRequirementOnlyWhereJsonSchemaReadsItTheSame(string $requirement, ?string $pattern): void
     {
-        $schema = $this->pathTool([new CollectedPathParam('segment', 'string', $requirement)])['segment'];
+        // A route without `utf8`: its requirement is matched byte by byte, as ECMA would match it
+        // only where nothing in it can match a byte of a multibyte character.
+        $schema = $this->pathTool([new CollectedPathParam('segment', 'string', $requirement, utf8: false)])['segment'];
+
+        self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    /**
+     * @return iterable<string, array{string, ?bool, ?string}>
+     */
+    public static function utf8Requirements(): iterable
+    {
+        // Without `utf8` PCRE matches bytes: what can match a byte of a multibyte character — a
+        // negated class, \D, \W — reads differently from ECMA, which matches code points.
+        yield 'bytes: a negated class' => ['[^/]+', false, null];
+        yield 'bytes: \W' => ['a\Wb', false, null];
+        yield 'bytes: digits' => ['\d{4}', false, '^(?:\d{4})$'];
+        // With it, PCRE's \d \w \b are Unicode (UCP); ECMA's stay ASCII.
+        yield 'utf8: a negated class' => ['[^/]+', true, '^(?:[^/]+)$'];
+        yield 'utf8: digits' => ['\d{4}', true, null];
+        yield 'utf8: a word' => ['\w+', true, null];
+        yield 'utf8: ASCII ranges' => ['[a-z0-9]+', true, '^(?:[a-z0-9]+)$'];
+        // Not stated on the route — the router's default decides — so only what reads the same both ways.
+        yield 'unknown: a negated class' => ['[^/]+', null, null];
+        yield 'unknown: digits' => ['\d{4}', null, null];
+        yield 'unknown: ASCII ranges' => ['[a-z0-9]+', null, '^(?:[a-z0-9]+)$'];
+    }
+
+    #[DataProvider('utf8Requirements')]
+    public function testARouteRequirementReadsAsItsUtf8OptionMatchesIt(string $requirement, ?bool $utf8, ?string $pattern): void
+    {
+        $schema = $this->pathTool([new CollectedPathParam('segment', 'string', $requirement, utf8: $utf8)])['segment'];
 
         self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
     }
@@ -1071,6 +1102,17 @@ final class McpManifestBuilderTest extends TestCase
         yield 'an escaped delimiter' => [[new Regex('/^[a-z]+\/[a-z]+$/D')], '^(?:[a-z]+\/[a-z]+)$'];
         yield 'escaped syntax' => [[new Regex('/^[a-z]+\.[a-z]+$/D')], '^(?:[a-z]+\.[a-z]+)$'];
         yield 'the Unicode flag' => [[new Regex('/^[a-z]+$/uD')], '^(?:[a-z]+)$'];
+        // Without `u` PCRE matches bytes; with it, its \d \w \b are Unicode. Each is published only
+        // where it reads the same as ECMA's code points and ASCII classes.
+        yield 'bytes: digits' => [[new Regex('/^\d{4}$/D')], '^(?:\d{4})$'];
+        yield 'bytes: a word' => [[new Regex('/^\w+$/D')], '^(?:\w+)$'];
+        yield 'bytes: a negated class' => [[new Regex('/^[^<>]{1,3}$/')], null];
+        yield 'bytes: \W' => [[new Regex('/^\W$/')], null];
+        yield 'bytes: \D' => [[new Regex('/^\D+$/')], null];
+        yield 'utf8: a negated class' => [[new Regex('/^[^<>]{1,3}$/uD')], '^(?:[^<>]{1,3})$'];
+        yield 'utf8: a word' => [[new Regex('/^\w+$/u')], null];
+        yield 'utf8: digits' => [[new Regex('/^\d{4}$/u')], null];
+        yield 'utf8: a word boundary' => [[new Regex('/^a\b$/u')], null];
         yield 'bracket delimiters' => [[new Regex('{^[a-z]+$}')], '^(?:[a-z]+)\n?$'];
         yield 'an escaped delimiter that is no syntax' => [[new Regex('#^a\#b$#D')], '^(?:a#b)$'];
         yield 'an escaped backslash before the end' => [[new Regex('/^a\\\\$/D')], '^(?:a\\\\)$'];
@@ -1100,6 +1142,8 @@ final class McpManifestBuilderTest extends TestCase
     #[DataProvider('regexConstraints')]
     public function testAStringsRegexConstraintIsItsPatternOnlyWhereJsonSchemaReadsItTheSame(array $constraints, ?string $pattern): void
     {
+        // Untrimmed and refused blank, the value the Regex sees is the one sent: the pattern is the
+        // rule alone. Trimming and blank values are testAStringsRegexAllowsWhatTheFormAndValidatorAllow.
         $field = new CollectedFormField(
             name: 'code',
             formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType',
@@ -1107,12 +1151,87 @@ final class McpManifestBuilderTest extends TestCase
             mapped: true,
             compound: false,
             dataClass: null,
-            constraints: $constraints,
+            constraints: [...$constraints, new NotBlank()],
+            trim: false,
         );
 
         $schema = $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code'];
 
         self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    /**
+     * @return iterable<string, array{bool, bool, string, ?string}>
+     */
+    public static function normalisedValues(): iterable
+    {
+        $ws = '[\p{Z}\p{Cc}\p{Cf}]*';
+        // The form trims what it is sent (`trim`, on by default) with Symfony's own StringUtil::trim
+        // — Unicode separators, controls and format characters — before the Regex sees it; and the
+        // Regex lets a blank value through, which only a NotBlank refuses.
+        yield 'trimmed, blank allowed' => [true, false, '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})?' . $ws . '$'];
+        yield 'trimmed, refused blank' => [true, true, '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
+        // Trimmed, PCRE's `$` has no final newline left to allow.
+        yield 'trimmed, D' => [true, true, '/^[A-Z]{2,5}$/D', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
+        yield 'as sent, blank allowed' => [false, false, '/^[A-Z]{2,5}$/', '^(?:(?:[A-Z]{2,5})\n?)?$'];
+        yield 'as sent, blank allowed, D' => [false, false, '/^[A-Z]{2,5}$/D', '^(?:[A-Z]{2,5})?$'];
+        yield 'as sent, refused blank' => [false, true, '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
+        // A rule that can match what the form trims can't be told apart from the padding.
+        yield 'trimmed, the rule matches a space' => [true, true, '/^[a-z ]+$/', null];
+        yield 'trimmed, the rule matches a tab' => [true, true, '/^a\tb$/', null];
+        yield 'trimmed, the rule has a negated class' => [true, true, '/^[^<>]+$/u', null];
+        yield 'as sent, the rule matches a space' => [false, true, '/^[a-z ]+$/', '^(?:[a-z ]+)\n?$'];
+    }
+
+    #[DataProvider('normalisedValues')]
+    public function testAStringsRegexAllowsWhatTheFormAndValidatorAllow(bool $trim, bool $notBlank, string $regex, ?string $pattern): void
+    {
+        $field = new CollectedFormField(
+            name: 'code',
+            formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType',
+            required: false,
+            mapped: true,
+            compound: false,
+            dataClass: null,
+            constraints: [new Regex($regex), ...$notBlank ? [new NotBlank()] : []],
+            trim: $trim,
+        );
+
+        $schema = $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code'];
+
+        self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    public function testAKeyInsideAnEmbeddedFormOrACollectionEntryTakesNullWhereItsContractSaysSo(): void
+    {
+        // The form says what an embedded form's and an entry's fields are; the contract still says
+        // which of them an update may clear.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $address = new CollectedFormField(
+            name: 'address',
+            formTypeClass: 'App\\AddressType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\AddressData',
+            children: [$this->scalarField('line1', $text, required: true), $this->scalarField('line2', $text, required: false)],
+        );
+        $notes = $this->collectionField('notes', 'App\\NoteType', required: false, entryChildren: [$this->scalarField('note', $text, required: false)]);
+        $tags = $this->collectionField('tags', $text, required: false);
+        $contract = (new PhpDocShapeParser())->parse('array{address?: array{line1: string, line2: string|null}, notes?: list<array{note: string|null}>, tags?: list<string|null>}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $body = $this->toolWithBody('PUT', [$address, $notes, $tags], $contract)['inputSchema']['properties'];
+
+        self::assertSame(['type' => 'string'], $body['address']['properties']['line1']);
+        self::assertSame(['type' => ['string', 'null']], $body['address']['properties']['line2']);
+        self::assertSame(['type' => ['string', 'null']], $body['notes']['items']['properties']['note']);
+        self::assertSame(['type' => ['string', 'null']], $body['tags']['items']);
+
+        $query = $this->toolTaking([$address, $notes, $tags], $contract)['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $query['address']['properties']['line2']);
+        self::assertSame(['type' => 'string'], $query['notes']['items']['properties']['note']);
+        self::assertSame(['type' => 'string'], $query['tags']['items']);
     }
 
     /**

@@ -107,6 +107,46 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         (new ResponseClassCollector())->collectIndex(self::fixtures('InheritedOutOfTreeImportUsedFixtures'));
     }
 
+    public function test_a_response_that_is_also_a_base_types_its_children_the_same_whichever_is_read_first(): void
+    {
+        // NotFoundResponse is read as a response of its own and as the base of another: read before
+        // its child (Notes) in one tree, after it (Alerts) in the other. Its alias means the same.
+        foreach (['InheritedConcreteBaseFixtures' => ['Notes', 'NoteNotFoundResponse'], 'InheritedConcreteBaseReadLastFixtures' => ['Alerts', 'AlertNotFoundResponse']] as $fixtures => [$domain, $response]) {
+            $output = self::emit(self::fixtures($fixtures));
+
+            self::assertStringContainsString("export interface NotFoundResponse {\n  error: Envelope;\n}", $output['Common'], $fixtures);
+            self::assertStringContainsString("export interface {$response} {\n  error: Envelope;\n}", $output[$domain], $fixtures);
+            self::assertMatchesRegularExpression('/import type \\{[^}]*\\bEnvelope\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $output[$domain], $fixtures);
+        }
+    }
+
+    public function test_a_base_with_aliases_of_its_own_tolerates_an_import_no_published_type_uses(): void
+    {
+        // PhpDocTypeCollector reads a file for its aliases as much as this collector does for its
+        // properties: an import from outside the tree that only a protected property uses fails
+        // neither.
+        $output = self::emit(self::fixtures('InheritedAliasAndOutOfTreeImportFixtures'));
+
+        self::assertStringContainsString("export interface ListNotesResponse {\n  page: Page;\n}", $output['Notes']);
+        self::assertStringContainsString("export interface Page {\n  total: number;\n}", $output['Common']);
+    }
+
+    public function test_an_inherited_class_name_is_the_classs_type_though_the_childs_module_has_an_alias_of_that_name(): void
+    {
+        $notes = self::emit(self::fixtures('InheritedClassNameFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ShowTotalResponse {\n  total: CommonMoney;\n}", $notes);
+        self::assertMatchesRegularExpression('/import type \\{[^}]*\\bMoney as CommonMoney\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
+    }
+
+    public function test_a_204_is_null_whatever_it_inherits(): void
+    {
+        // TypeBridgeResponseSubscriber sends a 204 with no body at all.
+        $notes = self::emit(self::fixtures('Inherited204Fixtures'))['Notes'];
+
+        self::assertStringContainsString('export type DeleteNoteResponse = null;', $notes);
+    }
+
     public function test_a_source_tree_is_read_once_however_often_it_is_asked_for(): void
     {
         $collector = new ResponseClassCollector();
