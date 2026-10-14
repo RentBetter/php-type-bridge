@@ -153,4 +153,16 @@ final class EndpointContractCollectorTest extends TestCase
         self::assertFalse($utf8('ShowRawReport'), "options: ['utf8' => false]");
         self::assertNull($utf8('ShowPlainReport'), 'Not stated: the router\'s default decides');
     }
+
+    public function test_a_fields_trim_option_survives_collection(): void
+    {
+        // withDeclared() rebuilds every field the collector hands on; it must carry `trim` across.
+        $src = __DIR__ . '/../Fixture/ReimportedScopeFixtures';
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
+        $byName = array_column($contracts['Reports'], null, 'name');
+        $fields = array_column($byName['ShowScopedReport']->request?->query?->fields ?? [], null, 'name');
+
+        self::assertTrue($fields['product']->trim);
+        self::assertFalse($fields['period']->trim);
+    }
 }

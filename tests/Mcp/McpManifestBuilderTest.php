@@ -1115,6 +1115,10 @@ final class McpManifestBuilderTest extends TestCase
         yield 'utf8: a word boundary' => [[new Regex('/^a\b$/u')], null];
         yield 'bracket delimiters' => [[new Regex('{^[a-z]+$}')], '^(?:[a-z]+)\n?$'];
         yield 'an escaped delimiter that is no syntax' => [[new Regex('#^a\#b$#D')], '^(?:a#b)$'];
+        // PCRE reads the body as written, escaped delimiter and all: `\-` stays a literal dash in a
+        // class, `\,` a literal comma, where unescaping would make a range or a quantifier of them.
+        yield 'a dash delimiter, escaped in a class' => [[new Regex('-^[a\-z]+$-D')], null];
+        yield 'a comma delimiter, escaped in a count' => [[new Regex(',^a{2\,3}$,D')], null];
         yield 'an escaped backslash before the end' => [[new Regex('/^a\\\\$/D')], '^(?:a\\\\)$'];
 
         // Matched anywhere in PCRE; padding it with `.*` would refuse a newline PCRE crosses.
@@ -1161,30 +1165,38 @@ final class McpManifestBuilderTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{bool, bool, string, ?string}>
+     * @return iterable<string, array{bool, list<Constraint>, string, ?string}>
      */
     public static function normalisedValues(): iterable
     {
         $ws = '[\p{Z}\p{Cc}\p{Cf}]*';
         // The form trims what it is sent (`trim`, on by default) with Symfony's own StringUtil::trim
-        // — Unicode separators, controls and format characters — before the Regex sees it; and the
-        // Regex lets a blank value through, which only a NotBlank refuses.
-        yield 'trimmed, blank allowed' => [true, false, '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})?' . $ws . '$'];
-        yield 'trimmed, refused blank' => [true, true, '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
+        // — Unicode separators, controls and format characters — before the Regex sees it. A blank
+        // value it hands on as null, trimmed or not: the Regex lets that through, and only a NotNull
+        // or a NotBlank that doesn't allow null refuses it.
+        yield 'trimmed, blank allowed' => [true, [], '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})?' . $ws . '$'];
+        yield 'trimmed, NotBlank' => [true, [new NotBlank()], '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
+        yield 'trimmed, NotNull' => [true, [new NotNull()], '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
+        yield 'trimmed, NotBlank allowing null' => [true, [new NotBlank(allowNull: true)], '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})?' . $ws . '$'];
         // Trimmed, PCRE's `$` has no final newline left to allow.
-        yield 'trimmed, D' => [true, true, '/^[A-Z]{2,5}$/D', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
-        yield 'as sent, blank allowed' => [false, false, '/^[A-Z]{2,5}$/', '^(?:(?:[A-Z]{2,5})\n?)?$'];
-        yield 'as sent, blank allowed, D' => [false, false, '/^[A-Z]{2,5}$/D', '^(?:[A-Z]{2,5})?$'];
-        yield 'as sent, refused blank' => [false, true, '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
+        yield 'trimmed, D' => [true, [new NotBlank()], '/^[A-Z]{2,5}$/D', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
+        yield 'as sent, blank allowed' => [false, [], '/^[A-Z]{2,5}$/', '^(?:(?:[A-Z]{2,5})\n?)?$'];
+        yield 'as sent, blank allowed, D' => [false, [], '/^[A-Z]{2,5}$/D', '^(?:[A-Z]{2,5})?$'];
+        yield 'as sent, NotBlank' => [false, [new NotBlank()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
+        yield 'as sent, NotNull' => [false, [new NotNull()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
+        yield 'as sent, NotBlank allowing null' => [false, [new NotBlank(allowNull: true)], '/^[A-Z]{2,5}$/', '^(?:(?:[A-Z]{2,5})\n?)?$'];
         // A rule that can match what the form trims can't be told apart from the padding.
-        yield 'trimmed, the rule matches a space' => [true, true, '/^[a-z ]+$/', null];
-        yield 'trimmed, the rule matches a tab' => [true, true, '/^a\tb$/', null];
-        yield 'trimmed, the rule has a negated class' => [true, true, '/^[^<>]+$/u', null];
-        yield 'as sent, the rule matches a space' => [false, true, '/^[a-z ]+$/', '^(?:[a-z ]+)\n?$'];
+        yield 'trimmed, the rule matches a space' => [true, [new NotBlank()], '/^[a-z ]+$/', null];
+        yield 'trimmed, the rule matches a tab' => [true, [new NotBlank()], '/^a\tb$/', null];
+        yield 'trimmed, the rule has a negated class' => [true, [new NotBlank()], '/^[^<>]+$/u', null];
+        yield 'as sent, the rule matches a space' => [false, [new NotBlank()], '/^[a-z ]+$/', '^(?:[a-z ]+)\n?$'];
     }
 
+    /**
+     * @param list<Constraint> $constraints
+     */
     #[DataProvider('normalisedValues')]
-    public function testAStringsRegexAllowsWhatTheFormAndValidatorAllow(bool $trim, bool $notBlank, string $regex, ?string $pattern): void
+    public function testAStringsRegexAllowsWhatTheFormAndValidatorAllow(bool $trim, array $constraints, string $regex, ?string $pattern): void
     {
         $field = new CollectedFormField(
             name: 'code',
@@ -1193,13 +1205,20 @@ final class McpManifestBuilderTest extends TestCase
             mapped: true,
             compound: false,
             dataClass: null,
-            constraints: [new Regex($regex), ...$notBlank ? [new NotBlank()] : []],
+            constraints: [new Regex($regex), ...$constraints],
             trim: $trim,
         );
 
         $schema = $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code'];
 
         self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    public function testAFieldRebuiltWithItsDeclaredContractsKeepsItsTrim(): void
+    {
+        $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, trim: false);
+
+        self::assertFalse($field->withDeclared([], [], null)->trim);
     }
 
     public function testAKeyInsideAnEmbeddedFormOrACollectionEntryTakesNullWhereItsContractSaysSo(): void

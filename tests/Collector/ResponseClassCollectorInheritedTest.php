@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
+use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedResponseProperty;
@@ -139,12 +140,45 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertMatchesRegularExpression('/import type \\{[^}]*\\bMoney as CommonMoney\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
     }
 
-    public function test_a_204_is_null_whatever_it_inherits(): void
+    public function test_a_204_has_no_properties_whatever_it_inherits(): void
     {
-        // TypeBridgeResponseSubscriber sends a 204 with no body at all.
-        $notes = self::emit(self::fixtures('Inherited204Fixtures'))['Notes'];
+        // TypeBridgeResponseSubscriber sends a 204 with no body at all, so nothing it declares or
+        // inherits is published: not a property, not an enum, not a prefixed name.
+        $src = self::fixtures('Inherited204Fixtures');
+        self::assertSame([], (new ResponseClassCollector())->collectIndex($src)['PTGS\\TypeBridge\\Tests\\Fixture\\Inherited204Fixtures\\Notes\\Response\\DeleteNoteResponse']->properties);
+
+        $notes = self::emit($src, new TypeScriptNaming(interfacePrefix: 'I'))['Notes'];
 
         self::assertStringContainsString('export type DeleteNoteResponse = null;', $notes);
+        self::assertStringContainsString('export type ArchiveNoteResponse = null;', $notes);
+        self::assertStringNotContainsString('NoteState', $notes);
+    }
+
+    public function test_a_php_stan_only_alias_is_neither_emitted_nor_imported(): void
+    {
+        $notes = self::emit(self::fixtures('PhpStanOnlyResponseFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  title: string;\n}", $notes);
+        self::assertStringNotContainsString('Working', $notes);
+        self::assertStringNotContainsString('Draft', $notes);
+    }
+
+    public function test_a_module_alias_still_wins_over_a_class_of_the_same_name_without_a_shape(): void
+    {
+        // As it always has for a response's own property; and an inherited one naming a class with
+        // no `_self` falls back to it rather than failing.
+        $notes = self::emit(self::fixtures('OwnClassAliasFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  summary: Summary;\n}", $notes);
+        self::assertStringContainsString("export interface ShowDigestResponse {\n  digest: Digest;\n}", $notes);
+    }
+
+    public function test_a_property_a_trait_declares_is_read_in_the_traits_file(): void
+    {
+        $notes = self::emit(self::fixtures('InheritedTraitFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface NoteGoneResponse {\n  error: ErrorBody;\n}", $notes);
+        self::assertMatchesRegularExpression('/import type \\{[^}]*\\bErrorBody\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
     }
 
     public function test_a_source_tree_is_read_once_however_often_it_is_asked_for(): void
@@ -175,7 +209,7 @@ final class ResponseClassCollectorInheritedTest extends TestCase
     /**
      * @return array<string, string>
      */
-    private static function emit(string $src = self::SRC): array
+    private static function emit(string $src = self::SRC, ?TypeScriptNaming $naming = null): array
     {
         $responseCollector = new ResponseClassCollector();
         $enumResolver = new EnumResolver();
@@ -184,6 +218,7 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         return (new TypeScriptEmitter(
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            naming: $naming ?? new TypeScriptNaming(),
         ))->emit(
             (new PhpDocTypeCollector())->collect($src),
             $responseCollector->collect($src),
