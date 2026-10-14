@@ -59,14 +59,14 @@ final readonly class EmitContext
      *
      * @param list<\PTGS\TypeBridge\Model\ImportedType> $imports
      */
-    public function scopeFor(array $imports): ConversionScope
+    public function scopeFor(array $imports, bool $fileScoped = false): ConversionScope
     {
         $symbols = [];
         foreach ($imports as $importedType) {
             $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
         }
 
-        return new ConversionScope($this->domain, $symbols, $this->foreignAliases);
+        return new ConversionScope($this->domain, $symbols, $this->foreignAliases, $fileScoped);
     }
 
     public function localReferenceFor(string $foreignDomain, string $name): string

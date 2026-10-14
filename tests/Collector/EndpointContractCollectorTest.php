@@ -142,7 +142,12 @@ final class EndpointContractCollectorTest extends TestCase
         $src = __DIR__ . '/../Fixture/ReimportedScopeFixtures';
         $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
         $byName = array_column($contracts['Reports'], null, 'name');
-        $utf8 = static fn(string $name): ?bool => $byName[$name]->request?->pathParams[0]->utf8 ?? 'no param';
+        $utf8 = static function (string $name) use ($byName): ?bool {
+            $param = $byName[$name]->request?->pathParams[0] ?? null;
+            self::assertNotNull($param, $name . ' has its {code}');
+
+            return $param->utf8;
+        };
 
         self::assertTrue($utf8('ShowReport'), 'utf8: true on the route');
         self::assertFalse($utf8('ShowRawReport'), "options: ['utf8' => false]");

@@ -9,9 +9,10 @@ use PTGS\TypeBridge\Parser\ParsedType;
 final readonly class CollectedResponseProperty
 {
     /**
-     * @param list<ImportedType>|null $imports what its annotation was read against when that is not
-     *        the response's own file: an inherited property is typed as the file declaring it says,
-     *        so it is converted in that file's scope. Null for the response's own properties.
+     * @param list<ImportedType>|null $imports what its annotation was read against: the imports and
+     *        aliases of the file declaring it — the response's own, or a base class's — so it is
+     *        converted in that file's scope. Null only for a property built without them, which is
+     *        read against the response's imports.
      */
     public function __construct(
         public string $name,

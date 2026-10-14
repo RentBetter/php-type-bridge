@@ -15,6 +15,7 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Parser\IntersectionType;
+use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Routing\RequirementType;
@@ -33,6 +34,9 @@ final class EndpointContractCollector
 {
     /** @var array<string, string> requirement regex => TS type */
     private readonly array $requirementTypes;
+
+    /** @var array<string, array<string, list<string>>> by source directory */
+    private array $shortNameMaps = [];
 
     private readonly ?AttributeText $toolDescriptions;
 
@@ -441,7 +445,7 @@ final class EndpointContractCollector
             : null;
 
         $collected = new CollectedEndpointRequest(
-            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles) : null,
+            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles, query: true) : null,
             body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles) : null,
             path: $path,
             pathParams: null === $path ? $this->derivePathParamsFromRoute($method) : null,
@@ -475,12 +479,18 @@ final class EndpointContractCollector
             $requirements = [];
         }
 
+        // Whether the router matches the requirements by character (`u`) or by byte: the route's
+        // own option when it states one; otherwise the router's default, which is not known here.
+        $options = $arguments['options'] ?? [];
+        $utf8 = $arguments['utf8'] ?? (\is_array($options) ? $options['utf8'] ?? null : null);
+        $utf8 = \is_bool($utf8) ? $utf8 : null;
+
         $params = [];
         foreach ($matches[1] as $name) {
             $requirement = $requirements[$name] ?? null;
             $requirement = \is_string($requirement) ? $requirement : null;
             $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
-            $params[] = new CollectedPathParam($name, $tsType, $requirement);
+            $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8);
         }
 
         return $params;
@@ -490,7 +500,7 @@ final class EndpointContractCollector
      * @param array<string, string> $classFiles
      * @param class-string $formClass
      */
-    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles): CollectedInputReference
+    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles, bool $query = false): CollectedInputReference
     {
         if (!isset($classFiles[$formClass])) {
             throw new RuntimeException(\sprintf(
@@ -514,6 +524,7 @@ final class EndpointContractCollector
             srcDir: $srcDir,
             classFiles: $classFiles,
             fields: $this->withDeclaredContracts($resolvedForm['fields'], $classFiles),
+            query: $query,
         );
     }
 
@@ -566,8 +577,10 @@ final class EndpointContractCollector
      * @param class-string|null $formClass
      * @param class-string $ownerClass
      * @param list<\PTGS\TypeBridge\Model\CollectedFormField> $fields
+     * @param bool $query whether it is a query, the one input whose inherited keys are read: whether a
+     *        call may leave a query out is the question they answer
      */
-    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = []): CollectedInputReference
+    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = [], bool $query = false): CollectedInputReference
     {
         $file = $classFiles[$ownerClass] ?? null;
         if (null === $file) {
@@ -595,75 +608,79 @@ final class EndpointContractCollector
             ));
         }
 
+        $self = $this->parseType($definitions['_self']);
+
         return new CollectedInputReference(
             formClass: $formClass,
             ownerClass: $ownerClass,
-            typeName: $this->emittedTypeName($ownerClass),
+            typeName: $this->docHelper->emittedTypeName('_self', $ownerClass),
             domain: $this->domainGuesser->guess($srcDir, $file),
             fields: $fields,
-            contract: $this->declaredShape($definitions['_self']),
-            inheritedContract: $this->inheritedShape($definitions['_self'], $content, $ownerClass, $srcDir, $classFiles),
+            contract: self::shapeOf($self),
+            inheritedContract: $query && $self instanceof IntersectionType
+                ? $this->inheritedShape($self, $definitions, $content, $ownerClass, $srcDir, $classFiles)
+                : null,
         );
     }
 
     /**
      * The keys an intersection (`Base & array{…}`) takes from the shape it extends, read where that
-     * shape is declared — the same file, or the class it is imported from — and through that
-     * shape's own base in turn. Null for a `_self` that is not an intersection, or whose base can't
-     * be read as a shape.
+     * shape is declared — the same file, or the class it is imported from, following an alias the
+     * target only re-imports to where it is declared — and through that shape's own base in turn.
+     * Null when its base can't be read as a shape.
      *
+     * @param array<string, string> $definitions the aliases the file declares
      * @param array<string, string> $classFiles
      */
-    private function inheritedShape(string $self, string $content, string $ownerClass, string $srcDir, array $classFiles, int $depth = 0): ?ShapeType
+    private function inheritedShape(IntersectionType $self, array $definitions, string $content, string $class, string $srcDir, array $classFiles, int $depth = 0): ?ShapeType
     {
-        try {
-            $parsed = $this->shapeParser->parse($self);
-        } catch (Throwable) {
-            return null;
-        }
-        if (!$parsed instanceof IntersectionType || $depth > 8) {
+        $base = $depth > 8 ? null : $this->aliasDefinition($self->base->name, $definitions, $content, $class, $srcDir, $classFiles);
+        $parsed = null === $base ? null : $this->parseType($base['definition']);
+        $own = self::shapeOf($parsed);
+        if (null === $base || null === $own) {
             return null;
         }
 
-        $alias = $parsed->base->name;
-        $baseSelf = $this->docHelper->extractPhpStanTypes($content)[$alias] ?? null;
-        $baseContent = $content;
-        $baseClass = $ownerClass;
-        if (null === $baseSelf) {
-            $import = $this->docHelper->extractImportedTypesLeniently($content, $ownerClass, $srcDir, $classFiles, $this->shortNameMap($classFiles), $this->domainGuesser)['imports'][$alias] ?? null;
-            $file = null === $import ? null : $classFiles[$import->targetClass] ?? null;
-            $read = null === $file ? false : file_get_contents($file);
-            if (null === $import || false === $read) {
-                return null;
-            }
-            $definitions = $this->docHelper->extractPhpStanTypes($read);
-            $baseSelf = $definitions[$import->targetTypeName] ?? $definitions['_self'] ?? null;
-            $baseContent = $read;
-            $baseClass = $import->targetClass;
-        }
-
-        if (null === $baseSelf || null === $own = $this->declaredShape($baseSelf)) {
-            return null;
-        }
-        $further = $this->inheritedShape($baseSelf, $baseContent, $baseClass, $srcDir, $classFiles, $depth + 1);
+        $further = $parsed instanceof IntersectionType
+            ? $this->inheritedShape($parsed, $base['definitions'], $base['content'], $base['class'], $srcDir, $classFiles, $depth + 1)
+            : null;
 
         return new ShapeType([...$further->fields ?? [], ...$own->fields]);
     }
 
     /**
+     * Where an alias a file uses is declared: in the file, or in the class it is imported from —
+     * as that class names it (its `_self`, or a named alias it may itself only import).
+     *
+     * @param array<string, string> $definitions the aliases the file declares
      * @param array<string, string> $classFiles
      *
-     * @return array<string, list<string>> short class name => the classes that have it
+     * @return array{definition: string, definitions: array<string, string>, content: string, class: string}|null
      */
-    private function shortNameMap(array $classFiles): array
+    private function aliasDefinition(string $alias, array $definitions, string $content, string $class, string $srcDir, array $classFiles, int $depth = 0): ?array
     {
-        $map = [];
-        foreach (array_keys($classFiles) as $class) {
-            $position = strrpos($class, '\\');
-            $map[false === $position ? $class : substr($class, $position + 1)][] = $class;
+        if (isset($definitions[$alias])) {
+            return ['definition' => $definitions[$alias], 'definitions' => $definitions, 'content' => $content, 'class' => $class];
         }
 
-        return $map;
+        $import = $depth > 8 ? null : $this->docHelper->extractImportedTypesLeniently($content, $class, $srcDir, $classFiles, $this->shortNameMap($srcDir, $classFiles), $this->domainGuesser)['imports'][$alias] ?? null;
+        $file = null === $import ? null : $classFiles[$import->targetClass] ?? null;
+        $read = null === $file ? false : file_get_contents($file);
+        if (null === $import || false === $read) {
+            return null;
+        }
+
+        return $this->aliasDefinition($import->sourceAlias ?? '_self', $this->docHelper->extractPhpStanTypes($read), $read, $import->targetClass, $srcDir, $classFiles, $depth + 1);
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     *
+     * @return array<string, list<string>>
+     */
+    private function shortNameMap(string $srcDir, array $classFiles): array
+    {
+        return $this->shortNameMaps[$srcDir] ??= $this->classLocator->shortNameMap(array_keys($classFiles));
     }
 
     /**
@@ -673,12 +690,11 @@ final class EndpointContractCollector
      */
     private function declaredShape(string $self): ?ShapeType
     {
-        try {
-            $parsed = $this->shapeParser->parse($self);
-        } catch (Throwable) {
-            return null;
-        }
+        return self::shapeOf($this->parseType($self));
+    }
 
+    private static function shapeOf(?ParsedType $parsed): ?ShapeType
+    {
         return match (true) {
             $parsed instanceof ShapeType => $parsed,
             $parsed instanceof IntersectionType => $parsed->extra,
@@ -686,31 +702,12 @@ final class EndpointContractCollector
         };
     }
 
-    /**
-     * Mirrors PhpDocTypeCollector::_self name emission for endpoint input references.
-     *
-     * @param class-string $ownerClass
-     */
-    private function emittedTypeName(string $ownerClass): string
+    private function parseType(string $type): ?ParsedType
     {
-        $shortName = $this->shortName($ownerClass);
-        if (enum_exists($ownerClass)) {
-            return $shortName . 'Data';
+        try {
+            return $this->shapeParser->parse($type);
+        } catch (Throwable) {
+            return null;
         }
-
-        return $shortName;
-    }
-
-    /**
-     * @param class-string $className
-     */
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-        if (false === $position) {
-            return $className;
-        }
-
-        return substr($className, $position + 1);
     }
 }

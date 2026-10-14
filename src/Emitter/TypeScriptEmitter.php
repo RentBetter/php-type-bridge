@@ -619,18 +619,15 @@ final class TypeScriptEmitter
         }
 
         foreach ($responses as $response) {
-            $own = array_filter($response->properties, static fn(CollectedResponseProperty $property): bool => null === $property->imports);
-            $this->appendImportedTypes($domain, $this->referenced($response->imports, array_values(array_map(
-                static fn(CollectedResponseProperty $property): ParsedType => $property->parsed,
-                $own,
-            ))), $imports);
+            // A 204 is emitted as null: nothing it declares is referenced.
+            if (204 === $response->status) {
+                continue;
+            }
             foreach ($response->properties as $property) {
-                // An inherited property imports what the file declaring it imports.
-                if (null !== $property->imports) {
-                    $this->appendImportedTypes($domain, $this->referenced($property->imports, [$property->parsed]), $imports);
-                }
+                // Each property imports what the file declaring it imports.
+                $this->appendImportedTypes($domain, $this->referenced($property->imports ?? $response->imports, [$property->parsed]), $imports);
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
-                $this->appendClassTypes($domain, $property->parsed, $imports);
+                $this->appendClassTypes($domain, $property->parsed, $imports, fileScoped: null !== $property->imports);
             }
         }
 
@@ -784,10 +781,10 @@ final class TypeScriptEmitter
      *
      * @param array<string, list<string>> $imports
      */
-    private function appendClassTypes(string $domain, ParsedType $type, array &$imports): void
+    private function appendClassTypes(string $domain, ParsedType $type, array &$imports, bool $fileScoped = false): void
     {
         if ($type instanceof NameRefType) {
-            if (null !== $type->class && null !== $this->classTypes && !$this->symbols->has($domain, $type->name)) {
+            if (null !== $type->class && null !== $this->classTypes && ($fileScoped || !$this->symbols->has($domain, $type->name))) {
                 $symbol = $this->classTypes->resolve($type->class);
                 if ($symbol->targetDomain !== $domain) {
                     $imports[$symbol->targetDomain][] = $symbol->canonicalName;
@@ -798,7 +795,7 @@ final class TypeScriptEmitter
         }
 
         foreach ($this->childTypes($type) as $child) {
-            $this->appendClassTypes($domain, $child, $imports);
+            $this->appendClassTypes($domain, $child, $imports, $fileScoped);
         }
     }
 

@@ -156,8 +156,9 @@ final readonly class TypeToTsConverter
             }
 
             // A name no alias answers to, written where it means a class: the JSON the class
-            // serialises to. An alias of the same name always wins.
-            if (null !== $type->class && null !== $this->classTypes && !$this->symbols->has($scope->domain, $type->name)) {
+            // serialises to. An alias of the same name in the module wins — unless the scope is the
+            // writing file's own, which already said the name is no alias of its.
+            if (null !== $type->class && null !== $this->classTypes && ($scope->fileScoped || !$this->symbols->has($scope->domain, $type->name))) {
                 $symbol = $this->classTypes->resolve($type->class);
 
                 return $symbol->targetDomain === $scope->domain

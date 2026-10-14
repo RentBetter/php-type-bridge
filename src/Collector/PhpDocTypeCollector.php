@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Collector;
 
 use PTGS\TypeBridge\Attribute\PhpStanOnly;
-use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
@@ -30,7 +29,7 @@ final class PhpDocTypeCollector
     public function collect(string $srcDir): array
     {
         $classFiles = $this->classLocator->classesIn($srcDir);
-        $shortNameMap = $this->buildShortNameMap(array_keys($classFiles));
+        $shortNameMap = $this->classLocator->shortNameMap(array_keys($classFiles));
         $domains = [];
 
         foreach ($classFiles as $className => $file) {
@@ -51,7 +50,9 @@ final class PhpDocTypeCollector
                 continue;
             }
 
-            $imports = $this->docHelper->extractImportedTypes(
+            // An import whose target is outside the source tree fails only an alias that uses it: a
+            // file may import anything for its own code.
+            $read = $this->docHelper->extractImportedTypesLeniently(
                 content: $content,
                 ownerClass: $className,
                 srcDir: $srcDir,
@@ -59,6 +60,7 @@ final class PhpDocTypeCollector
                 shortNameMap: $shortNameMap,
                 domainGuesser: $this->domainGuesser,
             );
+            $imports = $read['imports'];
 
             $classImports = $this->docHelper->classImports($content);
             $localAliases = array_keys($definitions);
@@ -66,12 +68,20 @@ final class PhpDocTypeCollector
             $domain = $this->domainGuesser->guess($srcDir, $file);
             $domains[$domain] ??= new CollectedDomain($domain);
 
+            if ($importsSelf && isset($read['unresolved']['_self'])) {
+                throw new RuntimeException(\sprintf('%s It is what %s serialises to.', $read['unresolved']['_self'], $className));
+            }
             if ($importsSelf && isset($imports['_self'])) {
                 $domains[$domain]->selfImports[$className] = $imports['_self'];
             }
 
             foreach ($definitions as $alias => $definition) {
-                $emittedName = $this->emittedTypeName($alias, $className);
+                $unresolved = $this->docHelper->unresolvedImportUsedIn($definition, $read['unresolved'], \sprintf('The @phpstan-type %s on %s', $alias, $className));
+                if (null !== $unresolved) {
+                    throw $unresolved;
+                }
+
+                $emittedName = $this->docHelper->emittedTypeName($alias, $className);
 
                 $existing = $domains[$domain]->types[$emittedName] ?? null;
                 if (null !== $existing && $existing->ownerClass !== $className) {
@@ -103,31 +113,6 @@ final class PhpDocTypeCollector
     }
 
     /**
-     * @param list<string> $classNames
-     * @return array<string, list<string>>
-     */
-    private function buildShortNameMap(array $classNames): array
-    {
-        $shortNameMap = [];
-
-        foreach ($classNames as $className) {
-            $shortNameMap[$this->shortName($className)][] = $className;
-        }
-
-        return $shortNameMap;
-    }
-
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-        if (false === $position) {
-            return $className;
-        }
-
-        return substr($className, $position + 1);
-    }
-
-    /**
      * The class's say on which of its aliases are for PHPStan alone — typing arrays that are
      * never serialised — so they are not emitted.
      */
@@ -140,19 +125,5 @@ final class PhpDocTypeCollector
         $attributes = (new ReflectionClass($className))->getAttributes(PhpStanOnly::class);
 
         return [] === $attributes ? null : $attributes[0]->newInstance();
-    }
-
-    private function emittedTypeName(string $alias, string $ownerClass): string
-    {
-        if ('_self' !== $alias) {
-            return $alias;
-        }
-
-        $shortName = $this->shortName($ownerClass);
-        if (enum_exists($ownerClass) && null === ValueOfName::of($ownerClass)) {
-            return $shortName . 'Data';
-        }
-
-        return $shortName;
     }
 }

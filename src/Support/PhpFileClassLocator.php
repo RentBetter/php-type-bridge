@@ -46,6 +46,25 @@ final class PhpFileClassLocator
     }
 
     /**
+     * Each short class name with the classes that have it, for resolving a name written without
+     * its namespace.
+     *
+     * @param list<string> $classNames
+     *
+     * @return array<string, list<string>>
+     */
+    public function shortNameMap(array $classNames): array
+    {
+        $map = [];
+        foreach ($classNames as $className) {
+            $position = strrpos($className, '\\');
+            $map[false === $position ? $className : substr($className, $position + 1)][] = $className;
+        }
+
+        return $map;
+    }
+
+    /**
      * Whether a class this locator found can actually be loaded in the current install.
      *
      * A source tree carries classes that only exist for some installs: a PHPStan rule or

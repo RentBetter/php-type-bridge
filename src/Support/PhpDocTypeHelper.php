@@ -13,6 +13,7 @@ use PHPStan\PhpDocParser\Parser\PhpDocParser;
 use PHPStan\PhpDocParser\Parser\TokenIterator;
 use PHPStan\PhpDocParser\Parser\TypeParser;
 use PHPStan\PhpDocParser\ParserConfig;
+use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\GenericType;
@@ -174,11 +175,22 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * The name a type alias is emitted under: the alias itself, or for `_self` its class's.
+     * An import whose target was set aside as unresolved by
+     * {@see self::extractImportedTypesLeniently()}, if the type written as `$type` uses it: the
+     * error it would have thrown, with where it is used — so a file is failed only over an import
+     * something read from it needs.
+     *
+     * @param array<string, string> $unresolved local alias => why
      */
-    public function emittedAliasName(string $alias, string $ownerClass): string
+    public function unresolvedImportUsedIn(string $type, array $unresolved, string $where): ?RuntimeException
     {
-        return $this->emittedTypeName($alias, $ownerClass);
+        foreach ($unresolved as $alias => $why) {
+            if (1 === preg_match('/(?<![\\w\\\\])' . preg_quote($alias, '/') . '(?![\\w\\\\])/', $type)) {
+                return new RuntimeException(\sprintf('%s %s is typed with it.', $why, $where));
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -205,6 +217,7 @@ final class PhpDocTypeHelper
             targetClass: $targetClass,
             targetTypeName: $this->emittedTypeName($sourceAlias, $targetClass),
             targetDomain: $domainGuesser->guess($srcDir, $targetFile),
+            sourceAlias: $sourceAlias,
         );
     }
 
@@ -571,14 +584,19 @@ final class PhpDocTypeHelper
         return substr($className, $position + 1);
     }
 
-    private function emittedTypeName(string $alias, string $ownerClass): string
+    /**
+     * The name a type alias is emitted under — the one rule an import of it, an endpoint's input
+     * reference and its own declaration agree on: a named alias is its own name; a class's `_self`
+     * is the class, and an enum's its Data unless `#[ValueOfName]` gives the value union its own name.
+     */
+    public function emittedTypeName(string $alias, string $ownerClass): string
     {
         if ('_self' !== $alias) {
             return $alias;
         }
 
         $shortName = $this->shortName($ownerClass);
-        if (enum_exists($ownerClass)) {
+        if (enum_exists($ownerClass) && null === ValueOfName::of($ownerClass)) {
             return $shortName . 'Data';
         }
 

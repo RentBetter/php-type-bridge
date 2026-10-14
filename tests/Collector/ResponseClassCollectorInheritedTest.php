@@ -50,7 +50,7 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
         $own = (new ResponseClassCollector())->collectIndex(self::SRC)[ListNotesResponse::class]->properties[0];
         self::assertSame('notes', $own->name);
-        self::assertNull($own->imports, 'Its own property is read against the response\'s file');
+        self::assertSame([], $own->imports, 'Its own property is read against the response\'s file, which imports nothing');
     }
 
     public function test_it_emits_the_envelope_on_every_error_response_and_imports_it_across_domains(): void

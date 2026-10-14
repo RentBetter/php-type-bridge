@@ -102,6 +102,6 @@ final class PhpDocTypeCollectorTest extends TestCase
     {
         $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/InheritedAliasAndOutOfTreeImportFixtures');
 
-        self::assertSame(['Page'], array_map(static fn(object $type): string => $type->name, $domains['Common']->types));
+        self::assertSame(['Page'], array_keys($domains['Common']->types));
     }
 }
