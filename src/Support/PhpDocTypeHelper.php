@@ -133,27 +133,79 @@ final class PhpDocTypeHelper
         DomainGuesser $domainGuesser,
     ): array {
         $imports = [];
-
         foreach ($this->importTags($content) as $tag) {
-            $sourceAlias = $tag->importedAlias;
-            $classRef = $tag->importedFrom->name;
-            $localAlias = $tag->importedAs ?? $sourceAlias;
-            $targetClass = $this->resolveClassReference($classRef, $ownerClass, $classFiles, $shortNameMap);
-            $targetTypeName = $this->emittedTypeName($sourceAlias, $targetClass);
-            $targetFile = $classFiles[$targetClass] ?? null;
-            if (null === $targetFile) {
-                throw new RuntimeException(\sprintf('Imported type target "%s" for "%s" was not found.', $targetClass, $ownerClass));
-            }
-
-            $imports[$localAlias] = new ImportedType(
-                localAlias: $localAlias,
-                targetClass: $targetClass,
-                targetTypeName: $targetTypeName,
-                targetDomain: $domainGuesser->guess($srcDir, $targetFile),
-            );
+            $import = $this->importedType($tag, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
+            $imports[$import->localAlias] = $import;
         }
 
         return $imports;
+    }
+
+    /**
+     * As {@see self::extractImportedTypes()}, but an import whose target is not in the source tree
+     * is set aside, with why, rather than thrown: for a file read for some of its types only — a
+     * response's base class, whose protected properties may name anything — where such an import
+     * matters only if what is read uses it.
+     *
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
+     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>} `unresolved` is local alias => why
+     */
+    public function extractImportedTypesLeniently(
+        string $content,
+        string $ownerClass,
+        string $srcDir,
+        array $classFiles,
+        array $shortNameMap,
+        DomainGuesser $domainGuesser,
+    ): array {
+        $imports = [];
+        $unresolved = [];
+        foreach ($this->importTags($content) as $tag) {
+            try {
+                $import = $this->importedType($tag, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
+                $imports[$import->localAlias] = $import;
+            } catch (RuntimeException $e) {
+                $unresolved[$tag->importedAs ?? $tag->importedAlias] = $e->getMessage();
+            }
+        }
+
+        return ['imports' => $imports, 'unresolved' => $unresolved];
+    }
+
+    /**
+     * The name a type alias is emitted under: the alias itself, or for `_self` its class's.
+     */
+    public function emittedAliasName(string $alias, string $ownerClass): string
+    {
+        return $this->emittedTypeName($alias, $ownerClass);
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
+     */
+    private function importedType(
+        TypeAliasImportTagValueNode $tag,
+        string $ownerClass,
+        string $srcDir,
+        array $classFiles,
+        array $shortNameMap,
+        DomainGuesser $domainGuesser,
+    ): ImportedType {
+        $sourceAlias = $tag->importedAlias;
+        $targetClass = $this->resolveClassReference($tag->importedFrom->name, $ownerClass, $classFiles, $shortNameMap);
+        $targetFile = $classFiles[$targetClass] ?? null;
+        if (null === $targetFile) {
+            throw new RuntimeException(\sprintf('Imported type target "%s" for "%s" was not found.', $targetClass, $ownerClass));
+        }
+
+        return new ImportedType(
+            localAlias: $tag->importedAs ?? $sourceAlias,
+            targetClass: $targetClass,
+            targetTypeName: $this->emittedTypeName($sourceAlias, $targetClass),
+            targetDomain: $domainGuesser->guess($srcDir, $targetFile),
+        );
     }
 
     /**

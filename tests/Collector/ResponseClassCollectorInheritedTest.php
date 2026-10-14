@@ -38,12 +38,19 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertSame(['notes' => 'list<string>', 'total' => 'int<0, max>'], self::rawTypes($index[ListNotesResponse::class]), 'Its own, then what it inherits');
     }
 
-    public function test_the_base_classs_import_travels_with_the_property(): void
+    public function test_an_inherited_property_carries_the_imports_of_the_file_that_declares_it(): void
     {
-        $imports = (new ResponseClassCollector())->collectIndex(self::SRC)[NoteGoneResponse::class]->imports;
+        $response = (new ResponseClassCollector())->collectIndex(self::SRC)[NoteGoneResponse::class];
 
+        self::assertSame([], $response->imports, 'The response\'s own file imports nothing');
+        $imports = $response->properties[0]->imports;
+        self::assertNotNull($imports);
         self::assertSame(['ErrorBodyData'], array_map(static fn(object $import): string => $import->localAlias, $imports));
         self::assertSame('Common', $imports[0]->targetDomain);
+
+        $own = (new ResponseClassCollector())->collectIndex(self::SRC)[ListNotesResponse::class]->properties[0];
+        self::assertSame('notes', $own->name);
+        self::assertNull($own->imports, 'Its own property is read against the response\'s file');
     }
 
     public function test_it_emits_the_envelope_on_every_error_response_and_imports_it_across_domains(): void
@@ -74,7 +81,7 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
         self::assertStringContainsString("export interface NoteGoneResponse {\n  error: Envelope;\n}", $output['Notes']);
         self::assertMatchesRegularExpression('/import type \\{[^}]*\\bEnvelope\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $output['Notes']);
-        self::assertStringContainsString('export type Envelope = {', $output['Common']);
+        self::assertStringContainsString("export interface Envelope {\n  code: string;\n  message: string;\n}", $output['Common']);
     }
 
     public function test_the_same_alias_in_the_base_and_the_child_names_each_files_own_shape(): void
@@ -90,6 +97,14 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         $output = self::emit(self::fixtures('InheritedOutOfTreeImportFixtures'));
 
         self::assertStringContainsString("export interface ListAuditedNotesResponse {\n  total: number;\n}", $output['Notes']);
+    }
+
+    public function test_a_published_property_typed_with_an_import_from_outside_the_source_tree_says_so(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/could not be resolved\\..*ListAuditedNotesResponse property .*AbstractAuditedResponse::\\$audit is typed with it/');
+
+        (new ResponseClassCollector())->collectIndex(self::fixtures('InheritedOutOfTreeImportUsedFixtures'));
     }
 
     public function test_a_source_tree_is_read_once_however_often_it_is_asked_for(): void

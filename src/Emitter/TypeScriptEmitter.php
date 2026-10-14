@@ -619,11 +619,16 @@ final class TypeScriptEmitter
         }
 
         foreach ($responses as $response) {
-            $this->appendImportedTypes($domain, $this->referenced($response->imports, array_map(
+            $own = array_filter($response->properties, static fn(CollectedResponseProperty $property): bool => null === $property->imports);
+            $this->appendImportedTypes($domain, $this->referenced($response->imports, array_values(array_map(
                 static fn(CollectedResponseProperty $property): ParsedType => $property->parsed,
-                $response->properties,
-            )), $imports);
+                $own,
+            ))), $imports);
             foreach ($response->properties as $property) {
+                // An inherited property imports what the file declaring it imports.
+                if (null !== $property->imports) {
+                    $this->appendImportedTypes($domain, $this->referenced($property->imports, [$property->parsed]), $imports);
+                }
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
                 $this->appendClassTypes($domain, $property->parsed, $imports);
             }

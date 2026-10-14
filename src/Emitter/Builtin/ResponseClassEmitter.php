@@ -55,7 +55,8 @@ final class ResponseClassEmitter implements TypeEmitter
                 '  %s%s: %s;',
                 $property->name,
                 $property->optional || $isIncluded ? '?' : '',
-                $context->convert($property->parsed, $scope),
+                // An inherited property is converted in the scope of the file that declares it.
+                $context->convert($property->parsed, null === $property->imports ? $scope : $context->scopeFor($property->imports)),
             );
 
             // Present whenever it is asked for: a side-load (an empty list when nothing is
