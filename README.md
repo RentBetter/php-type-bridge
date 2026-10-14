@@ -523,6 +523,8 @@ parameters:
 
 Mirror the same list in `type-bridge.php` so the emitter validates at codegen time too (the emitter throws on the same mismatch).
 
+In a request contract, `T|null` is an update's "clear this": left out, the field keeps its value; sent as null, it is cleared. An MCP tool publishes such a body key as taking null (`type: [T, "null"]`, or `null` in its `enum`), at any depth of a shape, unless the field's NotNull, or a NotBlank that doesn't allow null, refuses it. A query key never takes null — a query string can't carry one. A key valued `?T` (`product: ?string`) may be left out, in the TypeScript, the tool's `required` and an Endpoint's `query` alike.
+
 ## Testing
 
 ```bash

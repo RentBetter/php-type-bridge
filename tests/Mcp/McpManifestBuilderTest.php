@@ -931,7 +931,7 @@ final class McpManifestBuilderTest extends TestCase
             mapped: true,
             compound: true,
             dataClass: 'App\\AddressData',
-            contract: (new PhpDocShapeParser())->parse('array{line1: string, line2: string|null, region?: ?string, tags?: list<string|null>}'),
+            contract: (new PhpDocShapeParser())->parse("array{line1: string, line2: string|null, region?: ?string, tags?: list<string|null>, kind?: 'home'|'work'|null}"),
         );
 
         $body = $this->toolWithBody('PUT', [$address], new ShapeType([]))['inputSchema']['properties']['address'];
@@ -943,9 +943,16 @@ final class McpManifestBuilderTest extends TestCase
                 'line2' => ['type' => ['string', 'null']],
                 'region' => ['type' => 'string'],
                 'tags' => ['type' => 'array', 'items' => ['type' => ['string', 'null']]],
+                'kind' => ['enum' => ['home', 'work', null]],
             ],
             'required' => ['line1', 'line2'],
         ], $body);
+
+        // A query string carries no null, however the shape types its keys.
+        $query = $this->toolTaking([$address], new ShapeType([]))['inputSchema']['properties']['address'];
+        self::assertSame(['type' => 'string'], $query['properties']['line2']);
+        self::assertSame(['type' => 'string'], $query['properties']['tags']['items']);
+        self::assertSame(['enum' => ['home', 'work']], $query['properties']['kind']);
     }
 
     public function testAKeyWhoseValueIsQuestionMarkTIsOptionalAsItsTypeScriptIs(): void
@@ -985,6 +992,12 @@ final class McpManifestBuilderTest extends TestCase
         yield 'a dash at a class edge' => ['[a-z0-9-]+', '^(?:[a-z0-9-]+)$'];
         yield 'anchors Symfony strips' => ['^[a-z]+$', '^(?:[a-z]+)$'];
         yield 'anchors Symfony strips, \A and \z' => ['\A[a-z]+\z', '^(?:[a-z]+)$'];
+        yield 'a lazy quantifier' => ['[a-z]+?x', '^(?:[a-z]+?x)$'];
+        yield 'an open-ended count' => ['\d{2,}', '^(?:\d{2,})$'];
+        yield 'a dash first and last in a class' => ['[-a-z][a-z-]', '^(?:[-a-z][a-z-])$'];
+        yield 'an escaped dash and a class escape in a class' => ['[\-\d_]+', '^(?:[\-\d_]+)$'];
+        yield 'a backspace in a class' => ['[\b]', '^(?:[\b])$'];
+        yield 'an empty alternative' => ['(?:a|)b', '^(?:(?:a|)b)$'];
 
         // Not published: PCRE's, or an error in Unicode mode, or a different rule there.
         yield 'an inline flag' => ['(?i)[a-z]+', null];
@@ -1012,6 +1025,20 @@ final class McpManifestBuilderTest extends TestCase
         yield 'a container parameter' => ['%app.locales%', null];
         yield 'an env placeholder' => ['%env(LOCALES)%', null];
         yield 'non-ASCII' => ['[a-zé]+', null];
+        yield 'a count out of order' => ['a{5,2}', null];
+        yield 'a range out of order' => ['[z-a]', null];
+        yield 'an empty class' => ['[]a]', null];
+        yield 'an empty negated class' => ['[^]a]', null];
+        yield 'a quantifier on a quantifier' => ['a**', null];
+        yield 'a quantifier on a word boundary' => ['\b+', null];
+        yield 'a quantifier with nothing before it' => ['*a', null];
+        yield 'a quantifier at a group start' => ['(*a)', null];
+        yield 'an unclosed group' => ['(a', null];
+        yield 'an unopened group' => ['a)', null];
+        yield 'a lookahead' => ['(?=a)b', null];
+        yield 'a range to a class escape' => ['[a-\d]', null];
+        yield 'an unclosed class' => ['[a-z', null];
+        yield 'a trailing backslash' => ['a\\', null];
     }
 
     #[DataProvider('routeRequirements')]
@@ -1044,6 +1071,9 @@ final class McpManifestBuilderTest extends TestCase
         yield 'an escaped delimiter' => [[new Regex('/^[a-z]+\/[a-z]+$/D')], '^(?:[a-z]+\/[a-z]+)$'];
         yield 'escaped syntax' => [[new Regex('/^[a-z]+\.[a-z]+$/D')], '^(?:[a-z]+\.[a-z]+)$'];
         yield 'the Unicode flag' => [[new Regex('/^[a-z]+$/uD')], '^(?:[a-z]+)$'];
+        yield 'bracket delimiters' => [[new Regex('{^[a-z]+$}')], '^(?:[a-z]+)\n?$'];
+        yield 'an escaped delimiter that is no syntax' => [[new Regex('#^a\#b$#D')], '^(?:a#b)$'];
+        yield 'an escaped backslash before the end' => [[new Regex('/^a\\\\$/D')], '^(?:a\\\\)$'];
 
         // Matched anywhere in PCRE; padding it with `.*` would refuse a newline PCRE crosses.
         yield 'unanchored' => [[new Regex('/[a-z]+-[a-z]+/')], null];
@@ -1060,6 +1090,8 @@ final class McpManifestBuilderTest extends TestCase
         yield 'must not match' => [[new Regex(pattern: '/^[0-9]+$/', match: false)], null];
         // Both must hold, which one `pattern` cannot say.
         yield 'two' => [[new Regex('/^[A-Z]+$/'), new Regex('/^.{2,5}$/')], null];
+        yield 'a letter for a delimiter' => [[new Regex('a^b$a')], null];
+        yield 'an extended flag' => [[new Regex('/^[a-z]+$/x')], null];
     }
 
     /**

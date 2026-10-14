@@ -158,7 +158,7 @@ final class McpManifestBuilder
                 // a path segment is always required. A string's route requirement says what it
                 // must look like, so a model learns a ticket is `SO-12` before the router's 404.
                 $properties[$param->name] = ['type' => $param->tsType];
-                $pattern = 'string' === $param->tsType && null !== $param->requirement ? self::anchoredPattern($param->requirement) : null;
+                $pattern = 'string' === $param->tsType && null !== $param->requirement ? self::routePattern($param->requirement) : null;
                 if (null !== $pattern) {
                     $properties[$param->name]['pattern'] = $pattern;
                 }
@@ -207,8 +207,8 @@ final class McpManifestBuilder
 
         foreach ($reference->fields as $field) {
             $key = $declared[$field->name] ?? null;
-            $properties[$field->name] = $this->fieldSchema($field, $key?->type);
-            if ($json && $this->takesNull($key)) {
+            $properties[$field->name] = $this->fieldSchema($field, $key?->type, $json);
+            if ($json && $this->takesNull($key, $field)) {
                 $properties[$field->name] = self::withNull($properties[$field->name]);
             }
             if ($this->isRequired($field, $key) || ($makes && $this->refusesBlank($field))) {
@@ -218,13 +218,13 @@ final class McpManifestBuilder
     }
 
     /**
-     * Whether a submitted value is refused blank or missing: a NotBlank or a NotNull among the
-     * constraints it is validated against.
+     * Whether a submitted value is refused blank or missing: a NotNull, or a NotBlank that does not
+     * allow null — a field left out is null, which `NotBlank(allowNull: true)` lets through.
      */
     private function refusesBlank(CollectedFormField $field): bool
     {
         foreach ($field->constraints as $constraint) {
-            if ($constraint instanceof NotBlank || $constraint instanceof NotNull) {
+            if ($constraint instanceof NotNull || ($constraint instanceof NotBlank && !$constraint->allowNull)) {
                 return true;
             }
         }
@@ -233,15 +233,43 @@ final class McpManifestBuilder
     }
 
     /**
-     * Whether the contract types the key `T|null` — a null that is sent and means something, an
-     * update's "clear this" — rather than `?T`, a key only ever left out. A project lists such keys
-     * in `preserveNull`, and its PHPStan rule holds every other nullable key to `?T`, so the
-     * contract alone says which they are.
+     * Whether the key takes null as a value: the contract admits a null that is sent and means
+     * something — an update's "clear this" — and its validation does not refuse it.
      */
-    private function takesNull(?ShapeField $key): bool
+    private function takesNull(?ShapeField $key, CollectedFormField $field): bool
     {
-        return $key?->type instanceof NullableType && !$key->type->optional;
+        if (null === $key || !self::admitsNull($key->type)) {
+            return false;
+        }
+
+        // A contract one create and one update share says `string|null`; a NotNull, or a NotBlank
+        // that does not allow null, still refuses it with a 422.
+        return !$this->refusesBlank($field);
     }
+
+    /**
+     * Whether a type admits null as a value sent: `T|null`, or a union with a null among several
+     * members (`'open'|'closed'|null`, which parses as a union, not a nullable). `?T` does not: it
+     * is a key left out when null, and a project's preserveNull rule holds every nullable key to
+     * `?T` but the ones whose null means something.
+     */
+    private static function admitsNull(ParsedType $type): bool
+    {
+        if ($type instanceof NullableType) {
+            return !$type->optional;
+        }
+        if (!$type instanceof UnionType) {
+            return false;
+        }
+        foreach ($type->types as $member) {
+            if ($member instanceof ScalarType && 'null' === $member->base()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 
     /**
      * The schema with null among what it accepts: a `null` type beside its own (in `anyOf`, or as
@@ -280,19 +308,20 @@ final class McpManifestBuilder
      */
     private function isRequired(CollectedFormField $field, ?ShapeField $key): bool
     {
-        return null === $key ? $field->required : !$key->optional;
+        return null === $key ? $field->required : !$key->mayBeLeftOut();
     }
 
     /**
      * The field's schema, with what its validation bounds it by and what its property says it is.
      *
      * @param ParsedType|null $declared the type the request contract gives this field, if it names it
+     * @param bool            $json     whether it is sent as JSON, which can carry a null
      *
      * @return array<string, mixed>
      */
-    private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null): array
+    private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null, bool $json = false): array
     {
-        $schema = $this->valueSchema($field, $declared);
+        $schema = $this->valueSchema($field, $declared, $json);
         $schema = [...$schema, ...$this->bounds($field->constraints, $schema['type']), ...$this->patternOf($field->constraints, $schema['type'])];
 
         // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
@@ -315,7 +344,7 @@ final class McpManifestBuilder
      *
      * @return array{type: string, ...<string, mixed>}
      */
-    private function valueSchema(CollectedFormField $field, ?ParsedType $declared): array
+    private function valueSchema(CollectedFormField $field, ?ParsedType $declared, bool $json = false): array
     {
         // A collection is compound too, but its shape is its entry's, repeated.
         if (null !== $field->entryTypeClass) {
@@ -336,7 +365,7 @@ final class McpManifestBuilder
 
         // A compound field with no children reads what is sent whole, so its form says nothing of
         // what it takes: the shape its data class declares does, where every part of it can be said.
-        if (null !== $field->contract && null !== $contract = $this->shapeSchema($field->contract)) {
+        if (null !== $field->contract && null !== $contract = $this->shapeSchema($field->contract, $json)) {
             return $contract;
         }
 
@@ -344,7 +373,7 @@ final class McpManifestBuilder
             $properties = [];
             $required = [];
             foreach ($field->children as $child) {
-                $properties[$child->name] = $this->fieldSchema($child);
+                $properties[$child->name] = $this->fieldSchema($child, json: $json);
                 if ($child->required) {
                     $required[] = $child->name;
                 }
@@ -397,18 +426,18 @@ final class McpManifestBuilder
      *
      * @return array{type: 'object', properties?: array<string, array<string, mixed>>, required?: list<string>}|null
      */
-    private function shapeSchema(ShapeType $shape): ?array
+    private function shapeSchema(ShapeType $shape, bool $json = false): ?array
     {
         $properties = [];
         $required = [];
         foreach ($shape->fields as $key) {
-            $schema = $this->typeSchema($key->type);
+            $schema = $this->typeSchema($key->type, $json);
             if (null === $schema) {
                 return null;
             }
 
             $properties[$key->name] = $schema;
-            if (!$key->optional) {
+            if (!$key->mayBeLeftOut()) {
                 $required[] = $key->name;
             }
         }
@@ -425,12 +454,18 @@ final class McpManifestBuilder
     }
 
     /**
+     * A declared type as JSON Schema. Sent as JSON, a `T|null` takes null beside its type — a key
+     * inside a shape is cleared as much as one at the top — where `?T` is a key only left out; in a
+     * query string, which cannot carry a null, neither does.
+     *
      * @return array<string, mixed>|null
      */
-    private function typeSchema(ParsedType $type): ?array
+    private function typeSchema(ParsedType $type, bool $json = false): ?array
     {
         if ($type instanceof NullableType) {
-            return $this->typeSchema($type->inner);
+            $inner = $this->typeSchema($type->inner, $json);
+
+            return null !== $inner && $json && !$type->optional ? self::withNull($inner) : $inner;
         }
 
         $scalar = $this->declaredScalar($type);
@@ -439,7 +474,7 @@ final class McpManifestBuilder
         }
 
         if ($type instanceof ListType || $type instanceof MapType) {
-            $items = $this->typeSchema($type instanceof ListType ? $type->inner : $type->value);
+            $items = $this->typeSchema($type instanceof ListType ? $type->inner : $type->value, $json);
             if (null === $items) {
                 return null;
             }
@@ -448,8 +483,8 @@ final class McpManifestBuilder
         }
 
         return match (true) {
-            $type instanceof ShapeType => $this->shapeSchema($type),
-            $type instanceof UnionType => $this->unionSchema($type),
+            $type instanceof ShapeType => $this->shapeSchema($type, $json),
+            $type instanceof UnionType => $this->unionSchema($type, $json),
             $type instanceof LiteralType => ['enum' => [$type->value]],
             // An enum's ids are its own to say and can't be read statically; that it is a string can.
             $type instanceof IdOfType => ['type' => 'string'],
@@ -458,21 +493,25 @@ final class McpManifestBuilder
     }
 
     /**
-     * A union of literals is the values it allows; anything else is either of its members. A
-     * `null` member is dropped: a key that may be null is one a request leaves out.
+     * A union of literals is the values it allows; anything else is either of its members. A `null`
+     * member is a value sent as JSON, added as {@see self::withNull()} adds it; in a query string,
+     * which cannot carry one, it is dropped.
      *
      * @return array<string, mixed>|null
      */
-    private function unionSchema(UnionType $union): ?array
+    private function unionSchema(UnionType $union, bool $json = false): ?array
     {
         $members = [];
         $values = [];
+        $null = false;
         foreach ($union->types as $member) {
             if ($member instanceof ScalarType && 'null' === $member->base()) {
+                $null = true;
+
                 continue;
             }
 
-            $schema = $this->typeSchema($member);
+            $schema = $this->typeSchema($member, $json);
             if (null === $schema) {
                 return null;
             }
@@ -483,10 +522,12 @@ final class McpManifestBuilder
         }
 
         if ([] !== $members && \count($values) === \count($members)) {
-            return ['enum' => array_values(array_unique($values, \SORT_REGULAR))];
+            $schema = ['enum' => array_values(array_unique($values, \SORT_REGULAR))];
+        } else {
+            $schema = 1 === \count($members) ? $members[0] : ['anyOf' => $members];
         }
 
-        return 1 === \count($members) ? $members[0] : ['anyOf' => $members];
+        return $json && $null && [] !== $members ? self::withNull($schema) : $schema;
     }
 
     private function declaredScalar(?ParsedType $declared): ?string
@@ -565,9 +606,10 @@ final class McpManifestBuilder
     }
 
     /**
-     * A string's Regex constraint as the schema's `pattern`, when it has exactly one that reads the
-     * same in JSON Schema's regex dialect. Symfony's own HTML-pattern conversion strips the
-     * delimiters and anchors, and gives up on what it cannot carry over (flags after the delimiter).
+     * A string's Regex constraint as the schema's `pattern`, when it has exactly one and it reads the
+     * same in JSON Schema's dialect ({@see self::regexPattern()}). Two must both hold, which one
+     * `pattern` cannot say; one that can't be carried over would leave the other claiming to be the
+     * whole rule.
      *
      * @param list<Constraint> $constraints
      *
@@ -579,45 +621,277 @@ final class McpManifestBuilder
             return [];
         }
 
-        $patterns = [];
-        foreach ($constraints as $constraint) {
-            if ($constraint instanceof Regex) {
-                $html = $constraint->getHtmlPattern();
-                $patterns[] = null === $html ? null : self::anchoredPattern($html);
-            }
+        $regexes = array_values(array_filter($constraints, static fn (Constraint $constraint): bool => $constraint instanceof Regex));
+        if (1 !== \count($regexes)) {
+            return [];
         }
+        $pattern = self::regexPattern($regexes[0]);
 
-        // Two patterns are both to be met, which `pattern` cannot say; one that can't be carried
-        // over would leave the other claiming to be the whole rule.
-        return 1 === \count($patterns) && null !== $patterns[0] ? ['pattern' => $patterns[0]] : [];
+        return null === $pattern ? [] : ['pattern' => $pattern];
     }
 
     /**
-     * A whole-value regex fragment (a route requirement, an HTML pattern — both matched whole) as a
-     * JSON Schema `pattern`, which matches anywhere unless anchored. Null when the fragment may not
-     * read the same, or compile at all, as an ECMA-262 regex in Unicode mode — how Ajv compiles one,
-     * and an argument check that can't compile refuses every call:
-     *
-     * - any `(?` group but `(?:` — an inline flag, a lookaround, a named or atomic group;
-     * - a possessive quantifier (`a++`) or a POSIX class (`[[:alpha:]]`);
-     * - an escape other than `\d \D \w \W \s \S \b \B \n \r \t \f \v`, a backreference, or an
-     *   escaped syntax character — `\A`, `\h`, `\p{…}`, `\x{…}` and an escaped letter or `_` are
-     *   PCRE's, or an error under Unicode mode;
-     * - a brace that is not a `{n}`, `{n,}` or `{n,m}` quantifier.
-     *
-     * It errs toward no pattern: a client checks no value against a rule other than the server's.
+     * A route requirement as a `pattern`: the router matches it against the whole segment, so it is
+     * anchored (`^(?:…)$`), after the leading `^`/`\A` and trailing `$`/`\z` Symfony itself strips.
+     * Null for a requirement holding a `%…%` container placeholder, which the router resolves and the
+     * literal text is not, and for one that does not read the same in JSON Schema's dialect
+     * ({@see self::readsTheSameInEcma()}).
      */
-    private static function anchoredPattern(string $fragment): ?string
+    private static function routePattern(string $requirement): ?string
     {
-        if ('' === $fragment
-            || 1 === preg_match('/\(\?(?!:)|[+*?}]\+|\[\[:/', $fragment)
-            || 1 === preg_match('/\\\\[^dDwWsSbBnrtfv0-9^$\\\\.*+?()[\]{}|\/-]/', $fragment)
-            || 1 === preg_match('/(?<!\\\\)[{}]/', (string) preg_replace('/(?<!\\\\)\{\d+(?:,\d*)?\}/', '', $fragment))
-        ) {
+        // Route::sanitizeRequirement(), as Symfony does it.
+        if (str_starts_with($requirement, '^')) {
+            $requirement = substr($requirement, 1);
+        } elseif (str_starts_with($requirement, '\A')) {
+            $requirement = substr($requirement, 2);
+        }
+        if (str_ends_with($requirement, '$')) {
+            $requirement = substr($requirement, 0, -1);
+        } elseif (str_ends_with($requirement, '\z')) {
+            $requirement = substr($requirement, 0, -2);
+        }
+
+        if (str_contains($requirement, '%') || !self::readsTheSameInEcma($requirement, alternationOutsideGroups: true)) {
             return null;
         }
 
-        return '^(?:' . $fragment . ')$';
+        return '^(?:' . $requirement . ')$';
+    }
+
+    /**
+     * A Regex constraint as a `pattern`, when it means the same there. Only a whole-value rule
+     * carries over: anchored at both ends (`/^…$/`) — unanchored, PCRE matches anywhere and across
+     * lines, which no padding with `.*` reproduces — with no alternation outside a group (`^a|b$` is
+     * `(^a)|(b$)`), no flag but `D` and `u`, a value matched as sent (no normaliser) and a match that
+     * must succeed. PCRE's `$` without `D` also matches before a final newline, so the published rule
+     * allows one (`\n?$`).
+     */
+    private static function regexPattern(Regex $regex): ?string
+    {
+        if (!$regex->match || null !== $regex->normalizer) {
+            return null;
+        }
+
+        $pattern = $regex->pattern;
+        if (null === $pattern) {
+            return null;
+        }
+        $open = $pattern[0] ?? '';
+        $close = ['(' => ')', '[' => ']', '{' => '}', '<' => '>'][$open] ?? $open;
+        $end = strrpos($pattern, $close);
+        if ('' === $open || ctype_alnum($open) || '\\' === $open || false === $end || 0 === $end) {
+            return null;
+        }
+
+        $flags = substr($pattern, $end + 1);
+        if (\strlen($flags) !== strspn($flags, 'Du')) {
+            return null;
+        }
+
+        $body = substr($pattern, 1, $end - 1);
+        // An escaped delimiter is the character itself; escaped, a non-syntax one is an error in
+        // Unicode mode. `/` stays escaped, which both read as a slash.
+        if ('/' !== $open && !str_contains('^$\.*+?()[]{}|', $open)) {
+            $body = str_replace('\\' . $open, $open, $body);
+        }
+
+        if (!str_starts_with($body, '^') || !str_ends_with($body, '$') || 1 === strspn(strrev(substr($body, 0, -1)), '\\') % 2) {
+            return null;
+        }
+        $inner = substr($body, 1, -1);
+
+        if (!self::readsTheSameInEcma($inner, alternationOutsideGroups: false)) {
+            return null;
+        }
+
+        return '^(?:' . $inner . ')' . (str_contains($flags, 'D') ? '' : '\n?') . '$';
+    }
+
+    /**
+     * Whether a regex fragment reads the same, and compiles, as ECMA-262 in Unicode mode — how Ajv
+     * compiles a schema's `pattern`, and an argument check that can't compile refuses every call.
+     * Read token by token against what both dialects agree on, rather than searched for what they
+     * don't:
+     *
+     * - printable ASCII literals; outside a class, the syntax characters only escaped;
+     * - the escapes `\d \D \w \W \b \B \n \r \t \f` and escaped syntax characters (`\.`, `\/`, …) —
+     *   not `\s` or `\v`, whose sets differ, nor a backreference, an octal, `\x`, `\p` or an escaped
+     *   letter or `_`;
+     * - classes of literals, ranges between two literals in order, and `\d \D \w \W` — no nested
+     *   bracket, so no POSIX class, and no range from a class escape (`[\w-.]`);
+     * - plain and `(?:` groups, `*`, `+`, `?` and `{n}`, `{n,}`, `{n,m}` (n ≤ m) after something to
+     *   repeat, each optionally lazy — not possessive;
+     * - no `.` (PCRE's matches `\r`, and a route's a newline too; ECMA's neither), no `^` or `$`
+     *   (the caller anchors the whole), and `|` outside a group only where the caller wraps it.
+     */
+    private static function readsTheSameInEcma(string $fragment, bool $alternationOutsideGroups): bool
+    {
+        if ('' === $fragment || 1 === preg_match('/[^\x20-\x7E]/', $fragment)) {
+            return false;
+        }
+
+        $length = \strlen($fragment);
+        $depth = 0;
+        $repeatable = false;
+        $i = 0;
+        while ($i < $length) {
+            $char = $fragment[$i];
+
+            if ('\\' === $char) {
+                $escaped = $fragment[$i + 1] ?? '';
+                if ('' !== $escaped && str_contains('dDwWnrtf', $escaped)) {
+                    $repeatable = true;
+                } elseif ('' !== $escaped && str_contains('bB', $escaped)) {
+                    $repeatable = false;
+                } elseif ('' !== $escaped && str_contains('^$\.*+?()[]{}|/', $escaped)) {
+                    $repeatable = true;
+                } else {
+                    return false;
+                }
+                $i += 2;
+
+                continue;
+            }
+
+            if ('[' === $char) {
+                $close = self::classEnd($fragment, $i);
+                if (null === $close) {
+                    return false;
+                }
+                $i = $close + 1;
+                $repeatable = true;
+
+                continue;
+            }
+
+            if ('(' === $char) {
+                if ('?' === ($fragment[$i + 1] ?? '')) {
+                    if (':' !== ($fragment[$i + 2] ?? '')) {
+                        return false;
+                    }
+                    $i += 2;
+                }
+                ++$depth;
+                ++$i;
+                $repeatable = false;
+
+                continue;
+            }
+
+            if (')' === $char) {
+                if (0 === $depth) {
+                    return false;
+                }
+                --$depth;
+                ++$i;
+                $repeatable = true;
+
+                continue;
+            }
+
+            if ('|' === $char) {
+                if (0 === $depth && !$alternationOutsideGroups) {
+                    return false;
+                }
+                ++$i;
+                $repeatable = false;
+
+                continue;
+            }
+
+            if (str_contains('*+?{', $char)) {
+                if (!$repeatable) {
+                    return false;
+                }
+                if ('{' === $char) {
+                    if (1 !== preg_match('/\G\{(\d+)(?:(,)(\d*))?\}/', $fragment, $match, 0, $i)
+                        || (isset($match[3]) && '' !== $match[3] && (int) $match[1] > (int) $match[3])) {
+                        return false;
+                    }
+                    $i += \strlen($match[0]);
+                } else {
+                    ++$i;
+                }
+                if ('+' === ($fragment[$i] ?? '')) {
+                    return false;
+                }
+                if ('?' === ($fragment[$i] ?? '')) {
+                    ++$i;
+                }
+                $repeatable = false;
+
+                continue;
+            }
+
+            if (str_contains('}].^$', $char)) {
+                return false;
+            }
+
+            ++$i;
+            $repeatable = true;
+        }
+
+        return 0 === $depth;
+    }
+
+    /**
+     * Where the class opening at `$open` closes, when every part of it reads the same in both
+     * dialects: literals, escaped syntax characters and `\n \r \t \f \b \-`, the class escapes
+     * `\d \D \w \W`, and ranges between two literals in order. Null otherwise — a `[` inside (a POSIX
+     * class, or nesting), a range from or to a class escape, an empty class.
+     */
+    private static function classEnd(string $fragment, int $open): ?int
+    {
+        $length = \strlen($fragment);
+        $i = $open + 1;
+        if ('^' === ($fragment[$i] ?? '')) {
+            ++$i;
+        }
+        if (']' === ($fragment[$i] ?? '')) {
+            return null;
+        }
+
+        /** @var list<array{kind: 'literal'|'set'|'dash', char: string}> $atoms */
+        $atoms = [];
+        while ($i < $length && ']' !== $fragment[$i]) {
+            $char = $fragment[$i];
+            if ('[' === $char) {
+                return null;
+            }
+            if ('\\' === $char) {
+                $escaped = $fragment[$i + 1] ?? '';
+                if ('' !== $escaped && str_contains('dDwW', $escaped)) {
+                    $atoms[] = ['kind' => 'set', 'char' => $escaped];
+                } elseif ('' !== $escaped && str_contains('nrtfb', $escaped)) {
+                    $atoms[] = ['kind' => 'literal', 'char' => ['n' => "\n", 'r' => "\r", 't' => "\t", 'f' => "\f", 'b' => "\x08"][$escaped]];
+                } elseif ('' !== $escaped && str_contains('^$\.*+?()[]{}|/-', $escaped)) {
+                    $atoms[] = ['kind' => 'literal', 'char' => $escaped];
+                } else {
+                    return null;
+                }
+                $i += 2;
+
+                continue;
+            }
+            $atoms[] = ['kind' => '-' === $char ? 'dash' : 'literal', 'char' => $char];
+            ++$i;
+        }
+        if ($i >= $length) {
+            return null;
+        }
+
+        $count = \count($atoms);
+        for ($k = 0; $k < $count; ++$k) {
+            if ($k + 2 < $count && 'dash' === $atoms[$k + 1]['kind'] && 'dash' !== $atoms[$k]['kind']) {
+                [$from, $to] = [$atoms[$k], $atoms[$k + 2]];
+                if ('set' === $from['kind'] || 'set' === $to['kind'] || \ord($from['char']) > \ord($to['char'])) {
+                    return null;
+                }
+                $k += 2;
+            }
+        }
+
+        return $i;
     }
 
     private function tighter(string $keyword, int|float $current, int|float $limit): int|float
