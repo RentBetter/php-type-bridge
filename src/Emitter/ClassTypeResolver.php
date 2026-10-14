@@ -61,6 +61,19 @@ final class ClassTypeResolver
         return $this->resolved[$class] ??= $this->lookUp($class);
     }
 
+    /**
+     * The JSON type a class serialises to, or null where nothing says what that is (no `_self`, no
+     * emitter) — for a caller with a fallback of its own.
+     */
+    public function tryResolve(string $class): ?EmitImport
+    {
+        try {
+            return $this->resolve($class);
+        } catch (RuntimeException) {
+            return null;
+        }
+    }
+
     private function lookUp(string $class): EmitImport
     {
         if (!class_exists($class) && !interface_exists($class) && !enum_exists($class)) {

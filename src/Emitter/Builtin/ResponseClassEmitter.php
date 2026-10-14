@@ -40,10 +40,13 @@ final class ResponseClassEmitter implements TypeEmitter
 
     private function render(CollectedApiResponseClass $response, EmitContext $context): string
     {
-        // A 204 is sent with no body at all, whatever properties the class has or inherits.
-        if (204 === $response->status) {
+        // A 204 is sent with no body at all; the collector gives it no properties.
+        if (204 === $response->status && [] === $response->properties) {
             return \sprintf('export type %s = null;', $context->names->responseDeclarationName($response));
         }
+
+        // One scope per file a property is written in, not one per property.
+        $scopes = [];
 
         $name = $context->names->responseDeclarationName($response);
         $lines = [\sprintf('export interface %s {', $name)];
@@ -54,8 +57,8 @@ final class ResponseClassEmitter implements TypeEmitter
                 '  %s%s: %s;',
                 $property->name,
                 $property->optional || $isIncluded ? '?' : '',
-                // Converted in the scope of the file that declares it, inherited or not.
-                $context->convert($property->parsed, $context->scopeFor($property->imports ?? $response->imports, fileScoped: null !== $property->imports)),
+                // Converted in the scope of the file it is written in.
+                $context->convert($property->parsed, $scopes[$property->writtenIn ?? $response->className] ??= $context->scopeFor($property->imports ?? $response->imports, fileScoped: null !== $property->writtenIn)),
             );
 
             // Present whenever it is asked for: a side-load (an empty list when nothing is

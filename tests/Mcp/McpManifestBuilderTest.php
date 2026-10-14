@@ -1116,8 +1116,9 @@ final class McpManifestBuilderTest extends TestCase
         yield 'bracket delimiters' => [[new Regex('{^[a-z]+$}')], '^(?:[a-z]+)\n?$'];
         yield 'an escaped delimiter that is no syntax' => [[new Regex('#^a\#b$#D')], '^(?:a#b)$'];
         // PCRE reads the body as written, escaped delimiter and all: `\-` stays a literal dash in a
-        // class, `\,` a literal comma, where unescaping would make a range or a quantifier of them.
-        yield 'a dash delimiter, escaped in a class' => [[new Regex('-^[a\-z]+$-D')], null];
+        // class, as Unicode mode reads it too, and `\,` a literal comma, which Unicode mode refuses —
+        // where unescaping would make a range or a quantifier of them.
+        yield 'a dash delimiter, escaped in a class' => [[new Regex('-^[a\-z]+$-D')], '^(?:[a\-z]+)$'];
         yield 'a comma delimiter, escaped in a count' => [[new Regex(',^a{2\,3}$,D')], null];
         yield 'an escaped backslash before the end' => [[new Regex('/^a\\\\$/D')], '^(?:a\\\\)$'];
 

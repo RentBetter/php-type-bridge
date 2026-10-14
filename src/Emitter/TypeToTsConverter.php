@@ -51,6 +51,22 @@ final readonly class TypeToTsConverter
      * quoted when it cannot (`'my-key'`). The parser hands keys over unquoted, whatever the
      * PHPDoc spelling, so this is the only place that decides.
      */
+    /**
+     * The type of the class a name carries, where it is the class that the name means: in a scope
+     * that is the writing file's own, whenever the class has a type; otherwise only where no alias
+     * of the module has that name. Null where the name is the module's alias.
+     */
+    public function classSymbol(NameRefType $type, string $domain, bool $fileScoped): ?EmitImport
+    {
+        if (null === $type->class || null === $this->classTypes) {
+            return null;
+        }
+
+        $symbol = $fileScoped ? $this->classTypes->tryResolve($type->class) : null;
+
+        return $symbol ?? ($this->symbols->has($domain, $type->name) ? null : $this->classTypes->resolve($type->class));
+    }
+
     public static function propertyName(string $name): string
     {
         return 1 === preg_match(self::BARE_PROPERTY_NAME, $name) ? $name : self::stringLiteral($name);
@@ -157,10 +173,10 @@ final readonly class TypeToTsConverter
 
             // A name no alias answers to, written where it means a class: the JSON the class
             // serialises to. An alias of the same name in the module wins — unless the scope is the
-            // writing file's own, which already said the name is no alias of its.
-            if (null !== $type->class && null !== $this->classTypes && ($scope->fileScoped || !$this->symbols->has($scope->domain, $type->name))) {
-                $symbol = $this->classTypes->resolve($type->class);
-
+            // writing file's own (an inherited property), which already said the name is no alias
+            // of its, and the class has a type to name.
+            $symbol = $this->classSymbol($type, $scope->domain, $scope->fileScoped);
+            if (null !== $symbol) {
                 return $symbol->targetDomain === $scope->domain
                     ? $symbol->canonicalName
                     : $scope->foreignAliases[$symbol->targetDomain][$symbol->canonicalName] ?? $symbol->canonicalName;
@@ -184,12 +200,9 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof ShapeType) {
             $fields = array_map(function (ShapeField $field) use ($scope): string {
-                $optional = $field->optional || $this->isIncluded($field->type);
-                $fieldType = $field->type;
-                if ($fieldType instanceof NullableType && $fieldType->optional) {
-                    $optional = true;
-                    $fieldType = $fieldType->inner;
-                }
+                $optional = $field->mayBeLeftOut() || $this->isIncluded($field->type);
+                // `key: ?T` is emitted `key?: T`: left out, not sent as null.
+                $fieldType = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
 
                 return \sprintf('%s%s: %s', self::propertyName($field->name), $optional ? '?' : '', $this->convert($fieldType, $scope));
             }, $type->fields);

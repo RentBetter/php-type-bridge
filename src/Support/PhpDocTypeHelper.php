@@ -121,6 +121,9 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * A file's `@phpstan-import-type` tags, by the alias each is known by locally. An import whose
+     * target is not in the source tree is an error.
+     *
      * @param array<string, string> $classFiles
      * @param array<string, list<string>> $shortNameMap
      * @return array<string, ImportedType>
@@ -133,13 +136,12 @@ final class PhpDocTypeHelper
         array $shortNameMap,
         DomainGuesser $domainGuesser,
     ): array {
-        $imports = [];
-        foreach ($this->importTags($content) as $tag) {
-            $import = $this->importedType($tag, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
-            $imports[$import->localAlias] = $import;
+        $read = $this->extractImportedTypesLeniently($content, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
+        foreach ($read['unresolved'] as $why) {
+            throw new RuntimeException($why);
         }
 
-        return $imports;
+        return $read['imports'];
     }
 
     /**

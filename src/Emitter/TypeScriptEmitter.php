@@ -619,15 +619,11 @@ final class TypeScriptEmitter
         }
 
         foreach ($responses as $response) {
-            // A 204 is emitted as null: nothing it declares is referenced.
-            if (204 === $response->status) {
-                continue;
-            }
             foreach ($response->properties as $property) {
-                // Each property imports what the file declaring it imports.
+                // Each property imports what the file it is written in imports.
                 $this->appendImportedTypes($domain, $this->referenced($property->imports ?? $response->imports, [$property->parsed]), $imports);
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
-                $this->appendClassTypes($domain, $property->parsed, $imports, fileScoped: null !== $property->imports);
+                $this->appendClassTypes($domain, $property->parsed, $imports, fileScoped: null !== $property->writtenIn);
             }
         }
 
@@ -784,11 +780,10 @@ final class TypeScriptEmitter
     private function appendClassTypes(string $domain, ParsedType $type, array &$imports, bool $fileScoped = false): void
     {
         if ($type instanceof NameRefType) {
-            if (null !== $type->class && null !== $this->classTypes && ($fileScoped || !$this->symbols->has($domain, $type->name))) {
-                $symbol = $this->classTypes->resolve($type->class);
-                if ($symbol->targetDomain !== $domain) {
-                    $imports[$symbol->targetDomain][] = $symbol->canonicalName;
-                }
+            // The same choice the converter makes, so what is imported is what is referenced.
+            $symbol = $this->converter->classSymbol($type, $domain, $fileScoped);
+            if (null !== $symbol && $symbol->targetDomain !== $domain) {
+                $imports[$symbol->targetDomain][] = $symbol->canonicalName;
             }
 
             return;

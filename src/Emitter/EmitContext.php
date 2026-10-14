@@ -63,6 +63,11 @@ final readonly class EmitContext
     {
         $symbols = [];
         foreach ($imports as $importedType) {
+            // A file may import, or declare, what is never emitted (a #[PhpStanOnly] alias): it is
+            // no symbol here, and a type that does use it fails where it is converted, naming it.
+            if (!$this->symbols->has($importedType->targetDomain, $importedType->targetTypeName)) {
+                continue;
+            }
             $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
         }
 

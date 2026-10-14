@@ -88,6 +88,7 @@ final readonly class CollectedFormField
             constraints: $this->constraints,
             ownerClass: $this->ownerClass,
             contract: $contract,
+            trim: $this->trim,
         );
     }
 }

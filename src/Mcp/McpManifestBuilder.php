@@ -211,7 +211,7 @@ final class McpManifestBuilder
             if ($json && $this->takesNull($key, $field)) {
                 $properties[$field->name] = self::withNull($properties[$field->name]);
             }
-            if ($this->isRequired($field, $key) || ($makes && $this->refusesBlank($field))) {
+            if ($this->isRequired($field, $key) || ($makes && self::refusesBlank($field))) {
                 $required[] = $field->name;
             }
         }
@@ -221,7 +221,7 @@ final class McpManifestBuilder
      * Whether a submitted value is refused blank or missing: a NotNull, or a NotBlank that does not
      * allow null — a field left out is null, which `NotBlank(allowNull: true)` lets through.
      */
-    private function refusesBlank(CollectedFormField $field): bool
+    private static function refusesBlank(CollectedFormField $field): bool
     {
         foreach ($field->constraints as $constraint) {
             if ($constraint instanceof NotNull || ($constraint instanceof NotBlank && !$constraint->allowNull)) {
@@ -244,7 +244,7 @@ final class McpManifestBuilder
 
         // A contract one create and one update share says `string|null`; a NotNull, or a NotBlank
         // that does not allow null, still refuses it with a 422.
-        return !$this->refusesBlank($field);
+        return !self::refusesBlank($field);
     }
 
     /**
@@ -608,15 +608,9 @@ final class McpManifestBuilder
      */
     private static function shapeKeys(?ParsedType $type): array
     {
-        if ($type instanceof NullableType) {
-            $type = $type->inner;
-        }
-        if ($type instanceof UnionType) {
-            $shapes = array_values(array_filter($type->types, static fn (ParsedType $member): bool => $member instanceof ShapeType));
-            $type = 1 === \count($shapes) ? $shapes[0] : null;
-        }
+        $shape = self::soleMember($type, ShapeType::class);
 
-        return $type instanceof ShapeType ? array_column(array_map(static fn (ShapeField $key): array => ['name' => $key->name, 'key' => $key], $type->fields), 'key', 'name') : [];
+        return null === $shape ? [] : array_column(array_map(static fn (ShapeField $key): array => ['name' => $key->name, 'key' => $key], $shape->fields), 'key', 'name');
     }
 
     /**
@@ -624,15 +618,30 @@ final class McpManifestBuilder
      */
     private static function listItem(?ParsedType $type): ?ParsedType
     {
+        return self::soleMember($type, ListType::class)?->inner;
+    }
+
+    /**
+     * The type itself if it is a `$kind`, or the one `$kind` among a nullable's or a union's
+     * members — none when there are two to choose between.
+     *
+     * @template T of ParsedType
+     *
+     * @param class-string<T> $kind
+     *
+     * @return T|null
+     */
+    private static function soleMember(?ParsedType $type, string $kind): ?ParsedType
+    {
         if ($type instanceof NullableType) {
             $type = $type->inner;
         }
         if ($type instanceof UnionType) {
-            $lists = array_values(array_filter($type->types, static fn (ParsedType $member): bool => $member instanceof ListType));
-            $type = 1 === \count($lists) ? $lists[0] : null;
+            $members = array_values(array_filter($type->types, static fn (ParsedType $member): bool => $member instanceof $kind));
+            $type = 1 === \count($members) ? $members[0] : null;
         }
 
-        return $type instanceof ListType ? $type->inner : null;
+        return $type instanceof $kind ? $type : null;
     }
 
     /**
@@ -726,8 +735,8 @@ final class McpManifestBuilder
      * Around the rule goes what reaches it. The form trims the value first (its `trim` option, on by
      * default), with Symfony's own StringUtil::trim — `[\pZ\p{Cc}\p{Cf}]` from either end — so the
      * pattern allows that padding, unless the rule could match the padding itself, which then can't
-     * be told apart. The validator lets a blank value through, which only a NotBlank refuses. And
-     * PCRE's `$` without `D` also matches before a final newline, which trimming leaves none of.
+     * be told apart. A blank value the form hands on as null, which the Regex lets through and only
+     * a NotNull or a NotBlank not allowing null refuses. And PCRE's `$` without `D` also matches before a final newline, which trimming leaves none of.
      */
     private static function regexPattern(Regex $regex, CollectedFormField $field): ?string
     {
@@ -752,9 +761,11 @@ final class McpManifestBuilder
         }
 
         $body = substr($pattern, 1, $end - 1);
-        // An escaped delimiter is the character itself; escaped, a non-syntax one is an error in
-        // Unicode mode. `/` stays escaped, which both read as a slash.
-        if ('/' !== $open && !str_contains('^$\.*+?()[]{}|', $open)) {
+        // PCRE reads the body as written, an escaped delimiter included. Escaped, one of these is
+        // the character itself, which Unicode mode takes only bare; any other keeps its escape for
+        // the reading below to judge — `\/` is a slash in both, `\-` in a class is no range and
+        // `\,` in a count no quantifier, which unescaping them would make.
+        if (str_contains('#~!@%;:\'"=&`', $open)) {
             $body = str_replace('\\' . $open, $open, $body);
         }
 
@@ -767,7 +778,8 @@ final class McpManifestBuilder
             return null;
         }
 
-        $blank = [] === array_filter($field->constraints, static fn (Constraint $constraint): bool => $constraint instanceof NotBlank);
+        // A blank value reaches the validator as null, trimmed or not, and the Regex lets it through.
+        $blank = !self::refusesBlank($field);
 
         if ($field->trim) {
             // A space, a control character or a negated class could match what trimming takes off.

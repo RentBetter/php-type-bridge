@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Collector;
 
+use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Contract\ApiResponse;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedResponseProperty;
@@ -87,18 +88,20 @@ final class ResponseClassCollector
                 continue;
             }
 
+            $status = $this->statusCodeResolver->resolve($reflection);
             $properties = [];
-            foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            // A 204 is sent with no body at all: nothing it declares or inherits is published.
+            foreach (204 === $status ? [] : $reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
                 if ($property->isStatic()) {
                     continue;
                 }
 
                 // An inherited property is on the wire as much as the class's own — the response
                 // subscriber writes every public property — so it is published too. Every property
-                // is read in the file that declares it, and converted in that file's scope, whatever
-                // another file imports under the same names. Only a class in the source tree counts:
-                // a library's base class is not part of the contract.
-                $declaringClass = $property->getDeclaringClass()->getName();
+                // is read in the file it is written in — the class's, a base class's, a trait's — and
+                // converted in that file's scope, whatever another file imports under the same
+                // names. Only a file in the source tree counts: a library's is not the contract.
+                $declaringClass = self::writtenIn($property);
                 $declaringFile = $classFiles[$declaringClass] ?? null;
                 $declared = null === $declaringFile ? null : $this->typeContext($declaringClass, $declaringFile, $srcDir, $classFiles, $shortNameMap);
                 if (null === $declared) {
@@ -121,6 +124,7 @@ final class ResponseClassCollector
                     // nullable and stays a key that is always present.
                     optional: $parsed instanceof NullableType && $parsed->optional,
                     imports: array_values($declared['imports']),
+                    writtenIn: $declaringClass === $className ? null : $declaringClass,
                 );
             }
 
@@ -129,7 +133,7 @@ final class ResponseClassCollector
                 name: $reflection->getShortName(),
                 domain: $this->domainGuesser->guess($srcDir, $file),
                 sourceFile: $file,
-                status: $this->statusCodeResolver->resolve($reflection),
+                status: $status,
                 error: $this->statusCodeResolver->isError($reflection),
                 properties: $properties,
                 imports: array_values($context['imports']),
@@ -167,7 +171,12 @@ final class ResponseClassCollector
         $read = $this->docHelper->extractImportedTypesLeniently($content, $className, $srcDir, $classFiles, $shortNameMap, $this->domainGuesser);
         $imports = $read['imports'];
         $domain = $this->domainGuesser->guess($srcDir, $file);
+        $phpStanOnly = (class_exists($className) || trait_exists($className)) ? ((new ReflectionClass($className))->getAttributes(PhpStanOnly::class)[0] ?? null)?->newInstance() : null;
         foreach (array_keys($this->docHelper->extractPhpStanTypes($content)) as $alias) {
+            // An alias for PHPStan alone is never emitted, so there is nothing to import it from.
+            if (null !== $phpStanOnly && $phpStanOnly->covers($alias)) {
+                continue;
+            }
             $imports[$alias] = new ImportedType(
                 localAlias: $alias,
                 targetClass: $className,
@@ -184,6 +193,26 @@ final class ResponseClassCollector
         ];
     }
 
+
+    /**
+     * The class or trait whose file a property is written in. Reflection names the class a trait's
+     * property is used in; the trait that declares it — the innermost, its doc comment the
+     * property's — is where its annotation was written and its names are imported.
+     */
+    private static function writtenIn(ReflectionProperty $property): string
+    {
+        $class = $property->getDeclaringClass();
+        $traits = $class->getTraits();
+        while ([] !== $traits) {
+            $trait = array_shift($traits);
+            if ($trait->hasProperty($property->getName()) && $trait->getProperty($property->getName())->getDocComment() === $property->getDocComment()) {
+                $class = $trait;
+                $traits = $trait->getTraits();
+            }
+        }
+
+        return $class->getName();
+    }
 
     private function resolvePropertyType(ReflectionProperty $property): string
     {

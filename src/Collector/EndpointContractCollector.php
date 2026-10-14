@@ -38,6 +38,9 @@ final class EndpointContractCollector
     /** @var array<string, array<string, list<string>>> by source directory */
     private array $shortNameMaps = [];
 
+    /** @var array<string, array{content: string, definitions: array<string, string>}|false> a base's file, read once however many queries inherit from it */
+    private array $readFiles = [];
+
     private readonly ?AttributeText $toolDescriptions;
 
     /**
@@ -665,12 +668,20 @@ final class EndpointContractCollector
 
         $import = $depth > 8 ? null : $this->docHelper->extractImportedTypesLeniently($content, $class, $srcDir, $classFiles, $this->shortNameMap($srcDir, $classFiles), $this->domainGuesser)['imports'][$alias] ?? null;
         $file = null === $import ? null : $classFiles[$import->targetClass] ?? null;
-        $read = null === $file ? false : file_get_contents($file);
+        $read = null === $file ? false : ($this->readFiles[$file] ??= self::typesIn(file_get_contents($file), $this->docHelper));
         if (null === $import || false === $read) {
             return null;
         }
 
-        return $this->aliasDefinition($import->sourceAlias ?? '_self', $this->docHelper->extractPhpStanTypes($read), $read, $import->targetClass, $srcDir, $classFiles, $depth + 1);
+        return $this->aliasDefinition($import->sourceAlias ?? '_self', $read['definitions'], $read['content'], $import->targetClass, $srcDir, $classFiles, $depth + 1);
+    }
+
+    /**
+     * @return array{content: string, definitions: array<string, string>}|false
+     */
+    private static function typesIn(string|false $content, PhpDocTypeHelper $docHelper): array|false
+    {
+        return false === $content ? false : ['content' => $content, 'definitions' => $docHelper->extractPhpStanTypes($content)];
     }
 
     /**
