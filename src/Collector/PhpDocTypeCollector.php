@@ -8,20 +8,25 @@ use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
+use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
-use ReflectionClass;
 use RuntimeException;
 
 final class PhpDocTypeCollector
 {
+    private readonly ClassFileTypes $files;
+
     public function __construct(
         private readonly PhpDocShapeParser $parser = new PhpDocShapeParser(),
         private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
-    ) {}
+        ?ClassFileTypes $files = null,
+    ) {
+        $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
+    }
 
     /**
      * @return array<string, CollectedDomain>
@@ -29,19 +34,25 @@ final class PhpDocTypeCollector
     public function collect(string $srcDir): array
     {
         $classFiles = $this->classLocator->classesIn($srcDir);
-        $shortNameMap = $this->classLocator->shortNameMap(array_keys($classFiles));
         $domains = [];
 
         foreach ($classFiles as $className => $file) {
-            $content = file_get_contents($file);
-            if (false === $content) {
+            $content = $this->files->content($file);
+            if (null === $content) {
                 continue;
             }
 
-            $definitions = $this->docHelper->extractPhpStanTypes($content);
-            $phpStanOnly = $this->phpStanOnly($className);
-            if (null !== $phpStanOnly) {
-                $definitions = array_filter($definitions, static fn(string $alias): bool => !$phpStanOnly->covers($alias), \ARRAY_FILTER_USE_KEY);
+            $definitions = $this->files->definitions($file);
+            // An alias for PHPStan alone is not emitted, and an emitted one typed with it fails.
+            $phpStanOnly = [];
+            $only = PhpStanOnly::of($className);
+            if (null !== $only) {
+                foreach (array_keys($definitions) as $alias) {
+                    if ($only->covers($alias)) {
+                        $phpStanOnly[$alias] = ClassFileTypes::phpStanOnlyReason($alias, $className);
+                    }
+                }
+                $definitions = array_diff_key($definitions, $phpStanOnly);
             }
             // A class may declare what it serialises to by importing a type as its `_self`
             // rather than writing the shape itself; it then has nothing of its own to emit.
@@ -50,19 +61,14 @@ final class PhpDocTypeCollector
                 continue;
             }
 
-            // An import whose target is outside the source tree fails only an alias that uses it: a
-            // file may import anything for its own code.
-            $read = $this->docHelper->extractImportedTypesLeniently(
-                content: $content,
-                ownerClass: $className,
-                srcDir: $srcDir,
-                classFiles: $classFiles,
-                shortNameMap: $shortNameMap,
-                domainGuesser: $this->domainGuesser,
-            );
+            // An import that can't be emitted fails only an alias that uses it: a file may import
+            // anything for its own code. A `_self` imported from an alias kept for PHPStan is still
+            // recorded as the class's, and fails where something names the class.
+            $read = $this->files->imports($className, $file, $srcDir, $classFiles);
             $imports = $read['imports'];
+            $unresolved = [...$read['unresolved'], ...$read['phpStanOnly'], ...$phpStanOnly];
 
-            $classImports = $this->docHelper->classImports($content);
+            $classImports = $this->files->classImports($file);
             $localAliases = array_keys($definitions);
 
             $domain = $this->domainGuesser->guess($srcDir, $file);
@@ -76,9 +82,9 @@ final class PhpDocTypeCollector
             }
 
             foreach ($definitions as $alias => $definition) {
-                $unresolved = $this->docHelper->unresolvedImportUsedIn($definition, $read['unresolved'], \sprintf('The @phpstan-type %s on %s', $alias, $className));
-                if (null !== $unresolved) {
-                    throw $unresolved;
+                $failure = $this->docHelper->unresolvedImportUsedIn($definition, $unresolved, \sprintf('The @phpstan-type %s on %s', $alias, $className));
+                if (null !== $failure) {
+                    throw $failure;
                 }
 
                 $emittedName = $this->docHelper->emittedTypeName($alias, $className);
@@ -110,20 +116,5 @@ final class PhpDocTypeCollector
         ksort($domains);
 
         return $domains;
-    }
-
-    /**
-     * The class's say on which of its aliases are for PHPStan alone — typing arrays that are
-     * never serialised — so they are not emitted.
-     */
-    private function phpStanOnly(string $className): ?PhpStanOnly
-    {
-        if (!class_exists($className) && !interface_exists($className) && !trait_exists($className) && !enum_exists($className)) {
-            return null;
-        }
-
-        $attributes = (new ReflectionClass($className))->getAttributes(PhpStanOnly::class);
-
-        return [] === $attributes ? null : $attributes[0]->newInstance();
     }
 }

@@ -47,19 +47,18 @@ final readonly class TypeToTsConverter
     private const string BARE_PROPERTY_NAME = '/^(?:[A-Za-z_$][A-Za-z0-9_$]*|0|[1-9][0-9]*)$/';
 
     /**
-     * The type of the class a name carries, where it is the class that the name means: in a scope
-     * that is the writing file's own, whenever the class has a type; otherwise only where no alias
-     * of the module has that name. Null where the name is the module's alias.
+     * The type of the class a name carries, where it is the class that the name means: where no
+     * alias of the module it is written in has that name. Null where the name is that module's alias.
+     *
+     * @param string $aliasDomain the module the name is written in ({@see ConversionScope::$aliasDomain})
      */
-    public function classSymbol(NameRefType $type, string $domain, bool $fileScoped): ?EmitImport
+    public function classSymbol(NameRefType $type, string $aliasDomain): ?EmitImport
     {
-        if (null === $type->class || null === $this->classTypes) {
+        if (null === $type->class || null === $this->classTypes || $this->symbols->has($aliasDomain, $type->name)) {
             return null;
         }
 
-        $symbol = $fileScoped ? $this->classTypes->tryResolve($type->class) : null;
-
-        return $symbol ?? ($this->symbols->has($domain, $type->name) ? null : $this->classTypes->resolve($type->class));
+        return $this->classTypes->resolve($type->class);
     }
 
     /**
@@ -70,6 +69,15 @@ final readonly class TypeToTsConverter
     public static function propertyName(string $name): string
     {
         return 1 === preg_match(self::BARE_PROPERTY_NAME, $name) ? $name : self::stringLiteral($name);
+    }
+
+    /**
+     * What a symbol of a module is called where the scope is emitted: its own name in the same
+     * module, else the name it is imported under.
+     */
+    private static function localName(string $domain, string $symbol, ConversionScope $scope): string
+    {
+        return $domain === $scope->domain ? $symbol : $scope->foreignAliases[$domain][$symbol] ?? $symbol;
     }
 
     public static function stringLiteral(string $value): string
@@ -172,17 +180,15 @@ final readonly class TypeToTsConverter
             }
 
             // A name no alias answers to, written where it means a class: the JSON the class
-            // serialises to. An alias of the same name in the module wins — unless the scope is the
-            // writing file's own (an inherited property), which already said the name is no alias
-            // of its, and the class has a type to name.
-            $symbol = $this->classSymbol($type, $scope->domain, $scope->fileScoped);
+            // serialises to. An alias of the same name in the module it is written in always wins —
+            // the module's, or for an inherited property its base's, whichever module emits it.
+            $aliasDomain = $scope->aliasDomain ?? $scope->domain;
+            $symbol = $this->classSymbol($type, $aliasDomain);
             if (null !== $symbol) {
-                return $symbol->targetDomain === $scope->domain
-                    ? $symbol->canonicalName
-                    : $scope->foreignAliases[$symbol->targetDomain][$symbol->canonicalName] ?? $symbol->canonicalName;
+                return self::localName($symbol->targetDomain, $symbol->canonicalName, $scope);
             }
 
-            return $this->symbols->resolve($scope->domain, $type->name);
+            return self::localName($aliasDomain, $this->symbols->resolve($aliasDomain, $type->name), $scope);
         }
 
         if ($type instanceof TupleType) {
@@ -200,7 +206,7 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof ShapeType) {
             $fields = array_map(function (ShapeField $field) use ($scope): string {
-                $optional = $field->mayBeLeftOut() || $this->isIncluded($field->type);
+                $optional = $field->mayBeLeftOut($scope->inQuery) || $this->isIncluded($field->type);
                 // `key: ?T` is emitted `key?: T`: left out, not sent as null.
                 $fieldType = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
 

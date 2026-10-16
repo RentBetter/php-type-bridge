@@ -33,7 +33,7 @@ final class ClassTypeResolver
     /** @var array<string, CollectedDomain> */
     private array $domains;
 
-    /** @var array<string, EmitImport|null> null where the class has no type */
+    /** @var array<string, EmitImport> */
     private array $resolved = [];
 
     /**
@@ -58,30 +58,10 @@ final class ClassTypeResolver
 
     public function resolve(string $class): EmitImport
     {
-        return $this->tryResolve($class) ?? throw new RuntimeException(\sprintf(
-            'A shape names %s as a type, meaning the JSON it serialises to, but neither it nor a parent or '
-            . 'interface declares a `_self` shape, and no emitter publishes a type for it. Give it a '
-            . '`@phpstan-type _self` describing what jsonSerialize() returns — or, if the shape naming it is '
-            . 'never serialised, mark that shape\'s class #[PhpStanOnly].',
-            $class,
-        ));
+        return $this->resolved[$class] ??= $this->lookUp($class);
     }
 
-    /**
-     * The JSON type a class serialises to, or null where nothing says what that is (no `_self`, no
-     * emitter) — for a caller with a fallback of its own. A class that does say, wrongly — no such
-     * class, a `_self` imported from a type never emitted — is still an error.
-     */
-    public function tryResolve(string $class): ?EmitImport
-    {
-        if (!\array_key_exists($class, $this->resolved)) {
-            $this->resolved[$class] = $this->lookUp($class);
-        }
-
-        return $this->resolved[$class];
-    }
-
-    private function lookUp(string $class): ?EmitImport
+    private function lookUp(string $class): EmitImport
     {
         if (!class_exists($class) && !interface_exists($class) && !enum_exists($class)) {
             throw new RuntimeException(\sprintf('A shape names "%s" as a type, and there is no such class.', $class));
@@ -101,8 +81,17 @@ final class ClassTypeResolver
         }
 
         $emitter = $this->registry->typeSymbolEmitterFor($reflection);
+        if (null !== $emitter) {
+            return $this->rootSources->place($emitter->typeSymbol($reflection), $reflection);
+        }
 
-        return null === $emitter ? null : $this->rootSources->place($emitter->typeSymbol($reflection), $reflection);
+        throw new RuntimeException(\sprintf(
+            'A shape names %s as a type, meaning the JSON it serialises to, but neither it nor a parent or '
+            . 'interface declares a `_self` shape, and no emitter publishes a type for it. Give it a '
+            . '`@phpstan-type _self` describing what jsonSerialize() returns — or, if the shape naming it is '
+            . 'never serialised, mark that shape\'s class #[PhpStanOnly].',
+            $class,
+        ));
     }
 
     /**

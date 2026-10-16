@@ -12,6 +12,7 @@ use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
+use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
@@ -25,8 +26,7 @@ final class ResponseClassCollector
     /** @var array<string, array<class-string, CollectedApiResponseClass>> by source directory */
     private array $indexes = [];
 
-    /** @var array<string, array{imports: array<string, ImportedType>, unresolved: array<string, string>, classImports: array<string, string>}> by source directory and class */
-    private array $typeContexts = [];
+    private readonly ClassFileTypes $files;
 
     public function __construct(
         private readonly StatusCodeResolver $statusCodeResolver = new StatusCodeResolver(),
@@ -34,7 +34,10 @@ final class ResponseClassCollector
         private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
-    ) {}
+        ?ClassFileTypes $files = null,
+    ) {
+        $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
+    }
 
     /**
      * @return array<string, list<CollectedApiResponseClass>>
@@ -69,7 +72,6 @@ final class ResponseClassCollector
     private function readIndex(string $srcDir): array
     {
         $classFiles = $this->classLocator->classesIn($srcDir);
-        $shortNameMap = $this->classLocator->shortNameMap(array_keys($classFiles));
         $responses = [];
 
         foreach ($classFiles as $className => $file) {
@@ -83,7 +85,7 @@ final class ResponseClassCollector
             }
 
             $this->statusCodeResolver->assertResponseClass($reflection);
-            $context = $this->typeContext($className, $file, $srcDir, $classFiles, $shortNameMap);
+            $context = $this->typeContext($className, $file, $srcDir, $classFiles);
             if (null === $context) {
                 continue;
             }
@@ -100,10 +102,9 @@ final class ResponseClassCollector
                 // subscriber writes every public property — so it is published too. Every property
                 // is read in the file it is written in — the class's, a base class's, a trait's — and
                 // converted in that file's scope, whatever another file imports under the same
-                // names. Only a file in the source tree counts: a library's is not the contract.
-                $declaringClass = self::writtenIn($property, $classFiles);
-                $declaringFile = $classFiles[$declaringClass] ?? null;
-                $declared = null === $declaringFile ? null : $this->typeContext($declaringClass, $declaringFile, $srcDir, $classFiles, $shortNameMap);
+                // names, and whichever module the response is in.
+                $declaringClass = self::writtenIn($property, $reflection, $classFiles);
+                $declared = $this->typeContext($declaringClass, $classFiles[$declaringClass], $srcDir, $classFiles);
                 if (null === $declared) {
                     continue;
                 }
@@ -126,6 +127,7 @@ final class ResponseClassCollector
                     optional: $parsed instanceof NullableType && $parsed->optional,
                     imports: array_values($declared['imports']),
                     writtenIn: $declaringClass === $className ? null : $declaringClass,
+                    writtenInDomain: $declaringClass === $className ? null : $declared['domain'],
                 );
             }
 
@@ -147,38 +149,30 @@ final class ResponseClassCollector
     }
 
     /**
-     * What a class's file says its types mean, read once per class: the types it imports and the
+     * The scope a property written in a class's file is read in: the types the file imports and the
      * aliases it declares itself — both as imports, the latter from its own module, so a property
-     * converted in this scope finds them wherever it is emitted — and the classes it `use`s. An
-     * import whose target is outside the source tree is set aside rather than thrown: a file may
-     * import anything for its own code, and it fails only a published property typed with it.
+     * converted in this scope finds them wherever it is emitted — the classes it `use`s, and its
+     * module. An import that can't be emitted, and an alias the class keeps for PHPStan, are set
+     * aside: they fail only a published property typed with them.
      *
      * @param array<string, string> $classFiles
-     * @param array<string, list<string>> $shortNameMap
-     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>, classImports: array<string, string>}|null
+     *
+     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>, classImports: array<string, string>, domain: string}|null
      */
-    private function typeContext(string $className, string $file, string $srcDir, array $classFiles, array $shortNameMap): ?array
+    private function typeContext(string $className, string $file, string $srcDir, array $classFiles): ?array
     {
-        $key = $srcDir . "\0" . $className;
-        if (isset($this->typeContexts[$key])) {
-            return $this->typeContexts[$key];
-        }
-
-        $content = file_get_contents($file);
-        if (false === $content) {
+        if (null === $this->files->content($file)) {
             return null;
         }
 
-        $read = $this->docHelper->extractImportedTypesLeniently($content, $className, $srcDir, $classFiles, $shortNameMap, $this->domainGuesser);
-        $imports = $read['imports'];
-        $unresolved = $read['unresolved'];
+        $read = $this->files->imports($className, $file, $srcDir, $classFiles);
+        $imports = array_diff_key($read['imports'], $read['phpStanOnly']);
+        $unresolved = [...$read['unresolved'], ...$read['phpStanOnly']];
         $domain = $this->domainGuesser->guess($srcDir, $file);
-        $phpStanOnly = (class_exists($className) || trait_exists($className)) ? ((new ReflectionClass($className))->getAttributes(PhpStanOnly::class)[0] ?? null)?->newInstance() : null;
-        foreach (array_keys($this->docHelper->extractPhpStanTypes($content)) as $alias) {
-            // An alias for PHPStan alone is never emitted, so there is nothing to import it from —
-            // and a published property typed with it is a contradiction, failed where it is read.
+        $phpStanOnly = PhpStanOnly::of($className);
+        foreach (array_keys($this->files->definitions($file)) as $alias) {
             if (null !== $phpStanOnly && $phpStanOnly->covers($alias)) {
-                $unresolved[$alias] = \sprintf('"%s" is #[PhpStanOnly] on %s: it is never emitted, so nothing sent can be typed with it.', $alias, $className);
+                $unresolved[$alias] = ClassFileTypes::phpStanOnlyReason($alias, $className);
 
                 continue;
             }
@@ -191,24 +185,27 @@ final class ResponseClassCollector
             );
         }
 
-        return $this->typeContexts[$key] = [
+        return [
             'imports' => $imports,
             'unresolved' => $unresolved,
-            'classImports' => $this->docHelper->classImports($content),
+            'classImports' => $this->files->classImports($file),
+            'domain' => $domain,
         ];
     }
-
 
     /**
      * The class or trait whose file a property is written in. Reflection names the class a trait's
      * property is used in; the trait that declares it — the innermost, its doc comment the
-     * property's — is where its annotation was written and its names are imported. A trait outside
-     * the source tree has no file read here, so its property is read in the nearest one that does,
-     * as it was before traits were followed: the subscriber sends it all the same.
+     * property's — is where its annotation was written and its names are imported.
      *
-     * @param array<string, string> $classFiles
+     * A file outside the source tree — a library's trait or base class — is not read here, so its
+     * property is read in the nearest file of the tree that has it: the class using the trait, or
+     * the class of the tree nearest the library's base. The subscriber sends it all the same.
+     *
+     * @param ReflectionClass<object> $response
+     * @param array<string, string>   $classFiles
      */
-    private static function writtenIn(ReflectionProperty $property, array $classFiles): string
+    private static function writtenIn(ReflectionProperty $property, ReflectionClass $response, array $classFiles): string
     {
         $class = $property->getDeclaringClass();
         $traits = $class->getTraits();
@@ -219,8 +216,18 @@ final class ResponseClassCollector
                 $traits = $trait->getTraits();
             }
         }
+        if (isset($classFiles[$class->getName()])) {
+            return $class->getName();
+        }
 
-        return $class->getName();
+        $nearest = $response->getName();
+        for ($current = $response; false !== $current && $current->getName() !== $class->getName(); $current = $current->getParentClass()) {
+            if (isset($classFiles[$current->getName()])) {
+                $nearest = $current->getName();
+            }
+        }
+
+        return $nearest;
     }
 
     private function resolvePropertyType(ReflectionProperty $property): string

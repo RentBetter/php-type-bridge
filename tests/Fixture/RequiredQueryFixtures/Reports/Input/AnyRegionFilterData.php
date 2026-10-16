@@ -12,10 +12,13 @@ namespace PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Input;
  * }
  * @phpstan-type _self = RegionScope & array{
  *     page?: int,
+ *     range?: array{from: string|null},
  * }
  */
 final class AnyRegionFilterData
 {
     public ?string $region = null;
     public ?int $page = null;
+    /** @var array{from: string|null}|null */
+    public ?array $range = null;
 }

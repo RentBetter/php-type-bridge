@@ -11,7 +11,7 @@ use Symfony\Component\Routing\Attribute\Route;
 
 final class CodeController
 {
-    #[Route('/codes/{code}', requirements: ['code' => '[A-Z]+-[0-9]+'], methods: ['GET'])]
+    #[Route('/codes/{code}/{page}', requirements: ['code' => '[A-Z]+-[0-9]+', 'page' => '[a-z]+'], methods: ['GET'])]
     #[ApiResponses([CodeResponse::class])]
     #[McpTool(description: 'A code.')]
     public function showCodeAction(): CodeResponse

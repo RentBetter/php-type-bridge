@@ -31,6 +31,7 @@ final readonly class EmitContext
      * @param array<string, true>                   $preserveNullIndex keyed by "ShapeName.fieldName"
      * @param list<string>                          $candidateClasses every class in the generation run (for emitters that scan, e.g. a common-module emitter)
      * @param IncludeConvention                     $includes what shapes a response on request, and the query parameters that ask
+     * @param array<class-string, CollectedInputReference> $queries every endpoint's query, by the class whose `_self` it is
      */
     public function __construct(
         public string $domain,
@@ -46,6 +47,7 @@ final readonly class EmitContext
         private array $preserveNullIndex,
         public array $candidateClasses = [],
         public IncludeConvention $includes = new IncludeConvention(),
+        public array $queries = [],
     ) {}
 
     public function convert(ParsedType $type, ConversionScope $scope): string
@@ -58,20 +60,23 @@ final readonly class EmitContext
      * type names to the local symbol (alias-aware) it resolves to in this file.
      *
      * @param list<\PTGS\TypeBridge\Model\ImportedType> $imports
+     * @param string|null $aliasDomain the module a bare name is an alias of, where it is not this one
+     *        ({@see ConversionScope::$aliasDomain})
+     * @param bool $inQuery whether the declaration is a query's ({@see ConversionScope::$inQuery})
      */
-    public function scopeFor(array $imports, bool $fileScoped = false): ConversionScope
+    public function scopeFor(array $imports, ?string $aliasDomain = null, bool $inQuery = false): ConversionScope
     {
         $symbols = [];
         foreach ($imports as $importedType) {
-            // A file may import, or declare, what is never emitted (a #[PhpStanOnly] alias): it is
-            // no symbol here, and a type that does use it fails where it is converted, naming it.
+            // A class may declare what is never emitted (a #[PhpStanOnly] alias): it is no symbol
+            // here. The collectors fail what is typed with one, imported or declared.
             if (!$this->symbols->has($importedType->targetDomain, $importedType->targetTypeName)) {
                 continue;
             }
             $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
         }
 
-        return new ConversionScope($this->domain, $symbols, $this->foreignAliases, $fileScoped);
+        return new ConversionScope($this->domain, $symbols, $this->foreignAliases, $aliasDomain === $this->domain ? null : $aliasDomain, $inQuery);
     }
 
     public function localReferenceFor(string $foreignDomain, string $name): string

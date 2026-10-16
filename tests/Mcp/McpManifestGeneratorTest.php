@@ -77,8 +77,10 @@ final class McpManifestGeneratorTest extends TestCase
         $dir = __DIR__ . '/../Fixture/RequirementRoutedMcpFixtures';
         $manifest = (new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir));
 
-        $code = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties']['code'] ?? null;
-        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]{2,5}-[0-9]+|[0-9]+)$'], $code);
+        $properties = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties'] ?? [];
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]{2,5}-[0-9]+|[0-9]+)$'], $properties['code'] ?? null);
+        // And what it is: the import's `[0-9]+` is a number.
+        self::assertSame(['type' => 'number'], $properties['page'] ?? null);
     }
 
     public function testWithoutRoutingTheAttributePathStands(): void

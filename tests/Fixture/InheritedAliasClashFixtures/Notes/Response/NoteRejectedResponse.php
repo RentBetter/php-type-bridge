@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Tests\Fixture\InheritedAliasClashFixtures\Notes\Response;
 
-use PTGS\TypeBridge\Tests\Fixture\InheritedAliasClashFixtures\Common\Response\AbstractErrorResponse;
 use PTGS\TypeBridge\Status\HttpConflict;
+use PTGS\TypeBridge\Tests\Fixture\InheritedAliasClashFixtures\Common\Response\AbstractErrorResponse;
 
 /**
  * Imports another shape under the alias its base class uses.

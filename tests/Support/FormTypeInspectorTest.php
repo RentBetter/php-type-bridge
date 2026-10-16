@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Support;
 
 use PHPUnit\Framework\TestCase;
-use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Support\FormTypeInspector;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectNoteType;
@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NestedBrokenReq
 use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NonContractRootType;
 use RuntimeException;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\NotNull;
 
@@ -102,7 +103,8 @@ final class FormTypeInspectorTest extends TestCase
 
         $kinds = array_map(static fn(object $constraint): string => $constraint::class, $fields['labels']->entryConstraints);
         self::assertSame([NotNull::class], $kinds, 'LabelType sets a NotNull of its own');
-        self::assertSame([], $fields['notes']->entryConstraints, "A NotNull only in the 'strict' group never sees a request");
+        $kinds = array_map(static fn(object $constraint): string => $constraint::class, $fields['notes']->entryConstraints);
+        self::assertSame([Length::class], $kinds, "A NotNull only in the 'strict' group never sees a request, given to the entry or by an All");
     }
 
     public function test_a_field_rebuilt_with_its_declared_contracts_keeps_what_the_form_does_to_it(): void

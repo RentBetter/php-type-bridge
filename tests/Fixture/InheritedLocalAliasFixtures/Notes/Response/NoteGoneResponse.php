@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Tests\Fixture\InheritedLocalAliasFixtures\Notes\Response;
 
-use PTGS\TypeBridge\Tests\Fixture\InheritedLocalAliasFixtures\Common\Response\AbstractEnvelopeResponse;
 use PTGS\TypeBridge\Status\HttpGone;
+use PTGS\TypeBridge\Tests\Fixture\InheritedLocalAliasFixtures\Common\Response\AbstractEnvelopeResponse;
 
 final class NoteGoneResponse extends AbstractEnvelopeResponse implements HttpGone
 {

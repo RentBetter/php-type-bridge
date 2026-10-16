@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Tests\Fixture\InheritedResponseFixtures\Notes\Response;
 
-use PTGS\TypeBridge\Tests\Fixture\InheritedResponseFixtures\Common\Response\AbstractErrorResponse;
 use PTGS\TypeBridge\Status\HttpGone;
+use PTGS\TypeBridge\Tests\Fixture\InheritedResponseFixtures\Common\Response\AbstractErrorResponse;
 
 /** In another domain than the base class and the shape its property names. */
 final class NoteGoneResponse extends AbstractErrorResponse implements HttpGone

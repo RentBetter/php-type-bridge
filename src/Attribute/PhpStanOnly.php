@@ -29,4 +29,18 @@ final readonly class PhpStanOnly
     {
         return [] === $this->aliases || \in_array($alias, $this->aliases, true);
     }
+
+    /**
+     * The class's say on which of its aliases are for PHPStan alone; null where it says none are.
+     */
+    public static function of(string $class): ?self
+    {
+        if (!class_exists($class) && !interface_exists($class) && !trait_exists($class) && !enum_exists($class)) {
+            return null;
+        }
+
+        $attributes = (new \ReflectionClass($class))->getAttributes(self::class);
+
+        return [] === $attributes ? null : $attributes[0]->newInstance();
+    }
 }

@@ -249,7 +249,7 @@ final class McpManifestBuilder
 
     /**
      * Whether the key takes null as a value: the contract admits a null that is sent and means
-     * something — an update's "clear this" — and its validation does not refuse it.
+     * something — an update's "clear this" — and its form and validation do not refuse it.
      */
     private function takesNull(?ShapeField $key, CollectedFormField $field): bool
     {
@@ -257,11 +257,19 @@ final class McpManifestBuilder
             return false;
         }
 
+        // An embedded form is never set to null: Symfony submits a compound form's children, and a
+        // null sent for the form is an empty array that clears each of them — a 422 from a child's
+        // NotBlank, or a record of nulls. A list's null is an empty list, which does clear it; and
+        // a form that takes a record's id as well (`string|array{…}|null`) reads what is sent
+        // itself, before it is submitted, so its null is the "none" it declares.
+        if ($field->compound && [] !== $field->children && [] === $this->declaredScalars($key->type)) {
+            return false;
+        }
+
         // A contract one create and one update share says `string|null`; a NotNull, or a NotBlank
         // that does not allow null, still refuses it with a 422.
         return !self::refusesBlank($field);
     }
-
 
     /**
      * The schema with null among what it accepts: a `null` type beside its own (in `anyOf`, or as
@@ -408,10 +416,6 @@ final class McpManifestBuilder
     }
 
     /**
-     * The JSON Schema type of a scalar the contract declares. A form type's name is a guess at
-     * this (a CheckboxType binds a boolean and says so nowhere in its name); the contract states it.
-     */
-    /**
      * A declared shape as JSON Schema, or null when any part of it names a type stated elsewhere
      * (an alias, a generic, a class constant) that the builder cannot read here.
      *
@@ -428,7 +432,7 @@ final class McpManifestBuilder
             }
 
             $properties[$key->name] = $schema;
-            if (!$key->mayBeLeftOut()) {
+            if (!$key->mayBeLeftOut(inQuery: !$json)) {
                 $required[] = $key->name;
             }
         }
@@ -521,6 +525,10 @@ final class McpManifestBuilder
         return $json && $null && [] !== $members ? self::withNull($schema) : $schema;
     }
 
+    /**
+     * The JSON Schema type of a scalar the contract declares. A form type's name is a guess at
+     * this (a CheckboxType binds a boolean and says so nowhere in its name); the contract states it.
+     */
     private function declaredScalar(?ParsedType $declared): ?string
     {
         if ($declared instanceof NullableType) {

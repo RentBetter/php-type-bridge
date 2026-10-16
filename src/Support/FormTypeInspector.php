@@ -97,6 +97,7 @@ final class FormTypeInspector
             $propertyPath = $this->resolvePropertyPath($config, $name);
             $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
             $constraints = $this->collectConstraints($config, $property);
+            $entry = $this->entryBuilder($config);
 
             $fields[] = new CollectedFormField(
                 name: $name,
@@ -107,20 +108,20 @@ final class FormTypeInspector
                 dataClass: $config->getDataClass(),
                 propertyPath: $propertyPath,
                 entryTypeClass: $this->resolveEntryTypeClass($config),
-                entryDataClass: $this->resolveEntryDataClass($config),
+                entryDataClass: self::entryDataClass($entry),
                 enumClass: $this->resolveStringOption($config, 'class'),
                 input: $this->resolveStringOption($config, 'input'),
                 multiple: $this->isMultipleChoice($config),
                 hasModelTransformers: [] !== $config->getModelTransformers(),
                 hasViewTransformers: [] !== $config->getViewTransformers(),
                 children: $this->collectFields($child),
-                entryChildren: $this->collectEntryFields($config),
+                entryChildren: null !== $entry && $entry->getCompound() ? $this->collectFields($entry) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
                 trim: false !== $this->resolveOption($config, 'trim'),
                 blankStaysString: self::keepsBlankAString($config),
-                entryConstraints: $this->entryConstraints($config, $constraints),
+                entryConstraints: $this->entryConstraints($entry, $constraints),
             );
         }
 
@@ -147,32 +148,26 @@ final class FormTypeInspector
     }
 
     /**
-     * What each entry of a collection is held to: the constraints its `entry_options` give the
-     * entry field, and those an All on the collection's own constraints applies to every entry.
+     * What each entry of a collection is held to: the constraints its entry type gives it — its own
+     * and its `entry_options`', resolved as the collection builds each entry — and those an All on
+     * the collection's own constraints applies to every entry, Default group alone in both.
      *
-     * @param FormConfigInterface<mixed> $config
-     * @param list<Constraint>           $constraints the collection field's own
+     * @param FormBuilderInterface<mixed>|null $entry       the collection's entry, built as it builds one
+     * @param list<Constraint>                 $constraints the collection field's own
      *
      * @return list<Constraint>
      */
-    private function entryConstraints(FormConfigInterface $config, array $constraints): array
+    private function entryConstraints(?FormBuilderInterface $entry, array $constraints): array
     {
-        $entry = [];
-        $entryOptions = $this->resolveOption($config, 'entry_options');
-        $option = \is_array($entryOptions) ? $entryOptions['constraints'] ?? [] : [];
-        foreach (\is_array($option) ? $option : [$option] as $constraint) {
-            if ($constraint instanceof Constraint) {
-                $entry[] = $constraint;
-            }
-        }
+        $held = null === $entry ? [] : $this->collectConstraints($entry->getFormConfig(), null);
         foreach ($constraints as $constraint) {
             if ($constraint instanceof All) {
                 $nested = \is_array($constraint->constraints) ? $constraint->constraints : [$constraint->constraints];
-                $entry = [...$entry, ...array_values(array_filter($nested, static fn(mixed $one): bool => $one instanceof Constraint))];
+                $held = [...$held, ...array_values(array_filter($nested, static fn(mixed $one): bool => $one instanceof Constraint && self::isValidatedByDefault($one)))];
             }
         }
 
-        return $entry;
+        return $held;
     }
 
     /**
@@ -242,11 +237,17 @@ final class FormTypeInspector
             $constraints = [...$constraints, ...$this->propertyConstraints($property)];
         }
 
-        return array_values(array_filter($constraints, static function (Constraint $constraint): bool {
-            $groups = $constraint->groups;
+        return array_values(array_filter($constraints, self::isValidatedByDefault(...)));
+    }
 
-            return null === $groups || \in_array(Constraint::DEFAULT_GROUP, $groups, true);
-        }));
+    /**
+     * Whether a request is validated against the constraint: it is in the Default group.
+     */
+    private static function isValidatedByDefault(Constraint $constraint): bool
+    {
+        $groups = $constraint->groups;
+
+        return null === $groups || \in_array(Constraint::DEFAULT_GROUP, $groups, true);
     }
 
     /**
@@ -288,25 +289,28 @@ final class FormTypeInspector
     }
 
     /**
-     * A collection's entries do not exist on the builder — only a prototype does — so a
-     * compound entry type is built on its own and its fields collected, giving the
-     * emitters the shape of each item rather than an opaque entry class.
+     * A collection's entries do not exist on the builder — only a prototype does — so its entry type
+     * is built on its own, with the collection's `entry_options` as each entry is: the emitters get
+     * the shape of an item, not an opaque entry class, and what an item is held to.
      *
      * @param FormConfigInterface<mixed> $config
      *
-     * @return list<CollectedFormField>
+     * @return FormBuilderInterface<mixed>|null null for a field that is no collection
      */
-    private function collectEntryFields(FormConfigInterface $config): array
+    private function entryBuilder(FormConfigInterface $config): ?FormBuilderInterface
     {
         $entryTypeClass = $this->resolveEntryTypeClass($config);
         if (null === $entryTypeClass) {
-            return [];
+            return null;
         }
 
+        $entryOptions = $this->resolveOption($config, 'entry_options');
+
         try {
-            $entryBuilder = $this->formFactory->createNamedBuilder(
+            return $this->formFactory->createNamedBuilder(
                 name: '__entry__',
                 type: $entryTypeClass,
+                options: \is_array($entryOptions) ? $entryOptions : [],
             );
         } catch (OptionsException|FormException $exception) {
             // Same fact as a top-level form that cannot be built, one level down: a collection
@@ -321,12 +325,6 @@ final class FormTypeInspector
                 $exception->getMessage(),
             ), previous: $exception);
         }
-
-        if (!$entryBuilder->getCompound()) {
-            return [];
-        }
-
-        return $this->collectFields($entryBuilder);
     }
 
     /**
@@ -403,36 +401,12 @@ final class FormTypeInspector
     }
 
     /**
-     * @param FormConfigInterface<mixed> $config
+     * @param FormBuilderInterface<mixed>|null $entry
      */
-    private function resolveEntryDataClass(FormConfigInterface $config): ?string
+    private static function entryDataClass(?FormBuilderInterface $entry): ?string
     {
-        $entryTypeClass = $this->resolveEntryTypeClass($config);
-        if (null === $entryTypeClass) {
-            return null;
-        }
-
-        try {
-            $entryBuilder = $this->formFactory->createNamedBuilder(
-                name: '__entry__',
-                type: $entryTypeClass,
-            );
-        } catch (OptionsException|FormException $exception) {
-            // Same fact as a top-level form that cannot be built, one level down: a collection
-            // whose entry type needs options — an EnumType without its `class`, say — cannot be
-            // inspected either. This build sits inside collectFields(), which runs *outside*
-            // inspect()'s try, so without catching it here the exception leaves the inspector
-            // entirely and PHPStan reports an internal error and abandons the whole run rather
-            // than reporting the one form.
-            throw new RuntimeException(\sprintf(
-                'Collection entry type "%s" cannot be built for inspection: %s Give the option a default, or keep the form off the contract surface.',
-                $entryTypeClass,
-                $exception->getMessage(),
-            ), previous: $exception);
-        }
-
         /** @var class-string|null $dataClass */
-        $dataClass = $entryBuilder->getOption('data_class');
+        $dataClass = $entry?->getOption('data_class');
 
         return $dataClass;
     }

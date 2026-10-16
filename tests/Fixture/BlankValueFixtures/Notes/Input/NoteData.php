@@ -20,5 +20,6 @@ final class NoteData
     /** @var list<string|null> */
     public array $labels = [];
     /** @var list<string|null> */
+    #[Assert\All([new Assert\NotNull(groups: ['strict']), new Assert\Length(max: 50)])]
     public array $notes = [];
 }

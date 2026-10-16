@@ -92,7 +92,8 @@ final class EndpointQueryTest extends TestCase
 
         self::assertStringContainsString('export const ListAnyRegionReports: Endpoint<ListAnyRegionReportsEndpointMap, { query?: ListAnyRegionReportsQuery }> = {', $reports);
         self::assertStringContainsString("export interface RegionScope {\n  region: string | null;\n}", $reports);
-        self::assertStringContainsString("export interface AnyRegionFilterData extends Omit<RegionScope, 'region'> {\n  region?: RegionScope['region'];\n  page?: number;\n}", $reports);
+        // And inside a shape it sends, too.
+        self::assertStringContainsString("export interface AnyRegionFilterData extends Omit<RegionScope, 'region'> {\n  region?: RegionScope['region'];\n  page?: number;\n  range?: { from?: string | null };\n}", $reports);
     }
 
     public function test_keys_inherited_through_a_base_that_cant_be_read_are_unknown_not_partial(): void

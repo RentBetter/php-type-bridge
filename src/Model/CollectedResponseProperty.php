@@ -9,19 +9,21 @@ use PTGS\TypeBridge\Parser\ParsedType;
 final readonly class CollectedResponseProperty
 {
     /**
-     * @param list<ImportedType>|null $imports what its annotation was read against: the imports and
-     *        aliases of the file it is written in, so it is converted in that file's scope. Null only
-     *        for a property built without them, which is read against the response's imports.
+     * @param list<ImportedType> $imports what its annotation was read against: the imports and aliases
+     *        of the file it is written in, so it is converted in that file's scope
      * @param string|null $writtenIn the class or trait whose file it is written in, when that is not
-     *        the response's own — a base class, a trait. Such a scope is that file's alone: a name it
-     *        writes for a class means the class, whatever the emitting module declares under it.
+     *        the response's own — a base class, a trait
+     * @param string|null $writtenInDomain the module that file is in, when it is written elsewhere:
+     *        a bare name in it is that module's alias, as it would be in the module's own files,
+     *        whichever module the response is emitted in
      */
     public function __construct(
         public string $name,
         public string $rawType,
         public ParsedType $parsed,
+        public array $imports,
         public bool $optional = false,
-        public ?array $imports = null,
         public ?string $writtenIn = null,
+        public ?string $writtenInDomain = null,
     ) {}
 }

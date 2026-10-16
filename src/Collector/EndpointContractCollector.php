@@ -12,7 +12,6 @@ use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
-use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Parser\IntersectionType;
@@ -22,6 +21,7 @@ use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\AttributeText;
+use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
@@ -36,14 +36,8 @@ final class EndpointContractCollector
     /** @var array<string, string> requirement regex => TS type */
     private readonly array $requirementTypes;
 
-    /** @var array<string, array<string, list<string>>> by source directory */
-    private array $shortNameMaps = [];
-
-    /** @var array<string, array{content: string, definitions: array<string, string>}|false> a base's file, read once however many queries inherit from it */
-    private array $readFiles = [];
-
-    /** @var array<string, array<string, ImportedType>> a class's imports by source directory and class, parsed once */
-    private array $importsByClass = [];
+    /** A base's file, read once however many queries inherit from it. */
+    private readonly ClassFileTypes $files;
 
     private readonly ?AttributeText $toolDescriptions;
 
@@ -79,7 +73,9 @@ final class EndpointContractCollector
         ?string $mcpDescriptionProperty = null,
         private readonly ?RoutePathResolver $routePathResolver = null,
         private readonly PhpDocShapeParser $shapeParser = new PhpDocShapeParser(),
+        ?ClassFileTypes $files = null,
     ) {
+        $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
         $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
         $this->toolDescriptions = null === $mcpDescriptionAttribute
             ? null
@@ -498,7 +494,9 @@ final class EndpointContractCollector
 
         $params = [];
         foreach ($matches[1] as $name) {
-            $requirement = $requirements[$name] ?? null;
+            // What a segment must look like, too, is the router's: an import's requirement
+            // overrides the attribute's as its `utf8` does.
+            $requirement = null !== $served ? $served->getRequirement($name) : $requirements[$name] ?? null;
             $requirement = \is_string($requirement) ? $requirement : null;
             $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
             $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8);
@@ -573,12 +571,7 @@ final class EndpointContractCollector
     private function contractOf(string $class, array $classFiles): ?ShapeType
     {
         $file = $classFiles[$class] ?? null;
-        $content = null === $file ? false : file_get_contents($file);
-        if (false === $content) {
-            return null;
-        }
-
-        $self = $this->docHelper->extractPhpStanTypes($content)['_self'] ?? null;
+        $self = null === $file ? null : $this->files->definitions($file)['_self'] ?? null;
 
         return null === $self ? null : $this->declaredShape($self);
     }
@@ -602,8 +595,7 @@ final class EndpointContractCollector
             ));
         }
 
-        $content = file_get_contents($file);
-        if (false === $content) {
+        if (null === $this->files->content($file)) {
             throw new RuntimeException(\sprintf(
                 'Input contract class "%s" could not be read from "%s".',
                 $ownerClass,
@@ -611,7 +603,7 @@ final class EndpointContractCollector
             ));
         }
 
-        $definitions = $this->docHelper->extractPhpStanTypes($content);
+        $definitions = $this->files->definitions($file);
         if (!isset($definitions['_self'])) {
             throw new RuntimeException(\sprintf(
                 'Input contract class "%s" must declare @phpstan-type _self.',
@@ -629,7 +621,7 @@ final class EndpointContractCollector
             fields: $fields,
             contract: self::shapeOf($self),
             inheritedContract: $query && $self instanceof IntersectionType
-                ? $this->inheritedShape($self, $definitions, $content, $ownerClass, $srcDir, $classFiles)
+                ? $this->inheritedShape($self, $ownerClass, $file, $srcDir, $classFiles)
                 : null,
         );
     }
@@ -640,12 +632,12 @@ final class EndpointContractCollector
      * target only re-imports to where it is declared — and through that shape's own base in turn.
      * Null when its base can't be read as a shape.
      *
-     * @param array<string, string> $definitions the aliases the file declares
+     * @param string                $class the class whose file the intersection is written in
      * @param array<string, string> $classFiles
      */
-    private function inheritedShape(IntersectionType $self, array $definitions, string $content, string $class, string $srcDir, array $classFiles, int $depth = 0): ?ShapeType
+    private function inheritedShape(IntersectionType $self, string $class, string $file, string $srcDir, array $classFiles, int $depth = 0): ?ShapeType
     {
-        $base = $depth > 8 ? null : $this->aliasDefinition($self->base->name, $definitions, $content, $class, $srcDir, $classFiles);
+        $base = $depth > 8 ? null : $this->aliasDefinition($self->base->name, $class, $file, $srcDir, $classFiles);
         $parsed = null === $base ? null : $this->parseType($base['definition']);
         $own = self::shapeOf($parsed);
         if (null === $base || null === $own) {
@@ -653,7 +645,7 @@ final class EndpointContractCollector
         }
 
         $further = $parsed instanceof IntersectionType
-            ? $this->inheritedShape($parsed, $base['definitions'], $base['content'], $base['class'], $srcDir, $classFiles, $depth + 1)
+            ? $this->inheritedShape($parsed, $base['class'], $base['file'], $srcDir, $classFiles, $depth + 1)
             : null;
         // A base further down that can't be read leaves what is inherited unknown, not the part read.
         if ($parsed instanceof IntersectionType && null === $further) {
@@ -667,43 +659,24 @@ final class EndpointContractCollector
      * Where an alias a file uses is declared: in the file, or in the class it is imported from —
      * as that class names it (its `_self`, or a named alias it may itself only import).
      *
-     * @param array<string, string> $definitions the aliases the file declares
      * @param array<string, string> $classFiles
      *
-     * @return array{definition: string, definitions: array<string, string>, content: string, class: string}|null
+     * @return array{definition: string, class: string, file: string}|null
      */
-    private function aliasDefinition(string $alias, array $definitions, string $content, string $class, string $srcDir, array $classFiles, int $depth = 0): ?array
+    private function aliasDefinition(string $alias, string $class, string $file, string $srcDir, array $classFiles, int $depth = 0): ?array
     {
-        if (isset($definitions[$alias])) {
-            return ['definition' => $definitions[$alias], 'definitions' => $definitions, 'content' => $content, 'class' => $class];
+        $definition = $this->files->definitions($file)[$alias] ?? null;
+        if (null !== $definition) {
+            return ['definition' => $definition, 'class' => $class, 'file' => $file];
         }
 
-        $import = $depth > 8 ? null : ($this->importsByClass[$srcDir . "\0" . $class] ??= $this->docHelper->extractImportedTypesLeniently($content, $class, $srcDir, $classFiles, $this->shortNameMap($srcDir, $classFiles), $this->domainGuesser)['imports'])[$alias] ?? null;
-        $file = null === $import ? null : $classFiles[$import->targetClass] ?? null;
-        $read = null === $file ? false : ($this->readFiles[$file] ??= self::typesIn(file_get_contents($file), $this->docHelper));
-        if (null === $import || false === $read) {
+        $import = $depth > 8 ? null : $this->files->imports($class, $file, $srcDir, $classFiles)['imports'][$alias] ?? null;
+        $target = null === $import ? null : $classFiles[$import->targetClass] ?? null;
+        if (null === $import || null === $target || null === $this->files->content($target)) {
             return null;
         }
 
-        return $this->aliasDefinition($import->sourceAlias ?? '_self', $read['definitions'], $read['content'], $import->targetClass, $srcDir, $classFiles, $depth + 1);
-    }
-
-    /**
-     * @return array{content: string, definitions: array<string, string>}|false
-     */
-    private static function typesIn(string|false $content, PhpDocTypeHelper $docHelper): array|false
-    {
-        return false === $content ? false : ['content' => $content, 'definitions' => $docHelper->extractPhpStanTypes($content)];
-    }
-
-    /**
-     * @param array<string, string> $classFiles
-     *
-     * @return array<string, list<string>>
-     */
-    private function shortNameMap(string $srcDir, array $classFiles): array
-    {
-        return $this->shortNameMaps[$srcDir] ??= $this->classLocator->shortNameMap(array_keys($classFiles));
+        return $this->aliasDefinition($import->sourceAlias ?? '_self', $import->targetClass, $target, $srcDir, $classFiles, $depth + 1);
     }
 
     /**
