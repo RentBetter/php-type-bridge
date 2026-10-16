@@ -12,6 +12,7 @@ use RuntimeException;
 use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
@@ -20,6 +21,7 @@ use Symfony\Component\Form\FormTypeInterface;
 use Symfony\Component\Form\Forms;
 use Symfony\Component\OptionsResolver\Exception\ExceptionInterface as OptionsException;
 use Symfony\Component\Validator\Constraint;
+use Symfony\Component\Validator\Constraints\All;
 use Symfony\Component\Validator\Constraints\Choice;
 use Symfony\Component\Validator\Validation;
 use Throwable;
@@ -117,10 +119,60 @@ final class FormTypeInspector
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
                 trim: false !== $this->resolveOption($config, 'trim'),
+                blankStaysString: self::keepsBlankAString($config),
+                entryConstraints: $this->entryConstraints($config, $constraints),
             );
         }
 
         return $fields;
+    }
+
+    /**
+     * Whether a blank value reaches validation as '' rather than null. A field with no view
+     * transformer turns '' into null; TextType, given `empty_data: ''`, adds itself as one so the
+     * value stays a string — null submitted included. Another type's transformer (a number's, a
+     * choice's) makes a blank null all the same, so only TextType's counts.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private static function keepsBlankAString(FormConfigInterface $config): bool
+    {
+        foreach ($config->getViewTransformers() as $transformer) {
+            if ($transformer instanceof TextType) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * What each entry of a collection is held to: the constraints its `entry_options` give the
+     * entry field, and those an All on the collection's own constraints applies to every entry.
+     *
+     * @param FormConfigInterface<mixed> $config
+     * @param list<Constraint>           $constraints the collection field's own
+     *
+     * @return list<Constraint>
+     */
+    private function entryConstraints(FormConfigInterface $config, array $constraints): array
+    {
+        $entry = [];
+        $entryOptions = $this->resolveOption($config, 'entry_options');
+        $option = \is_array($entryOptions) ? $entryOptions['constraints'] ?? [] : [];
+        foreach (\is_array($option) ? $option : [$option] as $constraint) {
+            if ($constraint instanceof Constraint) {
+                $entry[] = $constraint;
+            }
+        }
+        foreach ($constraints as $constraint) {
+            if ($constraint instanceof All) {
+                $nested = \is_array($constraint->constraints) ? $constraint->constraints : [$constraint->constraints];
+                $entry = [...$entry, ...array_values(array_filter($nested, static fn(mixed $one): bool => $one instanceof Constraint))];
+            }
+        }
+
+        return $entry;
     }
 
     /**

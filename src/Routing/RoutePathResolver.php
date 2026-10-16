@@ -14,6 +14,7 @@ use Symfony\Component\Routing\Loader\DirectoryLoader;
 use Symfony\Component\Routing\Loader\GlobFileLoader;
 use Symfony\Component\Routing\Loader\Psr4DirectoryLoader;
 use Symfony\Component\Routing\Loader\YamlFileLoader;
+use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouteCollection;
 use Throwable;
 
@@ -35,8 +36,8 @@ use Throwable;
  */
 final class RoutePathResolver
 {
-    /** @var array<string, string>|null controller `Class::method` => path */
-    private ?array $pathsByController = null;
+    /** @var array<string, Route>|null controller `Class::method` => the route Symfony serves it at */
+    private ?array $routesByController = null;
 
     private ?string $loadError = null;
 
@@ -56,16 +57,25 @@ final class RoutePathResolver
      */
     public function pathFor(string $className, string $methodName): ?string
     {
-        $paths = $this->paths();
+        return $this->routeFor($className, $methodName)?->getPath();
+    }
+
+    /**
+     * The route Symfony serves a controller method at — its path, requirements and options as the
+     * routing config leaves them, an import's overriding the attribute's — or null, as pathFor().
+     */
+    public function routeFor(string $className, string $methodName): ?Route
+    {
+        $routes = $this->routes();
 
         // Symfony keys an invokable controller's route by the bare class name, so that key
         // answers for __invoke and nothing else — a constructor or helper on the same class
         // has no route, and must not inherit one.
         if ('__invoke' === $methodName) {
-            return $paths[$className . '::__invoke'] ?? $paths[$className] ?? null;
+            return $routes[$className . '::__invoke'] ?? $routes[$className] ?? null;
         }
 
-        return $paths[$className . '::' . $methodName] ?? null;
+        return $routes[$className . '::' . $methodName] ?? null;
     }
 
     /**
@@ -73,22 +83,22 @@ final class RoutePathResolver
      */
     public function loadError(): ?string
     {
-        $this->paths();
+        $this->routes();
 
         return $this->loadError;
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, Route>
      */
-    private function paths(): array
+    private function routes(): array
     {
-        if (null !== $this->pathsByController) {
-            return $this->pathsByController;
+        if (null !== $this->routesByController) {
+            return $this->routesByController;
         }
 
         if (null === $this->routingFile) {
-            return $this->pathsByController = [];
+            return $this->routesByController = [];
         }
 
         try {
@@ -96,18 +106,18 @@ final class RoutePathResolver
         } catch (Throwable $exception) {
             $this->loadError = $exception->getMessage();
 
-            return $this->pathsByController = [];
+            return $this->routesByController = [];
         }
 
-        $paths = [];
+        $routes = [];
         foreach ($collection as $route) {
             $controller = $route->getDefault('_controller');
             if (\is_string($controller) && '' !== $controller) {
-                $paths[$controller] = $route->getPath();
+                $routes[$controller] = $route;
             }
         }
 
-        return $this->pathsByController = $paths;
+        return $this->routesByController = $routes;
     }
 
     private function load(): RouteCollection

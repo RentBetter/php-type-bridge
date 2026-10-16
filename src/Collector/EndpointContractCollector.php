@@ -12,6 +12,7 @@ use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Parser\IntersectionType;
@@ -40,6 +41,9 @@ final class EndpointContractCollector
 
     /** @var array<string, array{content: string, definitions: array<string, string>}|false> a base's file, read once however many queries inherit from it */
     private array $readFiles = [];
+
+    /** @var array<string, array<string, ImportedType>> a class's imports by source directory and class, parsed once */
+    private array $importsByClass = [];
 
     private readonly ?AttributeText $toolDescriptions;
 
@@ -482,10 +486,14 @@ final class EndpointContractCollector
             $requirements = [];
         }
 
-        // Whether the router matches the requirements by character (`u`) or by byte: the route's
-        // own option when it states one; otherwise the router's default, which is not known here.
+        // Whether the router matches the requirements by character (`u`) or by byte: the option as
+        // the router has it when its config is loaded — an import's overrides the attribute's —
+        // else the attribute's; with neither, the router's default, which is not known here.
+        $served = $this->routePathResolver?->routeFor($method->getDeclaringClass()->getName(), $method->getName());
         $options = $arguments['options'] ?? [];
-        $utf8 = $arguments['utf8'] ?? (\is_array($options) ? $options['utf8'] ?? null : null);
+        $utf8 = null !== $served
+            ? ($served->hasOption('utf8') ? $served->getOption('utf8') : null)
+            : ($arguments['utf8'] ?? (\is_array($options) ? $options['utf8'] ?? null : null));
         $utf8 = \is_bool($utf8) ? $utf8 : null;
 
         $params = [];
@@ -647,6 +655,10 @@ final class EndpointContractCollector
         $further = $parsed instanceof IntersectionType
             ? $this->inheritedShape($parsed, $base['definitions'], $base['content'], $base['class'], $srcDir, $classFiles, $depth + 1)
             : null;
+        // A base further down that can't be read leaves what is inherited unknown, not the part read.
+        if ($parsed instanceof IntersectionType && null === $further) {
+            return null;
+        }
 
         return new ShapeType([...$further->fields ?? [], ...$own->fields]);
     }
@@ -666,7 +678,7 @@ final class EndpointContractCollector
             return ['definition' => $definitions[$alias], 'definitions' => $definitions, 'content' => $content, 'class' => $class];
         }
 
-        $import = $depth > 8 ? null : $this->docHelper->extractImportedTypesLeniently($content, $class, $srcDir, $classFiles, $this->shortNameMap($srcDir, $classFiles), $this->domainGuesser)['imports'][$alias] ?? null;
+        $import = $depth > 8 ? null : ($this->importsByClass[$srcDir . "\0" . $class] ??= $this->docHelper->extractImportedTypesLeniently($content, $class, $srcDir, $classFiles, $this->shortNameMap($srcDir, $classFiles), $this->domainGuesser)['imports'])[$alias] ?? null;
         $file = null === $import ? null : $classFiles[$import->targetClass] ?? null;
         $read = null === $file ? false : ($this->readFiles[$file] ??= self::typesIn(file_get_contents($file), $this->docHelper));
         if (null === $import || false === $read) {

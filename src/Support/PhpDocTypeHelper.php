@@ -122,33 +122,10 @@ final class PhpDocTypeHelper
 
     /**
      * A file's `@phpstan-import-type` tags, by the alias each is known by locally. An import whose
-     * target is not in the source tree is an error.
-     *
-     * @param array<string, string> $classFiles
-     * @param array<string, list<string>> $shortNameMap
-     * @return array<string, ImportedType>
-     */
-    public function extractImportedTypes(
-        string $content,
-        string $ownerClass,
-        string $srcDir,
-        array $classFiles,
-        array $shortNameMap,
-        DomainGuesser $domainGuesser,
-    ): array {
-        $read = $this->extractImportedTypesLeniently($content, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
-        foreach ($read['unresolved'] as $why) {
-            throw new RuntimeException($why);
-        }
-
-        return $read['imports'];
-    }
-
-    /**
-     * As {@see self::extractImportedTypes()}, but an import whose target is not in the source tree
-     * is set aside, with why, rather than thrown: for a file read for some of its types only — a
-     * response's base class, whose protected properties may name anything — where such an import
-     * matters only if what is read uses it.
+     * target is not in the source tree is set aside, with why, rather than thrown: a file is read
+     * for some of its types only — a response's base class, whose protected properties may name
+     * anything — and such an import matters only if what is read uses it
+     * ({@see self::unresolvedImportUsedIn()}).
      *
      * @param array<string, string> $classFiles
      * @param array<string, list<string>> $shortNameMap
@@ -234,6 +211,8 @@ final class PhpDocTypeHelper
      * @param ?string $ownerClass the class whose docblock holds the type
      * @param array<string, string> $classImports the file's `use` statements, alias => class ({@see self::classImports()})
      * @param list<string> $localAliases the aliases the file declares itself
+     * @param ?string $selfClass the class `self::` means, where it isn't `$ownerClass`: in a
+     *        trait, the class using it — as PHP and PHPStan read it
      */
     public function resolveImportedNames(
         ParsedType $type,
@@ -241,10 +220,11 @@ final class PhpDocTypeHelper
         ?string $ownerClass = null,
         array $classImports = [],
         array $localAliases = [],
+        ?string $selfClass = null,
     ): ParsedType {
-        return $this->mapLeaves($type, function (ParsedType $leaf) use ($imports, $ownerClass, $classImports, $localAliases): ParsedType {
+        return $this->mapLeaves($type, function (ParsedType $leaf) use ($imports, $ownerClass, $classImports, $localAliases, $selfClass): ParsedType {
             if ($leaf instanceof ClassConstantType) {
-                return $this->resolveClassConstant($leaf, $ownerClass, $classImports);
+                return $this->resolveClassConstant($leaf, $ownerClass, $classImports, $selfClass ?? $ownerClass);
             }
 
             if (!$leaf instanceof NameRefType) {
@@ -396,10 +376,10 @@ final class PhpDocTypeHelper
      *
      * @param array<string, string> $classImports
      */
-    private function resolveClassConstant(ClassConstantType $type, ?string $ownerClass, array $classImports): ParsedType
+    private function resolveClassConstant(ClassConstantType $type, ?string $ownerClass, array $classImports, ?string $selfClass): ParsedType
     {
         $class = 'self' === $type->class || 'static' === $type->class
-            ? ($ownerClass ?? throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $type->class)))
+            ? ($selfClass ?? throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $type->class)))
             : $this->resolveClassName($type->class, $ownerClass, $classImports);
         if (null === $class || (!class_exists($class) && !interface_exists($class) && !enum_exists($class))) {
             throw new RuntimeException(\sprintf(

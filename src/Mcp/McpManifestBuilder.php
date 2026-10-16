@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Mcp;
 
+use InvalidArgumentException;
 use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
@@ -20,6 +21,7 @@ use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\AttributeText;
 use ReflectionProperty;
+use Symfony\Component\Routing\Route;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\Choice;
 use Symfony\Component\Validator\Constraints\Count;
@@ -211,20 +213,33 @@ final class McpManifestBuilder
             if ($json && $this->takesNull($key, $field)) {
                 $properties[$field->name] = self::withNull($properties[$field->name]);
             }
-            if ($this->isRequired($field, $key) || ($makes && self::refusesBlank($field))) {
+            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && self::refusesBlank($field))) {
                 $required[] = $field->name;
             }
         }
     }
 
     /**
-     * Whether a submitted value is refused blank or missing: a NotNull, or a NotBlank that does not
-     * allow null — a field left out is null, which `NotBlank(allowNull: true)` lets through.
+     * Whether a submitted value is refused blank or missing. A field left out, sent as null or sent
+     * blank reaches validation as null — which a NotNull refuses, and a NotBlank unless it allows
+     * null — or, where the form keeps it a string, as '': which any NotBlank refuses, and a NotNull
+     * lets through.
      */
     private static function refusesBlank(CollectedFormField $field): bool
     {
-        foreach ($field->constraints as $constraint) {
-            if ($constraint instanceof NotNull || ($constraint instanceof NotBlank && !$constraint->allowNull)) {
+        return self::refusesBlankValue($field->constraints, $field->blankStaysString);
+    }
+
+    /**
+     * @param list<Constraint> $constraints
+     */
+    private static function refusesBlankValue(array $constraints, bool $blankStaysString): bool
+    {
+        foreach ($constraints as $constraint) {
+            $refused = $blankStaysString
+                ? $constraint instanceof NotBlank
+                : $constraint instanceof NotNull || ($constraint instanceof NotBlank && !$constraint->allowNull);
+            if ($refused) {
                 return true;
             }
         }
@@ -238,36 +253,13 @@ final class McpManifestBuilder
      */
     private function takesNull(?ShapeField $key, CollectedFormField $field): bool
     {
-        if (null === $key || !self::admitsNull($key->type)) {
+        if (null === $key || !ShapeField::admitsNull($key->type)) {
             return false;
         }
 
         // A contract one create and one update share says `string|null`; a NotNull, or a NotBlank
         // that does not allow null, still refuses it with a 422.
         return !self::refusesBlank($field);
-    }
-
-    /**
-     * Whether a type admits null as a value sent: `T|null`, or a union with a null among several
-     * members (`'open'|'closed'|null`, which parses as a union, not a nullable). `?T` does not: it
-     * is a key left out when null, and a project's preserveNull rule holds every nullable key to
-     * `?T` but the ones whose null means something.
-     */
-    private static function admitsNull(ParsedType $type): bool
-    {
-        if ($type instanceof NullableType) {
-            return !$type->optional;
-        }
-        if (!$type instanceof UnionType) {
-            return false;
-        }
-        foreach ($type->types as $member) {
-            if ($member instanceof ScalarType && 'null' === $member->base()) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
 
@@ -306,9 +298,9 @@ final class McpManifestBuilder
      * every filter as mandatory, and a model could not list anything without inventing a value
      * for each. It is the fallback for a field the contract does not declare.
      */
-    private function isRequired(CollectedFormField $field, ?ShapeField $key): bool
+    private function isRequired(CollectedFormField $field, ?ShapeField $key, bool $inQuery): bool
     {
-        return null === $key ? $field->required : !$key->mayBeLeftOut();
+        return null === $key ? $field->required : !$key->mayBeLeftOut($inQuery);
     }
 
     /**
@@ -561,7 +553,10 @@ final class McpManifestBuilder
             \assert(null !== $field->entryTypeClass);
             $schema = ['type' => $this->scalarTypeOf($field->entryTypeClass)];
 
-            return $json && null !== $item && self::admitsNull($item) ? self::withNull($schema) : $schema;
+            // An entry takes null where its contract admits one and nothing it is held to refuses it.
+            return $json && null !== $item && ShapeField::admitsNull($item) && !self::refusesBlankValue($field->entryConstraints, blankStaysString: false)
+                ? self::withNull($schema)
+                : $schema;
         }
 
         $properties = $this->childSchemas($field->entryChildren, self::shapeKeys($item), $json);
@@ -706,19 +701,14 @@ final class McpManifestBuilder
      */
     private static function routePattern(string $requirement, ?bool $utf8): ?string
     {
-        // Route::sanitizeRequirement(), as Symfony does it.
-        if (str_starts_with($requirement, '^')) {
-            $requirement = substr($requirement, 1);
-        } elseif (str_starts_with($requirement, '\A')) {
-            $requirement = substr($requirement, 2);
-        }
-        if (str_ends_with($requirement, '$')) {
-            $requirement = substr($requirement, 0, -1);
-        } elseif (str_ends_with($requirement, '\z')) {
-            $requirement = substr($requirement, 0, -2);
+        // As the router reads it: Symfony's own Route takes the anchors off.
+        try {
+            $requirement = new Route('/', requirements: ['value' => $requirement])->getRequirement('value') ?? '';
+        } catch (InvalidArgumentException) {
+            return null;
         }
 
-        if (str_contains($requirement, '%') || !self::readsTheSameInEcma($requirement, alternationOutsideGroups: true, unicode: $utf8)) {
+        if ('' === $requirement || str_contains($requirement, '%') || !self::readsTheSameInEcma($requirement, alternationOutsideGroups: true, unicode: $utf8)) {
             return null;
         }
 
@@ -733,10 +723,10 @@ final class McpManifestBuilder
      * (no normaliser) and a match that must succeed.
      *
      * Around the rule goes what reaches it. The form trims the value first (its `trim` option, on by
-     * default), with Symfony's own StringUtil::trim — `[\pZ\p{Cc}\p{Cf}]` from either end — so the
-     * pattern allows that padding, unless the rule could match the padding itself, which then can't
-     * be told apart. A blank value the form hands on as null, which the Regex lets through and only
-     * a NotNull or a NotBlank not allowing null refuses. And PCRE's `$` without `D` also matches before a final newline, which trimming leaves none of.
+     * default), so the pattern is the rule on a trimmed value — refusing padding the server would
+     * take off — unless the rule could match the padding itself. A blank value is let through where
+     * nothing refuses it (refusesBlank()). And PCRE's `$` without `D` also matches before a final
+     * newline, which trimming leaves none of.
      */
     private static function regexPattern(Regex $regex, CollectedFormField $field): ?string
     {
@@ -782,13 +772,16 @@ final class McpManifestBuilder
         $blank = !self::refusesBlank($field);
 
         if ($field->trim) {
-            // A space, a control character or a negated class could match what trimming takes off.
+            // The rule as it reads the trimmed value. A padded value the server would trim is
+            // refused — costing a caller nothing — rather than allowed with `\p{…}` padding, which
+            // only Unicode-mode regex reads. Where the rule could match the padding itself (a space,
+            // a control character, a negated class), a padded value it accepts may trim to one it
+            // doesn't, so there is no pattern.
             if (1 === preg_match('/ |\\\\[nrtfb]|\[\^/', $inner)) {
                 return null;
             }
-            $padding = '[\p{Z}\p{Cc}\p{Cf}]*';
 
-            return '^' . $padding . '(?:' . $inner . ')' . ($blank ? '?' : '') . $padding . '$';
+            return '^(?:' . $inner . ')' . ($blank ? '?' : '') . '$';
         }
 
         $newline = str_contains($flags, 'D') ? '' : '\n?';

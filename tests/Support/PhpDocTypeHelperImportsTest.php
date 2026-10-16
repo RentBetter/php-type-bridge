@@ -7,11 +7,10 @@ namespace PTGS\TypeBridge\Tests\Support;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
-use RuntimeException;
 
 /**
- * A file's `@phpstan-import-type` tags, read strictly — every target must be in the source tree —
- * or leniently, setting an unresolved one aside for whoever reads the file to fail on if it is used.
+ * A file's `@phpstan-import-type` tags: an import from outside the source tree is set aside, for
+ * whoever reads the file to fail on if it is used.
  */
 final class PhpDocTypeHelperImportsTest extends TestCase
 {
@@ -40,28 +39,16 @@ final class PhpDocTypeHelperImportsTest extends TestCase
         final class InvoiceView {}
         PHP;
 
-    public function test_each_import_is_known_by_its_local_alias_whichever_way_it_is_read(): void
+    public function test_each_import_is_known_by_its_local_alias(): void
     {
-        $helper = new PhpDocTypeHelper();
+        $read = (new PhpDocTypeHelper())->extractImportedTypesLeniently(self::RESOLVED, 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser());
 
-        $strict = $helper->extractImportedTypes(self::RESOLVED, 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser());
-        $lenient = $helper->extractImportedTypesLeniently(self::RESOLVED, 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser());
-
-        self::assertSame(['Page', 'Cursor'], array_keys($strict));
-        self::assertSame('PageView', $strict['Page']->targetTypeName);
-        self::assertSame('_self', $strict['Page']->sourceAlias);
-        self::assertSame('Common', $strict['Page']->targetDomain);
-        self::assertSame('Cursor', $strict['Cursor']->targetTypeName);
-        self::assertEquals($strict, $lenient['imports']);
-        self::assertSame([], $lenient['unresolved']);
-    }
-
-    public function test_read_strictly_an_import_from_outside_the_source_tree_is_an_error(): void
-    {
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('Class reference "\\Vendor\\Library\\Money" from "App\\Billing\\View\\InvoiceView" could not be resolved.');
-
-        (new PhpDocTypeHelper())->extractImportedTypes(self::ONE_UNRESOLVED, 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser());
+        self::assertSame(['Page', 'Cursor'], array_keys($read['imports']));
+        self::assertSame('PageView', $read['imports']['Page']->targetTypeName);
+        self::assertSame('_self', $read['imports']['Page']->sourceAlias);
+        self::assertSame('Common', $read['imports']['Page']->targetDomain);
+        self::assertSame('Cursor', $read['imports']['Cursor']->targetTypeName);
+        self::assertSame([], $read['unresolved']);
     }
 
     public function test_read_leniently_it_is_set_aside_by_its_local_alias_with_why(): void

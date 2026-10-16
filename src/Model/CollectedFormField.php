@@ -33,6 +33,11 @@ final readonly class CollectedFormField
      *                                                Null for any other field, and where `_self` is not a shape
      * @param bool                     $trim          the field's `trim` option: whether the form trims what it is
      *                                                 sent (Symfony's StringUtil::trim) before it is validated
+     * @param bool                     $blankStaysString whether a blank value reaches validation as '' rather than
+     *                                                 null: a text field whose `empty_data` is '', which TextType
+     *                                                 keeps a string (a number's transformer still makes it null)
+     * @param list<Constraint>         $entryConstraints what each entry of a collection is validated against: its
+     *                                                 `entry_options` constraints and an All on its property
      */
     public function __construct(
         public string $name,
@@ -56,6 +61,8 @@ final readonly class CollectedFormField
         public ?string $ownerClass = null,
         public ?ShapeType $contract = null,
         public bool $trim = true,
+        public bool $blankStaysString = false,
+        public array $entryConstraints = [],
     ) {}
 
     /**
@@ -89,6 +96,8 @@ final readonly class CollectedFormField
             ownerClass: $this->ownerClass,
             contract: $contract,
             trim: $this->trim,
+            blankStaysString: $this->blankStaysString,
+            entryConstraints: $this->entryConstraints,
         );
     }
 }

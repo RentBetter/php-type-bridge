@@ -101,7 +101,7 @@ final class ResponseClassCollector
                 // is read in the file it is written in — the class's, a base class's, a trait's — and
                 // converted in that file's scope, whatever another file imports under the same
                 // names. Only a file in the source tree counts: a library's is not the contract.
-                $declaringClass = self::writtenIn($property);
+                $declaringClass = self::writtenIn($property, $classFiles);
                 $declaringFile = $classFiles[$declaringClass] ?? null;
                 $declared = null === $declaringFile ? null : $this->typeContext($declaringClass, $declaringFile, $srcDir, $classFiles, $shortNameMap);
                 if (null === $declared) {
@@ -114,7 +114,8 @@ final class ResponseClassCollector
                     throw $unresolved;
                 }
 
-                $parsed = $this->docHelper->resolveImportedNames($this->parser->parse($rawType), $declared['imports'], $declaringClass, $declared['classImports']);
+                // Names are the file's; `self::` is the class, which for a trait is the one using it.
+                $parsed = $this->docHelper->resolveImportedNames($this->parser->parse($rawType), $declared['imports'], $declaringClass, $declared['classImports'], selfClass: $property->getDeclaringClass()->getName());
                 $properties[] = new CollectedResponseProperty(
                     name: $property->getName(),
                     rawType: $rawType,
@@ -170,11 +171,15 @@ final class ResponseClassCollector
 
         $read = $this->docHelper->extractImportedTypesLeniently($content, $className, $srcDir, $classFiles, $shortNameMap, $this->domainGuesser);
         $imports = $read['imports'];
+        $unresolved = $read['unresolved'];
         $domain = $this->domainGuesser->guess($srcDir, $file);
         $phpStanOnly = (class_exists($className) || trait_exists($className)) ? ((new ReflectionClass($className))->getAttributes(PhpStanOnly::class)[0] ?? null)?->newInstance() : null;
         foreach (array_keys($this->docHelper->extractPhpStanTypes($content)) as $alias) {
-            // An alias for PHPStan alone is never emitted, so there is nothing to import it from.
+            // An alias for PHPStan alone is never emitted, so there is nothing to import it from —
+            // and a published property typed with it is a contradiction, failed where it is read.
             if (null !== $phpStanOnly && $phpStanOnly->covers($alias)) {
+                $unresolved[$alias] = \sprintf('"%s" is #[PhpStanOnly] on %s: it is never emitted, so nothing sent can be typed with it.', $alias, $className);
+
                 continue;
             }
             $imports[$alias] = new ImportedType(
@@ -188,7 +193,7 @@ final class ResponseClassCollector
 
         return $this->typeContexts[$key] = [
             'imports' => $imports,
-            'unresolved' => $read['unresolved'],
+            'unresolved' => $unresolved,
             'classImports' => $this->docHelper->classImports($content),
         ];
     }
@@ -197,15 +202,19 @@ final class ResponseClassCollector
     /**
      * The class or trait whose file a property is written in. Reflection names the class a trait's
      * property is used in; the trait that declares it — the innermost, its doc comment the
-     * property's — is where its annotation was written and its names are imported.
+     * property's — is where its annotation was written and its names are imported. A trait outside
+     * the source tree has no file read here, so its property is read in the nearest one that does,
+     * as it was before traits were followed: the subscriber sends it all the same.
+     *
+     * @param array<string, string> $classFiles
      */
-    private static function writtenIn(ReflectionProperty $property): string
+    private static function writtenIn(ReflectionProperty $property, array $classFiles): string
     {
         $class = $property->getDeclaringClass();
         $traits = $class->getTraits();
         while ([] !== $traits) {
             $trait = array_shift($traits);
-            if ($trait->hasProperty($property->getName()) && $trait->getProperty($property->getName())->getDocComment() === $property->getDocComment()) {
+            if (isset($classFiles[$trait->getName()]) && $trait->hasProperty($property->getName()) && $trait->getProperty($property->getName())->getDocComment() === $property->getDocComment()) {
                 $class = $trait;
                 $traits = $trait->getTraits();
             }

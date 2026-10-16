@@ -47,11 +47,6 @@ final readonly class TypeToTsConverter
     private const string BARE_PROPERTY_NAME = '/^(?:[A-Za-z_$][A-Za-z0-9_$]*|0|[1-9][0-9]*)$/';
 
     /**
-     * A shape key as a TypeScript property name: as written when it can be (`id`, `$type`), and
-     * quoted when it cannot (`'my-key'`). The parser hands keys over unquoted, whatever the
-     * PHPDoc spelling, so this is the only place that decides.
-     */
-    /**
      * The type of the class a name carries, where it is the class that the name means: in a scope
      * that is the writing file's own, whenever the class has a type; otherwise only where no alias
      * of the module has that name. Null where the name is the module's alias.
@@ -67,6 +62,11 @@ final readonly class TypeToTsConverter
         return $symbol ?? ($this->symbols->has($domain, $type->name) ? null : $this->classTypes->resolve($type->class));
     }
 
+    /**
+     * A shape key as a TypeScript property name: as written when it can be (`id`, `$type`), and
+     * quoted when it cannot (`'my-key'`). The parser hands keys over unquoted, whatever the
+     * PHPDoc spelling, so this is the only place that decides.
+     */
     public static function propertyName(string $name): string
     {
         return 1 === preg_match(self::BARE_PROPERTY_NAME, $name) ? $name : self::stringLiteral($name);
