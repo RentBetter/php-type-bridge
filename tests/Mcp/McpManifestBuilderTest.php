@@ -1321,6 +1321,73 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'string'], $query['tags']['items']);
     }
 
+    public function testAnEmbeddedFormTakesNoNullWhateverItsContractSays(): void
+    {
+        // Symfony submits a compound form's children, never the form as a whole: a null sent for it
+        // is an empty array, so its fields are cleared one by one — a 422 from a NotBlank, or a
+        // record of nulls — and never the null an update's "clear this" means. A list's null is an
+        // empty list, which is a clear.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $address = new CollectedFormField(
+            name: 'address',
+            formTypeClass: 'App\\AddressType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\AddressData',
+            children: [$this->scalarField('street', $text, required: true)],
+        );
+        $billing = new CollectedFormField(
+            name: 'billing',
+            formTypeClass: 'App\\BillingType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\BillingData',
+            children: [$address],
+        );
+        $tags = $this->collectionField('tags', $text, required: false);
+        $contract = (new PhpDocShapeParser())->parse('array{address?: array{street: string}|null, billing?: array{address: array{street: string}|null}, tags?: list<string>|null}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $body = $this->toolWithBody('PUT', [$address, $billing, $tags], $contract)['inputSchema']['properties'];
+
+        self::assertSame('object', $body['address']['type']);
+        self::assertSame('object', $body['billing']['properties']['address']['type']);
+        self::assertSame(['array', 'null'], $body['tags']['type']);
+    }
+
+    public function testAKeyThatMayBeNullInsideAQueryShapeMayBeLeftOut(): void
+    {
+        // A query string carries no null, nested or not: `from: string|null` is sent by leaving it out.
+        $range = new CollectedFormField(
+            name: 'range',
+            formTypeClass: 'App\\RangeType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\RangeData',
+            contract: $this->shape('array{from: string|null, to?: string, until: string}'),
+        );
+        $contract = $this->shape('array{range?: array{from: string|null, to?: string, until: string}}');
+
+        $query = $this->toolTaking([$range], $contract)['inputSchema']['properties']['range'];
+        self::assertSame(['until'], $query['required']);
+        self::assertSame(['type' => 'string'], $query['properties']['from']);
+
+        $body = $this->toolWithBody('PUT', [$range], $contract)['inputSchema']['properties']['range'];
+        self::assertSame(['from', 'until'], $body['required']);
+        self::assertSame(['type' => ['string', 'null']], $body['properties']['from']);
+    }
+
+    private function shape(string $type): ShapeType
+    {
+        $shape = (new PhpDocShapeParser())->parse($type);
+        self::assertInstanceOf(ShapeType::class, $shape);
+
+        return $shape;
+    }
+
     /**
      * @param list<CollectedPathParam> $params
      *

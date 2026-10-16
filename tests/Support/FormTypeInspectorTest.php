@@ -96,6 +96,15 @@ final class FormTypeInspectorTest extends TestCase
         self::assertSame([], $fields['title']->entryConstraints);
     }
 
+    public function test_an_entry_is_held_to_what_its_type_sets_and_not_to_another_groups_constraints(): void
+    {
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+
+        $kinds = array_map(static fn(object $constraint): string => $constraint::class, $fields['labels']->entryConstraints);
+        self::assertSame([NotNull::class], $kinds, 'LabelType sets a NotNull of its own');
+        self::assertSame([], $fields['notes']->entryConstraints, "A NotNull only in the 'strict' group never sees a request");
+    }
+
     public function test_a_field_rebuilt_with_its_declared_contracts_keeps_what_the_form_does_to_it(): void
     {
         $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');

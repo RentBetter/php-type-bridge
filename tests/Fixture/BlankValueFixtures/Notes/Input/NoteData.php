@@ -17,4 +17,8 @@ final class NoteData
     /** @var list<string|null> */
     #[Assert\All([new Assert\NotNull()])]
     public array $tags = [];
+    /** @var list<string|null> */
+    public array $labels = [];
+    /** @var list<string|null> */
+    public array $notes = [];
 }

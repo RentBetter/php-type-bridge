@@ -70,6 +70,17 @@ final class McpManifestGeneratorTest extends TestCase
         self::assertSame(['type' => 'string'], $code);
     }
 
+    public function testWhatAPathParamMustLookLikeIsWhatTheRouterServes(): void
+    {
+        // The method says a code is lettered; the import that loads it says a number will do too,
+        // and the import wins: the tool must not refuse `123`, which the router serves.
+        $dir = __DIR__ . '/../Fixture/RequirementRoutedMcpFixtures';
+        $manifest = (new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir));
+
+        $code = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties']['code'] ?? null;
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]{2,5}-[0-9]+|[0-9]+)$'], $code);
+    }
+
     public function testWithoutRoutingTheAttributePathStands(): void
     {
         // Existing consumers configure no routing and put the full path on the attribute;

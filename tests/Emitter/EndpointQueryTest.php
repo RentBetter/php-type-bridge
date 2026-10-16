@@ -76,8 +76,23 @@ final class EndpointQueryTest extends TestCase
 
     public function test_a_key_that_may_be_null_is_one_a_query_may_leave_out(): void
     {
-        // A query string carries no null: `product: string|null` is sent by leaving it out.
-        self::assertStringContainsString('export const ListAnyProductReports: Endpoint<ListAnyProductReportsEndpointMap, { query?: ListAnyProductReportsQuery }> = {', $this->emit()['Reports']);
+        // A query string carries no null: `product: string|null` is sent by leaving it out — the
+        // query as a whole, and the key in a query that sends others.
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString('export const ListAnyProductReports: Endpoint<ListAnyProductReportsEndpointMap, { query?: ListAnyProductReportsQuery }> = {', $reports);
+        self::assertStringContainsString("export interface AnyProductFilterData {\n  product?: string | null;\n}", $reports);
+    }
+
+    public function test_an_inherited_key_that_may_be_null_is_one_a_query_may_leave_out(): void
+    {
+        // The shape it extends is its own interface, whatever else uses it: the query leaves the
+        // key out without changing it.
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString('export const ListAnyRegionReports: Endpoint<ListAnyRegionReportsEndpointMap, { query?: ListAnyRegionReportsQuery }> = {', $reports);
+        self::assertStringContainsString("export interface RegionScope {\n  region: string | null;\n}", $reports);
+        self::assertStringContainsString("export interface AnyRegionFilterData extends Omit<RegionScope, 'region'> {\n  region?: RegionScope['region'];\n  page?: number;\n}", $reports);
     }
 
     public function test_keys_inherited_through_a_base_that_cant_be_read_are_unknown_not_partial(): void
@@ -104,7 +119,7 @@ final class EndpointQueryTest extends TestCase
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             // A null that means something, so the contract says `T|null`: in a query, "any product".
-            preserveNull: ['AnyProductFilterData.product'],
+            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region'],
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),
             $responseCollector->collect(self::SRC),

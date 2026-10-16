@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PTGS\TypeBridge\Tests\Fixture\OwnClassAliasFixtures\Notes\View;
+namespace PTGS\TypeBridge\Tests\Fixture\InheritedClassNoTypeFixtures\Notes\View;
 
 /**
  * @phpstan-type Digest = array{

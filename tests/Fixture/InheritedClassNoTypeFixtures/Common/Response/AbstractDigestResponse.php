@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PTGS\TypeBridge\Tests\Fixture\OwnClassAliasFixtures\Common\Response;
+namespace PTGS\TypeBridge\Tests\Fixture\InheritedClassNoTypeFixtures\Common\Response;
 
 use PTGS\TypeBridge\Status\HttpOk;
 

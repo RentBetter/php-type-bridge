@@ -155,6 +155,21 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringNotContainsString('NoteState', $notes);
     }
 
+    public function test_a_204_that_declares_properties_keeps_the_name_it_had_as_a_deprecated_alias(): void
+    {
+        // It was an interface of what it declares, under the interface prefix; it is null now, under
+        // its own name like every 204, and the old name still compiles for a while, deprecated.
+        $notes = self::emit(self::fixtures('Inherited204Fixtures'), new TypeScriptNaming(interfacePrefix: 'I'))['Notes'];
+
+        self::assertStringContainsString('export type RestoreNoteResponse = null;', $notes);
+        self::assertMatchesRegularExpression('/\\/\\*\\* @deprecated [^*]*RestoreNoteResponse[^*]*\\*\\/\\nexport type IRestoreNoteResponse = RestoreNoteResponse;/', $notes);
+        // One that only inherits them was never named so: nothing to keep.
+        self::assertStringNotContainsString('IDeleteNoteResponse', $notes);
+        self::assertStringNotContainsString('IArchiveNoteResponse', $notes);
+        // Without a prefix the name never changed.
+        self::assertStringNotContainsString('@deprecated', self::emit(self::fixtures('Inherited204Fixtures'))['Notes']);
+    }
+
     public function test_a_php_stan_only_alias_is_neither_emitted_nor_imported(): void
     {
         $notes = self::emit(self::fixtures('PhpStanOnlyResponseFixtures'))['Notes'];
@@ -166,12 +181,43 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
     public function test_a_module_alias_still_wins_over_a_class_of_the_same_name_without_a_shape(): void
     {
-        // As it always has for a response's own property; and an inherited one naming a class with
-        // no `_self` falls back to it rather than failing.
+        // As it always has for a response's own property, and for one inherited from a base in the
+        // same module: the name means there what it means in the module's own files.
         $notes = self::emit(self::fixtures('OwnClassAliasFixtures'))['Notes'];
 
         self::assertStringContainsString("export interface ShowNoteResponse {\n  summary: Summary;\n}", $notes);
-        self::assertStringContainsString("export interface ShowDigestResponse {\n  digest: Digest;\n}", $notes);
+        self::assertStringContainsString("export interface ShowSummaryResponse {\n  summary: Summary;\n}", $notes);
+    }
+
+    public function test_an_inherited_class_without_a_type_is_an_error_not_the_childs_module_alias(): void
+    {
+        // The base is written in Common, where `Digest` is the class: the Notes module's alias of
+        // the same name is not what that file meant, whichever module the child is in.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('neither it nor a parent');
+
+        self::emit(self::fixtures('InheritedClassNoTypeFixtures'));
+    }
+
+    public function test_an_inherited_name_is_an_alias_of_the_module_its_file_is_in(): void
+    {
+        // The base names Common's `Page` without importing it, as a module's own files may: in the
+        // Notes module, which has a `Page` of its own, it is still Common's.
+        $notes = self::emit(self::fixtures('InheritedModuleAliasFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ListNotesResponse {\n  page: CommonPage;\n}", $notes);
+        self::assertMatchesRegularExpression('/import type \\{[^}]*\\bPage as CommonPage\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
+    }
+
+    public function test_a_property_of_a_concrete_base_is_one_type_in_the_base_and_in_its_children(): void
+    {
+        // The base `use`s Billing's Money, and its module has an alias called Money: the alias wins,
+        // as it always has for an own property — in the base's own interface and in the child's.
+        $output = self::emit(self::fixtures('InheritedConcreteClassNameFixtures'));
+
+        self::assertStringContainsString("export interface PriceResponse {\n  price: Money;\n}", $output['Common']);
+        self::assertStringContainsString("export interface NotePriceResponse {\n  price: CommonMoney;\n}", $output['Notes']);
+        self::assertStringNotContainsString('BillingMoney', $output['Notes']);
     }
 
     public function test_a_property_a_trait_declares_is_read_in_the_traits_file(): void
@@ -199,6 +245,27 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
         self::assertStringContainsString('  id: string;', $notes);
         self::assertStringContainsString('  meta: { page: number };', $notes);
+    }
+
+    public function test_a_property_a_library_base_class_declares_is_published(): void
+    {
+        // The subscriber sends it all the same: read, as a library trait's is, in the nearest file
+        // of the tree — here the tree's own base between the two.
+        $src = self::fixtures('LibraryBaseFixtures');
+        $response = (new ResponseClassCollector())->collectIndex($src)['PTGS\\TypeBridge\\Tests\\Fixture\\LibraryBaseFixtures\\Notes\\Response\\ShowNoteResponse'];
+
+        self::assertSame(['id' => 'string', 'meta' => 'array{page: int}'], self::rawTypes($response));
+        self::assertSame('PTGS\\TypeBridge\\Tests\\Fixture\\LibraryBaseFixtures\\Notes\\Response\\AbstractNoteResponse', $response->properties[1]->writtenIn);
+        self::assertStringContainsString('  meta: { page: number };', self::emit($src)['Notes']);
+    }
+
+    public function test_a_published_property_typed_with_an_imported_php_stan_only_alias_says_so(): void
+    {
+        // Another class's `Row` is emitted under the same name: the import is not quietly that one.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/"Row" is #\\[PhpStanOnly\\] on .*RowSource.*ShowRowResponse/s');
+
+        (new ResponseClassCollector())->collectIndex(self::fixtures('PhpStanOnlyImportedFixtures'));
     }
 
     public function test_a_published_property_typed_with_a_php_stan_only_alias_says_so(): void

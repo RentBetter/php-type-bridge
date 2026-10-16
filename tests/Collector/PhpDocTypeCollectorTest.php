@@ -104,4 +104,14 @@ final class PhpDocTypeCollectorTest extends TestCase
 
         self::assertSame(['Page'], array_keys($domains['Common']->types));
     }
+
+    public function test_an_alias_typed_with_an_imported_php_stan_only_alias_says_so(): void
+    {
+        // RowSource keeps `Row` for PHPStan; RowView emits a `Row` of its own. LineView imports
+        // RowSource's, which is never emitted — it is not quietly RowView's instead.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/"Row" is #\\[PhpStanOnly\\] on .*RowSource.*Line on .*LineView/s');
+
+        (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/PhpStanOnlyImportedFixtures');
+    }
 }
