@@ -59,6 +59,17 @@ final class McpManifestGeneratorTest extends TestCase
         self::assertSame(['/api/ping'], array_column($manifest['tools'], 'path'));
     }
 
+    public function testWhetherARouteMatchesByCharacterIsWhatTheRouterServes(): void
+    {
+        // The method says `utf8: false`; the import that loads it says `utf8: true`, and the import
+        // wins. Matched by character, `\w` is Unicode in PCRE and ASCII in JSON Schema: no pattern.
+        $dir = __DIR__ . '/../Fixture/Utf8RoutedMcpFixtures';
+        $manifest = (new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir));
+
+        $code = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties']['code'] ?? null;
+        self::assertSame(['type' => 'string'], $code);
+    }
+
     public function testWithoutRoutingTheAttributePathStands(): void
     {
         // Existing consumers configure no routing and put the full path on the attribute;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Support;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
@@ -14,6 +15,7 @@ use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NonContractRoot
 use RuntimeException;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\NotNull;
 
 final class FormTypeInspectorTest extends TestCase
 {
@@ -73,6 +75,33 @@ final class FormTypeInspectorTest extends TestCase
         $this->expectExceptionMessage('BrokenLeafType');
 
         (new FormTypeInspector())->inspect(NestedBrokenRequestType::class);
+    }
+
+    public function test_it_records_whether_a_blank_value_stays_an_empty_string(): void
+    {
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+
+        self::assertFalse($fields['title']->blankStaysString, 'A blank text field reaches validation as null');
+        self::assertTrue($fields['code']->blankStaysString, "With empty_data '', TextType keeps it ''");
+        self::assertFalse($fields['count']->blankStaysString, "A number's transformer still makes it null");
+    }
+
+    public function test_it_records_what_each_collection_entry_is_held_to(): void
+    {
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+
+        $kinds = array_map(static fn(object $constraint): string => $constraint::class, $fields['tags']->entryConstraints);
+        sort($kinds);
+        self::assertSame([NotBlank::class, NotNull::class], $kinds, 'Its entry_options constraints, and what an All on its property holds each entry to');
+        self::assertSame([], $fields['title']->entryConstraints);
+    }
+
+    public function test_a_field_rebuilt_with_its_declared_contracts_keeps_what_the_form_does_to_it(): void
+    {
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+
+        self::assertTrue($fields['code']->withDeclared([], [], null)->blankStaysString);
+        self::assertCount(2, $fields['tags']->withDeclared([], [], null)->entryConstraints);
     }
 
     public function test_it_records_whether_the_form_trims_a_fields_value(): void

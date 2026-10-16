@@ -74,6 +74,23 @@ final class EndpointQueryTest extends TestCase
         self::assertStringContainsString('export const ListProductReports: Endpoint<ListProductReportsEndpointMap, { query?: ListProductReportsQuery }> = {', $reports);
     }
 
+    public function test_a_key_that_may_be_null_is_one_a_query_may_leave_out(): void
+    {
+        // A query string carries no null: `product: string|null` is sent by leaving it out.
+        self::assertStringContainsString('export const ListAnyProductReports: Endpoint<ListAnyProductReportsEndpointMap, { query?: ListAnyProductReportsQuery }> = {', $this->emit()['Reports']);
+    }
+
+    public function test_keys_inherited_through_a_base_that_cant_be_read_are_unknown_not_partial(): void
+    {
+        // ScopeData's own keys are readable, the root it extends is outside the source tree: what
+        // it inherits is not known, and a part of it is not passed off as the whole.
+        $src = __DIR__ . '/../Fixture/PartialInheritedQueryFixtures';
+        $contract = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src))['Reports'][0];
+
+        self::assertSame('ShowReport', $contract->name);
+        self::assertNull($contract->request?->query?->inheritedContract);
+    }
+
     /**
      * @return array<string, string>
      */
@@ -86,6 +103,8 @@ final class EndpointQueryTest extends TestCase
         return (new TypeScriptEmitter(
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            // A null that means something, so the contract says `T|null`: in a query, "any product".
+            preserveNull: ['AnyProductFilterData.product'],
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),
             $responseCollector->collect(self::SRC),

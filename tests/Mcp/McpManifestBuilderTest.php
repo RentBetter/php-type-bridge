@@ -1170,17 +1170,18 @@ final class McpManifestBuilderTest extends TestCase
      */
     public static function normalisedValues(): iterable
     {
-        $ws = '[\p{Z}\p{Cc}\p{Cf}]*';
-        // The form trims what it is sent (`trim`, on by default) with Symfony's own StringUtil::trim
-        // — Unicode separators, controls and format characters — before the Regex sees it. A blank
-        // value it hands on as null, trimmed or not: the Regex lets that through, and only a NotNull
-        // or a NotBlank that doesn't allow null refuses it.
-        yield 'trimmed, blank allowed' => [true, [], '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})?' . $ws . '$'];
-        yield 'trimmed, NotBlank' => [true, [new NotBlank()], '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
-        yield 'trimmed, NotNull' => [true, [new NotNull()], '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
-        yield 'trimmed, NotBlank allowing null' => [true, [new NotBlank(allowNull: true)], '/^[A-Z]{2,5}$/', '^' . $ws . '(?:[A-Z]{2,5})?' . $ws . '$'];
+        // The form trims what it is sent (`trim`, on by default) before the Regex sees it. The
+        // pattern is the rule as it reads the trimmed value: a padded value the server would trim
+        // is refused, which costs a caller nothing, and the pattern needs nothing — no `\p{…}` —
+        // that only Unicode-mode regex reads. A blank value the form hands on as null, trimmed or
+        // not: the Regex lets that through, and only a NotNull or a NotBlank that doesn't allow
+        // null refuses it.
+        yield 'trimmed, blank allowed' => [true, [], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})?$'];
+        yield 'trimmed, NotBlank' => [true, [new NotBlank()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})$'];
+        yield 'trimmed, NotNull' => [true, [new NotNull()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})$'];
+        yield 'trimmed, NotBlank allowing null' => [true, [new NotBlank(allowNull: true)], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})?$'];
         // Trimmed, PCRE's `$` has no final newline left to allow.
-        yield 'trimmed, D' => [true, [new NotBlank()], '/^[A-Z]{2,5}$/D', '^' . $ws . '(?:[A-Z]{2,5})' . $ws . '$'];
+        yield 'trimmed, D' => [true, [new NotBlank()], '/^[A-Z]{2,5}$/D', '^(?:[A-Z]{2,5})$'];
         yield 'as sent, blank allowed' => [false, [], '/^[A-Z]{2,5}$/', '^(?:(?:[A-Z]{2,5})\n?)?$'];
         yield 'as sent, blank allowed, D' => [false, [], '/^[A-Z]{2,5}$/D', '^(?:[A-Z]{2,5})?$'];
         yield 'as sent, NotBlank' => [false, [new NotBlank()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
@@ -1213,6 +1214,72 @@ final class McpManifestBuilderTest extends TestCase
         $schema = $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code'];
 
         self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    /**
+     * @return iterable<string, array{list<Constraint>, string}>
+     */
+    public static function emptyStringValues(): iterable
+    {
+        // A text field whose `empty_data` is '' keeps a blank value a string: the Regex lets ''
+        // through, so does a NotNull, and any NotBlank refuses it.
+        yield 'nothing else' => [[], '^(?:[A-Z]+)?$'];
+        yield 'NotNull' => [[new NotNull()], '^(?:[A-Z]+)?$'];
+        yield 'NotBlank' => [[new NotBlank()], '^(?:[A-Z]+)$'];
+        yield 'NotBlank allowing null' => [[new NotBlank(allowNull: true)], '^(?:[A-Z]+)$'];
+    }
+
+    /**
+     * @param list<Constraint> $constraints
+     */
+    #[DataProvider('emptyStringValues')]
+    public function testABlankValueKeptAnEmptyStringIsAllowedWhereItsConstraintsTakeOne(array $constraints, string $pattern): void
+    {
+        $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Regex('/^[A-Z]+$/'), ...$constraints], blankStaysString: true);
+
+        self::assertSame(['type' => 'string', 'pattern' => $pattern], $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code']);
+    }
+
+    public function testAFieldThatKeepsABlankStringIsRequiredAndTakesNoNullWhereANotBlankRefusesIt(): void
+    {
+        // Left out or sent as null, it reaches validation as '' — which NotBlank(allowNull: true)
+        // refuses, though it would let a null through.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $title = new CollectedFormField(name: 'title', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(allowNull: true)], blankStaysString: true);
+        $note = new CollectedFormField(name: 'note', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotNull()], blankStaysString: true);
+        $contract = (new PhpDocShapeParser())->parse('array{title?: string|null, note?: string|null}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $tool = $this->toolWithBody('POST', [$title, $note], $contract);
+        self::assertSame(['title'], $tool['inputSchema']['required']);
+        self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['title']);
+        // A NotNull takes the '' a null becomes.
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
+    }
+
+    public function testAQueryKeyThatMayBeNullMayBeLeftOut(): void
+    {
+        // A query string carries no null: `product: string|null` is sent by leaving it out.
+        $product = $this->scalarField('product', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true);
+        $contract = (new PhpDocShapeParser())->parse('array{product: string|null}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $schema = $this->toolTaking([$product], $contract)['inputSchema'];
+        self::assertArrayNotHasKey('required', $schema);
+        self::assertSame(['type' => 'string'], $schema['properties']['product']);
+    }
+
+    public function testACollectionEntryItsConstraintsHoldToANonNullValueTakesNoNull(): void
+    {
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $tags = new CollectedFormField(name: 'tags', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType', required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotNull()]);
+        $labels = new CollectedFormField(name: 'labels', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType', required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text);
+        $contract = (new PhpDocShapeParser())->parse('array{tags?: list<string|null>, labels?: list<string|null>}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $body = $this->toolWithBody('PUT', [$tags, $labels], $contract)['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $body['tags']['items']);
+        self::assertSame(['type' => ['string', 'null']], $body['labels']['items']);
     }
 
     public function testAFieldRebuiltWithItsDeclaredContractsKeepsItsTrim(): void

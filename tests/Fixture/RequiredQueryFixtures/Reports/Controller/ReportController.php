@@ -9,6 +9,7 @@ use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\MonthlyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\NullableProductFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\QuarterlyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportListFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\WeeklyReportFilterType;
@@ -57,6 +58,14 @@ final class ReportController
     #[ApiRequest(query: MonthlyReportFilterType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function showMonthlyReport(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/anyProduct', methods: ['GET'])]
+    #[ApiRequest(query: AnyProductFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listAnyProductReports(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

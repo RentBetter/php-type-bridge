@@ -18,6 +18,7 @@ use PTGS\TypeBridge\Tests\Fixture\InheritedResponseFixtures\Common\Response\Conf
 use PTGS\TypeBridge\Tests\Fixture\InheritedResponseFixtures\Common\Response\NotFoundResponse;
 use PTGS\TypeBridge\Tests\Fixture\InheritedResponseFixtures\Notes\Response\ListNotesResponse;
 use PTGS\TypeBridge\Tests\Fixture\InheritedResponseFixtures\Notes\Response\NoteGoneResponse;
+use RuntimeException;
 
 /**
  * A property a response inherits is on the wire — TypeBridgeResponseSubscriber and the throwable
@@ -179,6 +180,43 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
         self::assertStringContainsString("export interface NoteGoneResponse {\n  error: ErrorBody;\n}", $notes);
         self::assertMatchesRegularExpression('/import type \\{[^}]*\\bErrorBody\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
+    }
+
+    public function test_self_in_a_traits_property_is_the_class_using_it(): void
+    {
+        // As PHP and PHPStan read it: a trait's `self::` is whichever class uses the trait, so its
+        // constants are looked up there — the trait's file gives only the names.
+        $notes = self::emit(self::fixtures('TraitConstantFixtures'))['Notes'];
+
+        self::assertMatchesRegularExpression('/export interface ShowNoteResponse \\{\\n  status: ([\'"])open\\1 \\| ([\'"])closed\\2;\\n\\}/', $notes);
+    }
+
+    public function test_a_property_a_library_trait_declares_is_published_as_it_was(): void
+    {
+        // The subscriber sends it whatever file it was written in; a trait outside the source tree
+        // is read in the using class's file, as before traits were followed at all.
+        $notes = self::emit(self::fixtures('LibraryTraitFixtures'))['Notes'];
+
+        self::assertStringContainsString('  id: string;', $notes);
+        self::assertStringContainsString('  meta: { page: number };', $notes);
+    }
+
+    public function test_a_published_property_typed_with_a_php_stan_only_alias_says_so(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Row.*#\\[PhpStanOnly\\]|#\\[PhpStanOnly\\].*Row/s');
+
+        self::emit(self::fixtures('PhpStanOnlyUsedFixtures'));
+    }
+
+    public function test_a_class_whose_type_is_misconfigured_fails_rather_than_becoming_a_module_alias(): void
+    {
+        // Common\Model\Money's `_self` is imported from a PHPStan-only class, so it has no type: that
+        // is an error to name, not a cue to use the Notes module's own `Money` instead.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('declares no such type that is emitted');
+
+        self::emit(self::fixtures('ClassSelfUnemittedFixtures'));
     }
 
     public function test_a_source_tree_is_read_once_however_often_it_is_asked_for(): void
