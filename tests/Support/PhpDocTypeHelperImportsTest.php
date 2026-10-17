@@ -83,6 +83,7 @@ final class PhpDocTypeHelperImportsTest extends TestCase
         yield 'as a shape key' => ['array{Amount: int}', false];
         yield 'as a string literal' => ["'Amount'|'other'", false];
         yield 'inside a longer name' => ['AmountView', false];
+        yield 'as a qualified class name' => ['\\Vendor\\Library\\Amount', false];
     }
 
     #[DataProvider('spellings')]

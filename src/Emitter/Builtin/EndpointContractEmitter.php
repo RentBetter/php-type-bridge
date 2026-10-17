@@ -27,9 +27,10 @@ use ReflectionMethod;
  * {@see self::RESULT_HELPER} and {@see self::ENDPOINT_HELPER}: once in the root module when
  * there is one, once per module otherwise.
  *
- * An endpoint whose success response has a body takes the include query parameters too
- * (`includes.query`): its query is `IncludeQuery`, or its own query form's type and that. The
- * orchestrator declares `IncludeQuery` the same way, via {@see self::includeQueryHelper()}.
+ * An endpoint with a query form takes its type as a query string sends it, `AsQuery<T>`
+ * ({@see self::AS_QUERY_HELPER}). One whose success response has a body takes the include query
+ * parameters too (`includes.query`): its query is `IncludeQuery`, or its own query form's and that.
+ * The orchestrator declares both the same way, `IncludeQuery` via {@see self::includeQueryHelper()}.
  */
 #[AsTypeBridgeEmitter('endpoint-contracts', mode: EmitMode::Referenced)]
 final class EndpointContractEmitter implements TypeEmitter
@@ -53,7 +54,38 @@ final class EndpointContractEmitter implements TypeEmitter
         }
         TS;
 
+    /**
+     * `AsQuery<T>`: T as a query string sends it. A query string carries no null, so a key that may
+     * be null is sent by leaving it out — at any depth, a shape it sends included. The type itself
+     * stays as declared, for whatever else uses it — a body, a response — where a null is sent and
+     * the key is always there.
+     */
+    public const string AS_QUERY_HELPER = <<<'TS'
+        /** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out. */
+        export type AsQuery<T> = T extends readonly (infer Item)[]
+          ? AsQuery<Item>[]
+          : T extends object
+            ? { [K in keyof T as null extends T[K] ? K : never]?: AsQuery<T[K]> } & { [K in keyof T as null extends T[K] ? never : K]: AsQuery<T[K]> }
+            : T;
+        TS;
+
     private const array METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+    /**
+     * Whether any of the contracts takes a query form, whose type it takes as `AsQuery<T>`.
+     *
+     * @param list<CollectedEndpointContract> $contracts
+     */
+    public static function anyTakesQueryForm(array $contracts): bool
+    {
+        foreach ($contracts as $contract) {
+            if (null !== $contract->request?->query) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * @param list<CollectedEndpointContract> $contracts
@@ -145,14 +177,14 @@ final class EndpointContractEmitter implements TypeEmitter
     }
 
     /**
-     * The endpoint's query: its query form's type, `IncludeQuery` when its response has a body to
-     * shape, both intersected, or none.
+     * The endpoint's query: its query form's type as a query string sends it, `IncludeQuery` when
+     * its response has a body to shape, both intersected, or none.
      */
     private function queryType(CollectedEndpointContract $contract, EmitContext $context): ?string
     {
         $types = [];
         if (null !== $query = $contract->request?->query) {
-            $types[] = $context->symbolForInputReference($query);
+            $types[] = 'AsQuery<' . $context->symbolForInputReference($query) . '>';
         }
         if (self::takesIncludeQuery($contract, $context->includes)) {
             $types[] = 'IncludeQuery';

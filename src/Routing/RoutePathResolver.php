@@ -36,7 +36,7 @@ use Throwable;
  */
 final class RoutePathResolver
 {
-    /** @var array<string, Route>|null controller `Class::method` => the route Symfony serves it at */
+    /** @var array<string, non-empty-list<Route>>|null controller `Class::method` => the routes Symfony serves it at, in the order it loads them */
     private ?array $routesByController = null;
 
     private ?string $loadError = null;
@@ -53,29 +53,45 @@ final class RoutePathResolver
 
     /**
      * The served path for a controller method, or null when it has no route (or routing is not
-     * configured, or the routing file could not be loaded).
+     * configured, or the routing file could not be loaded). Which route, for a method routed more
+     * than once: see routeFor().
      */
-    public function pathFor(string $className, string $methodName): ?string
+    public function pathFor(string $className, string $methodName, ?string $declaredPath = null): ?string
     {
-        return $this->routeFor($className, $methodName)?->getPath();
+        return $this->routeFor($className, $methodName, $declaredPath)?->getPath();
     }
 
     /**
      * The route Symfony serves a controller method at — its path, requirements and options as the
      * routing config leaves them, an import's overriding the attribute's — or null, as pathFor().
+     *
+     * A method routed more than once is served at each. Given the path a #[Route] on it declares,
+     * this is the route serving that one: the first whose path ends with it, a prefix or a class
+     * #[Route] coming before. Otherwise, the first route loaded, which is its first #[Route]'s.
      */
-    public function routeFor(string $className, string $methodName): ?Route
+    public function routeFor(string $className, string $methodName, ?string $declaredPath = null): ?Route
     {
         $routes = $this->routes();
 
         // Symfony keys an invokable controller's route by the bare class name, so that key
         // answers for __invoke and nothing else — a constructor or helper on the same class
         // has no route, and must not inherit one.
-        if ('__invoke' === $methodName) {
-            return $routes[$className . '::__invoke'] ?? $routes[$className] ?? null;
+        $served = '__invoke' === $methodName
+            ? $routes[$className . '::__invoke'] ?? $routes[$className] ?? null
+            : $routes[$className . '::' . $methodName] ?? null;
+        if (null === $served) {
+            return null;
         }
 
-        return $routes[$className . '::' . $methodName] ?? null;
+        if (null !== $declaredPath) {
+            foreach ($served as $route) {
+                if (str_ends_with($route->getPath(), $declaredPath)) {
+                    return $route;
+                }
+            }
+        }
+
+        return $served[0];
     }
 
     /**
@@ -89,7 +105,7 @@ final class RoutePathResolver
     }
 
     /**
-     * @return array<string, Route>
+     * @return array<string, non-empty-list<Route>>
      */
     private function routes(): array
     {
@@ -113,7 +129,7 @@ final class RoutePathResolver
         foreach ($collection as $route) {
             $controller = $route->getDefault('_controller');
             if (\is_string($controller) && '' !== $controller) {
-                $routes[$controller] = $route;
+                $routes[$controller][] = $route;
             }
         }
 

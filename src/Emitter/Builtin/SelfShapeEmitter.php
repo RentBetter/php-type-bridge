@@ -48,30 +48,11 @@ final class SelfShapeEmitter implements TypeEmitter
 
     private function renderType(CollectedType $type, EmitContext $context): string
     {
-        // A query's own shape: a key that may be null may be left out, since a query string sends
-        // a null by leaving the key out.
-        $query = $type->isSelf ? $context->queries[$type->ownerClass] ?? null : null;
-        $scope = $context->scopeFor($type->imports, inQuery: null !== $query);
+        $scope = $context->scopeFor($type->imports);
         $name = $context->names->typeDeclarationName($type);
 
         if ($type->parsed instanceof IntersectionType) {
-            $base = $context->convert($type->parsed->base, $scope);
-            $lines = [\sprintf('export interface %s extends %s {', $name, $base)];
-            // The shape a query extends is an interface of its own, whatever else uses it: a key it
-            // takes from there that may be null is left out of the base and declared again, optional.
-            $own = array_map(static fn(ShapeField $field): string => $field->name, $type->parsed->extra->fields);
-            $leftOut = [];
-            foreach ($query?->inheritedContract->fields ?? [] as $key) {
-                if (!$key->mayBeLeftOut() && $key->mayBeLeftOut(inQuery: true) && !\in_array($key->name, $own, true)) {
-                    $leftOut[] = $key->name;
-                }
-            }
-            if ([] !== $leftOut) {
-                $lines = [\sprintf('export interface %s extends Omit<%s, %s> {', $name, $base, implode(' | ', array_map(TypeToTsConverter::stringLiteral(...), $leftOut)))];
-                foreach ($leftOut as $key) {
-                    $lines[] = \sprintf('  %s?: %s[%s];', TypeToTsConverter::propertyName($key), $base, TypeToTsConverter::stringLiteral($key));
-                }
-            }
+            $lines = [\sprintf('export interface %s extends %s {', $name, $context->convert($type->parsed->base, $scope))];
             foreach ($type->parsed->extra->fields as $field) {
                 $lines[] = $this->renderShapeField($field, $type->name, $context, $scope);
             }
@@ -123,7 +104,7 @@ final class SelfShapeEmitter implements TypeEmitter
         $this->assertNullableMatchesPreserveNullConfig($field, $shapeName, $context);
 
         // An included key is absent unless the request asks for it, whatever its PHP spelling.
-        $optional = $field->mayBeLeftOut($scope->inQuery) || $context->converter->isIncluded($field->type);
+        $optional = $field->mayBeLeftOut() || $context->converter->isIncluded($field->type);
         // `key: ?T` is emitted `key?: T`: left out, not sent as null.
         $type = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
 

@@ -561,8 +561,9 @@ final class McpManifestBuilder
             \assert(null !== $field->entryTypeClass);
             $schema = ['type' => $this->scalarTypeOf($field->entryTypeClass)];
 
-            // An entry takes null where its contract admits one and nothing it is held to refuses it.
-            return $json && null !== $item && ShapeField::admitsNull($item) && !self::refusesBlankValue($field->entryConstraints, blankStaysString: false)
+            // An entry takes null where its contract admits one and nothing it is held to refuses it,
+            // as the entry reaches validation: null, or '' where its options keep a blank a string.
+            return $json && null !== $item && ShapeField::admitsNull($item) && !self::refusesBlankValue($field->entryConstraints, $field->entryBlankStaysString)
                 ? self::withNull($schema)
                 : $schema;
         }
@@ -727,8 +728,9 @@ final class McpManifestBuilder
      * A Regex constraint as a `pattern`, describing every value the server takes. Only a whole-value
      * rule carries over: anchored at both ends (`/^…$/`) — unanchored, PCRE matches anywhere and
      * across lines, which no padding with `.*` reproduces — with no alternation outside a group
-     * (`^a|b$` is `(^a)|(b$)`), no flag but `D` and `u`, the value matched as the form hands it on
-     * (no normaliser) and a match that must succeed.
+     * (`^a|b$` is `(^a)|(b$)`), no flag but `D` and `u`, the value matched as it was sent (no
+     * normaliser, and no transformer of the form's: the rule reads what that makes of the value)
+     * and a match that must succeed.
      *
      * Around the rule goes what reaches it. The form trims the value first (its `trim` option, on by
      * default), so the pattern is the rule on a trimmed value — refusing padding the server would
@@ -738,7 +740,7 @@ final class McpManifestBuilder
      */
     private static function regexPattern(Regex $regex, CollectedFormField $field): ?string
     {
-        if (!$regex->match || null !== $regex->normalizer) {
+        if (!$regex->match || null !== $regex->normalizer || $field->transformsValue) {
             return null;
         }
 

@@ -181,8 +181,9 @@ final readonly class TypeToTsConverter
 
             // A name no alias answers to, written where it means a class: the JSON the class
             // serialises to. An alias of the same name in the module it is written in always wins —
-            // the module's, or for an inherited property its base's, whichever module emits it.
-            $aliasDomain = $scope->aliasDomain ?? $scope->domain;
+            // the module's, or for an inherited property its base's, whichever module emits it. A
+            // config alias is every module's, declared by each that uses it: this one's.
+            $aliasDomain = $this->symbols->isShared($type->name) ? $scope->domain : $scope->aliasDomain ?? $scope->domain;
             $symbol = $this->classSymbol($type, $aliasDomain);
             if (null !== $symbol) {
                 return self::localName($symbol->targetDomain, $symbol->canonicalName, $scope);
@@ -206,7 +207,7 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof ShapeType) {
             $fields = array_map(function (ShapeField $field) use ($scope): string {
-                $optional = $field->mayBeLeftOut($scope->inQuery) || $this->isIncluded($field->type);
+                $optional = $field->mayBeLeftOut() || $this->isIncluded($field->type);
                 // `key: ?T` is emitted `key?: T`: left out, not sent as null.
                 $fieldType = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
 

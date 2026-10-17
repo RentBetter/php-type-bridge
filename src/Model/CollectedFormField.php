@@ -38,6 +38,12 @@ final readonly class CollectedFormField
      *                                                 keeps a string (a number's transformer still makes it null)
      * @param list<Constraint>         $entryConstraints what each entry of a collection is validated against: its
      *                                                 `entry_options` constraints and an All on its property
+     * @param bool                     $entryBlankStaysString whether a collection entry's blank value reaches
+     *                                                 validation as '', as `$blankStaysString` says of a field
+     * @param bool                     $transformsValue whether the form transforms a submitted value before it is
+     *                                                 validated: a model transformer, or a view transformer but
+     *                                                 TextType's own (which only turns a null into ''). What a
+     *                                                 constraint then sees is not what was sent
      */
     public function __construct(
         public string $name,
@@ -63,6 +69,8 @@ final readonly class CollectedFormField
         public bool $trim = true,
         public bool $blankStaysString = false,
         public array $entryConstraints = [],
+        public bool $entryBlankStaysString = false,
+        public bool $transformsValue = false,
     ) {}
 
     /**
@@ -98,6 +106,8 @@ final readonly class CollectedFormField
             trim: $this->trim,
             blankStaysString: $this->blankStaysString,
             entryConstraints: $this->entryConstraints,
+            entryBlankStaysString: $this->entryBlankStaysString,
+            transformsValue: $this->transformsValue,
         );
     }
 }

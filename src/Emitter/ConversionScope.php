@@ -19,14 +19,11 @@ final readonly class ConversionScope
      * @param string|null $aliasDomain the module whose aliases a bare name answers to, where it is not
      *        `$domain`: the module of the file an inherited property is written in. A name means
      *        there what it means in that module's own files, whichever module emits it
-     * @param bool $inQuery whether the type is a query's, where a key that may be null may also be
-     *        left out: a query string carries no null, so leaving the key out is how one is sent
      */
     public function __construct(
         public string $domain,
         public array $importedSymbols = [],
         public array $foreignAliases = [],
         public ?string $aliasDomain = null,
-        public bool $inQuery = false,
     ) {}
 }

@@ -375,7 +375,7 @@ final class EndpointContractCollector
      */
     private function contractPath(ReflectionMethod $method, string $attributePath): string
     {
-        return $this->routePathResolver?->pathFor($method->getDeclaringClass()->getName(), $method->getName()) ?? $attributePath;
+        return $this->routePathResolver?->pathFor($method->getDeclaringClass()->getName(), $method->getName(), $attributePath) ?? $attributePath;
     }
 
     /**
@@ -391,7 +391,7 @@ final class EndpointContractCollector
             return $attributePath;
         }
 
-        $served = $this->routePathResolver->pathFor($method->getDeclaringClass()->getName(), $method->getName());
+        $served = $this->routePathResolver->pathFor($method->getDeclaringClass()->getName(), $method->getName(), $attributePath);
         if (null !== $error = $this->routePathResolver->loadError()) {
             throw new RuntimeException(\sprintf('Cannot resolve served route paths for MCP tools: %s', $error));
         }
@@ -485,7 +485,7 @@ final class EndpointContractCollector
         // Whether the router matches the requirements by character (`u`) or by byte: the option as
         // the router has it when its config is loaded — an import's overrides the attribute's —
         // else the attribute's; with neither, the router's default, which is not known here.
-        $served = $this->routePathResolver?->routeFor($method->getDeclaringClass()->getName(), $method->getName());
+        $served = $this->routePathResolver?->routeFor($method->getDeclaringClass()->getName(), $method->getName(), $pathTemplate);
         $options = $arguments['options'] ?? [];
         $utf8 = null !== $served
             ? ($served->hasOption('utf8') ? $served->getOption('utf8') : null)

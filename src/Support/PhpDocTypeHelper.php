@@ -121,6 +121,30 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * A file's `@phpstan-import-type` tags, by the alias each is known by locally, every one of which
+     * must be found in the source tree: the first that isn't fails.
+     *
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
+     * @return array<string, ImportedType>
+     */
+    public function extractImportedTypes(
+        string $content,
+        string $ownerClass,
+        string $srcDir,
+        array $classFiles,
+        array $shortNameMap,
+        DomainGuesser $domainGuesser,
+    ): array {
+        $read = $this->extractImportedTypesLeniently($content, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
+        foreach ($read['unresolved'] as $why) {
+            throw new RuntimeException($why);
+        }
+
+        return $read['imports'];
+    }
+
+    /**
      * A file's `@phpstan-import-type` tags, by the alias each is known by locally. An import whose
      * target is not in the source tree is set aside, with why, rather than thrown: a file is read
      * for some of its types only — a response's base class, whose protected properties may name
@@ -155,21 +179,25 @@ final class PhpDocTypeHelper
 
     /**
      * An import whose target was set aside as unresolved by
-     * {@see self::extractImportedTypesLeniently()}, if the type written as `$type` uses it: the
-     * error it would have thrown, with where it is used — so a file is failed only over an import
-     * something read from it needs.
+     * {@see self::extractImportedTypesLeniently()}, if the type uses it — names it as a type, which
+     * a shape key or a string literal spelt the same does not: the error it would have thrown, with
+     * where it is used — so a file is failed only over an import something read from it needs.
      *
+     * @param ParsedType $type as parsed, before its names are resolved
      * @param array<string, string> $unresolved local alias => why
      */
-    public function unresolvedImportUsedIn(string $type, array $unresolved, string $where): ?RuntimeException
+    public function unresolvedImportUsedIn(ParsedType $type, array $unresolved, string $where): ?RuntimeException
     {
-        foreach ($unresolved as $alias => $why) {
-            if (1 === preg_match('/(?<![\\w\\\\])' . preg_quote($alias, '/') . '(?![\\w\\\\])/', $type)) {
-                return new RuntimeException(\sprintf('%s %s is typed with it.', $why, $where));
+        $used = null;
+        $this->mapLeaves($type, static function (ParsedType $leaf) use ($unresolved, &$used): ParsedType {
+            if ($leaf instanceof NameRefType && null === $leaf->class && isset($unresolved[$leaf->name])) {
+                $used ??= $leaf->name;
             }
-        }
 
-        return null;
+            return $leaf;
+        });
+
+        return null === $used ? null : new RuntimeException(\sprintf('%s %s is typed with it.', $unresolved[$used], $where));
     }
 
     /**
@@ -247,6 +275,26 @@ final class PhpDocTypeHelper
             $class = $this->resolveClassName($leaf->name, $ownerClass, $classImports);
 
             return null === $class ? $leaf : new NameRefType($leaf->name, $class);
+        });
+    }
+
+    /**
+     * A type written outside the source tree, its names as that file means them: each the class it
+     * resolved to ({@see self::resolveImportedNames()}), spelt in full, so no module's alias of the
+     * same short name answers to it. Such a file is in no module, so a name that resolved to no
+     * class fails, with why.
+     */
+    public function namesAsClasses(ParsedType $type, string $why): ParsedType
+    {
+        return $this->mapLeaves($type, static function (ParsedType $leaf) use ($why): ParsedType {
+            if (!$leaf instanceof NameRefType) {
+                return $leaf;
+            }
+            if (null === $leaf->class) {
+                throw new RuntimeException(\sprintf('`%s` names no class where it is written. %s', $leaf->name, $why));
+            }
+
+            return new NameRefType($leaf->class, $leaf->class);
         });
     }
 

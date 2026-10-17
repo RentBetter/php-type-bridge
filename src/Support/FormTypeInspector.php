@@ -122,6 +122,8 @@ final class FormTypeInspector
                 trim: false !== $this->resolveOption($config, 'trim'),
                 blankStaysString: self::keepsBlankAString($config),
                 entryConstraints: $this->entryConstraints($entry, $constraints),
+                entryBlankStaysString: null !== $entry && self::keepsBlankAString($entry->getFormConfig()),
+                transformsValue: self::transformsValue($config),
             );
         }
 
@@ -140,6 +142,27 @@ final class FormTypeInspector
     {
         foreach ($config->getViewTransformers() as $transformer) {
             if ($transformer instanceof TextType) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the form changes a submitted value before it is validated: a model transformer does, and
+     * a view transformer — a number's, a date's, a choice's — but TextType's own, which turns only a
+     * null into ''.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private static function transformsValue(FormConfigInterface $config): bool
+    {
+        if ([] !== $config->getModelTransformers()) {
+            return true;
+        }
+        foreach ($config->getViewTransformers() as $transformer) {
+            if (!$transformer instanceof TextType) {
                 return true;
             }
         }

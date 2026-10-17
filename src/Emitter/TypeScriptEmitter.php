@@ -11,7 +11,6 @@ use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
-use PTGS\TypeBridge\Model\CollectedResponseProperty;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
@@ -157,14 +156,6 @@ final class TypeScriptEmitter
     private ?ClassTypeResolver $classTypes = null;
 
     /**
-     * Every endpoint's query, by the class whose `_self` it is, whichever module the endpoint is in:
-     * a query's own interface leaves out a key that may be null.
-     *
-     * @var array<class-string, CollectedInputReference>
-     */
-    private array $queries = [];
-
-    /**
      * What emit() declares in the shared root module — the config type aliases and the
      * `WithIncludes` helper the domain modules use — so emitDiscovered(), which writes that module
      * too, declares them alongside its own.
@@ -239,18 +230,9 @@ final class TypeScriptEmitter
     public function emit(array $domains, array $responses = [], array $contracts = []): array
     {
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
-        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses));
+        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses), array_keys($this->typeAliases));
         $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
-        $this->queries = [];
-        foreach ($contracts as $domainContracts) {
-            foreach ($domainContracts as $contract) {
-                $query = $contract->request?->query;
-                if (null !== $query) {
-                    $this->queries[$query->ownerClass] = $query;
-                }
-            }
-        }
 
         $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
         sort($allDomains);
@@ -452,7 +434,6 @@ final class TypeScriptEmitter
             naming: $this->naming,
             preserveNullIndex: $this->preserveNullIndex,
             includes: $this->includes,
-            queries: $this->queries,
         );
 
         $blocks = [];
@@ -486,6 +467,9 @@ final class TypeScriptEmitter
         // Helpers every module with endpoints shares, declared once like the aliases.
         $helpers = [];
         if ([] !== $contracts) {
+            if (EndpointContractEmitter::anyTakesQueryForm($contracts)) {
+                $helpers[] = new EmittedBlock(40, '// Endpoint inputs', EndpointContractEmitter::AS_QUERY_HELPER, 'AsQuery');
+            }
             if (EndpointContractEmitter::anyTakesIncludeQuery($contracts, $this->includes)) {
                 $helpers[] = new EmittedBlock(40, '// Endpoint inputs', EndpointContractEmitter::includeQueryHelper($this->includes), 'IncludeQuery');
             }
@@ -793,8 +777,9 @@ final class TypeScriptEmitter
     /**
      * Imports for the names a type uses bare that no import answers to: the classes it names where
      * no alias of the module it is written in does — see {@see ClassTypeResolver} — and that
-     * module's aliases, where it is not this one. The same choice the converter makes, so what is
-     * imported is what is referenced.
+     * module's aliases, where it is not this one. A config alias is never imported: this module
+     * declares its own. The same choice the converter makes, so what is imported is what is
+     * referenced.
      *
      * @param array<string, list<string>> $imports
      * @param string|null $aliasDomain the module the type is written in, where it is not this one
@@ -804,7 +789,7 @@ final class TypeScriptEmitter
     {
         $aliasDomain ??= $domain;
         if ($type instanceof NameRefType) {
-            if (isset($imported[$type->name])) {
+            if (isset($imported[$type->name]) || $this->symbols->isShared($type->name)) {
                 return;
             }
 

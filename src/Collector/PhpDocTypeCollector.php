@@ -82,7 +82,8 @@ final class PhpDocTypeCollector
             }
 
             foreach ($definitions as $alias => $definition) {
-                $failure = $this->docHelper->unresolvedImportUsedIn($definition, $unresolved, \sprintf('The @phpstan-type %s on %s', $alias, $className));
+                $parsed = $this->parser->parse($definition);
+                $failure = $this->docHelper->unresolvedImportUsedIn($parsed, $unresolved, \sprintf('The @phpstan-type %s on %s', $alias, $className));
                 if (null !== $failure) {
                     throw $failure;
                 }
@@ -103,7 +104,7 @@ final class PhpDocTypeCollector
                 $domains[$domain]->types[$emittedName] = new CollectedType(
                     name: $emittedName,
                     definition: $definition,
-                    parsed: $this->docHelper->resolveImportedNames($this->parser->parse($definition), $imports, $className, $classImports, $localAliases),
+                    parsed: $this->docHelper->resolveImportedNames($parsed, $imports, $className, $classImports, $localAliases),
                     sourceFile: $file,
                     domain: $domain,
                     ownerClass: $className,

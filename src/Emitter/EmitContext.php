@@ -31,7 +31,6 @@ final readonly class EmitContext
      * @param array<string, true>                   $preserveNullIndex keyed by "ShapeName.fieldName"
      * @param list<string>                          $candidateClasses every class in the generation run (for emitters that scan, e.g. a common-module emitter)
      * @param IncludeConvention                     $includes what shapes a response on request, and the query parameters that ask
-     * @param array<class-string, CollectedInputReference> $queries every endpoint's query, by the class whose `_self` it is
      */
     public function __construct(
         public string $domain,
@@ -47,7 +46,6 @@ final readonly class EmitContext
         private array $preserveNullIndex,
         public array $candidateClasses = [],
         public IncludeConvention $includes = new IncludeConvention(),
-        public array $queries = [],
     ) {}
 
     public function convert(ParsedType $type, ConversionScope $scope): string
@@ -62,9 +60,8 @@ final readonly class EmitContext
      * @param list<\PTGS\TypeBridge\Model\ImportedType> $imports
      * @param string|null $aliasDomain the module a bare name is an alias of, where it is not this one
      *        ({@see ConversionScope::$aliasDomain})
-     * @param bool $inQuery whether the declaration is a query's ({@see ConversionScope::$inQuery})
      */
-    public function scopeFor(array $imports, ?string $aliasDomain = null, bool $inQuery = false): ConversionScope
+    public function scopeFor(array $imports, ?string $aliasDomain = null): ConversionScope
     {
         $symbols = [];
         foreach ($imports as $importedType) {
@@ -76,7 +73,7 @@ final readonly class EmitContext
             $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
         }
 
-        return new ConversionScope($this->domain, $symbols, $this->foreignAliases, $aliasDomain === $this->domain ? null : $aliasDomain, $inQuery);
+        return new ConversionScope($this->domain, $symbols, $this->foreignAliases, $aliasDomain === $this->domain ? null : $aliasDomain);
     }
 
     public function localReferenceFor(string $foreignDomain, string $name): string

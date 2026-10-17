@@ -88,12 +88,15 @@ final class EndpointQueryTest extends TestCase
         self::assertStringContainsString("export interface AnyProductFilterData {\n  product: string | null;\n}", $reports);
     }
 
-    public function test_a_query_whose_keys_can_never_be_null_is_its_type_as_declared(): void
+    public function test_every_query_is_its_type_as_a_query_string_sends_it(): void
     {
+        // Whether a key may be null can rest on a shape this can't see — a base outside the tree —
+        // so every query form's type is taken as sent; where none may be null that is the type.
         $reports = $this->emit()['Reports'];
 
-        self::assertStringContainsString('export type ShowReportQuery = ReportFilterData;', $reports);
-        self::assertStringContainsString('export type ListProductReportsQuery = NullableProductFilterData;', $reports);
+        self::assertStringContainsString('export type ShowReportQuery = AsQuery<ReportFilterData>;', $reports);
+        self::assertStringContainsString('export type ListProductReportsQuery = AsQuery<NullableProductFilterData>;', $reports);
+        self::assertSame(1, substr_count($reports, 'export type AsQuery<T> = '));
     }
 
     public function test_an_inherited_key_that_may_be_null_is_one_a_query_may_leave_out(): void
