@@ -81,7 +81,19 @@ final class EndpointQueryTest extends TestCase
         $reports = $this->emit()['Reports'];
 
         self::assertStringContainsString('export const ListAnyProductReports: Endpoint<ListAnyProductReportsEndpointMap, { query?: ListAnyProductReportsQuery }> = {', $reports);
-        self::assertStringContainsString("export interface AnyProductFilterData {\n  product?: string | null;\n}", $reports);
+        self::assertStringContainsString('export type ListAnyProductReportsQuery = AsQuery<AnyProductFilterData>;', $reports);
+        self::assertStringContainsString('export type AsQuery<T> = ', $reports);
+        // The type itself is as declared, whatever else uses it — a body, a response — where a null
+        // is sent and the key is always there.
+        self::assertStringContainsString("export interface AnyProductFilterData {\n  product: string | null;\n}", $reports);
+    }
+
+    public function test_a_query_whose_keys_can_never_be_null_is_its_type_as_declared(): void
+    {
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString('export type ShowReportQuery = ReportFilterData;', $reports);
+        self::assertStringContainsString('export type ListProductReportsQuery = NullableProductFilterData;', $reports);
     }
 
     public function test_an_inherited_key_that_may_be_null_is_one_a_query_may_leave_out(): void
@@ -92,8 +104,41 @@ final class EndpointQueryTest extends TestCase
 
         self::assertStringContainsString('export const ListAnyRegionReports: Endpoint<ListAnyRegionReportsEndpointMap, { query?: ListAnyRegionReportsQuery }> = {', $reports);
         self::assertStringContainsString("export interface RegionScope {\n  region: string | null;\n}", $reports);
-        // And inside a shape it sends, too.
-        self::assertStringContainsString("export interface AnyRegionFilterData extends Omit<RegionScope, 'region'> {\n  region?: RegionScope['region'];\n  page?: number;\n  range?: { from?: string | null };\n}", $reports);
+        // AsQuery<T> leaves it out at any depth: inside a shape it sends, too.
+        self::assertStringContainsString("export interface AnyRegionFilterData extends RegionScope {\n  page?: number;\n  range?: { from: string | null };\n}", $reports);
+        self::assertStringContainsString('export type ListAnyRegionReportsQuery = AsQuery<AnyRegionFilterData>;', $reports);
+    }
+
+    public function test_a_query_that_narrows_a_key_it_inherits_still_extends_its_base(): void
+    {
+        // An interface that made its own `region` optional would no longer extend RegionScope.
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString("export interface NorthRegionFilterData extends RegionScope {\n  region: 'north' | null;\n  page?: number;\n}", $reports);
+        self::assertStringContainsString('export type ListNorthReportsQuery = AsQuery<NorthRegionFilterData>;', $reports);
+        self::assertStringContainsString('export const ListNorthReports: Endpoint<ListNorthReportsEndpointMap, { query?: ListNorthReportsQuery }> = {', $reports);
+    }
+
+    public function test_a_query_extending_a_shape_open_to_more_keys_keeps_every_key_it_inherits(): void
+    {
+        // Omit<> over an index signature keeps nothing but the signature: `product` would be
+        // neither required nor a string.
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringNotContainsString('Omit<', $reports);
+        self::assertStringContainsString("export interface OpenRegionFilterData extends OpenScope {\n  page?: number;\n}", $reports);
+        self::assertStringContainsString('export type ShowOpenRegionReportQuery = AsQuery<OpenRegionFilterData>;', $reports);
+        self::assertStringContainsString('export const ShowOpenRegionReport: Endpoint<ShowOpenRegionReportEndpointMap, { query: ShowOpenRegionReportQuery }> = {', $reports);
+    }
+
+    public function test_a_key_inherited_from_two_levels_is_declared_once(): void
+    {
+        // Once by each shape that declares it, and not again by the query.
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString("export interface LayeredRegionFilterData extends MidScope {\n  page?: number;\n}", $reports);
+        self::assertStringContainsString("export interface MidScope extends DeepScope {\n  region: string | null;\n}", $reports);
+        self::assertStringContainsString("export interface DeepScope {\n  region: string | null;\n}", $reports);
     }
 
     public function test_keys_inherited_through_a_base_that_cant_be_read_are_unknown_not_partial(): void
@@ -120,7 +165,7 @@ final class EndpointQueryTest extends TestCase
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             // A null that means something, so the contract says `T|null`: in a query, "any product".
-            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region'],
+            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region'],
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),
             $responseCollector->collect(self::SRC),

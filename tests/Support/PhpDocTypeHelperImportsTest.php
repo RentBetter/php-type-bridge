@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Tests\Support;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
+use RuntimeException;
 
 /**
  * A file's `@phpstan-import-type` tags: an import from outside the source tree is set aside, for
@@ -57,5 +60,36 @@ final class PhpDocTypeHelperImportsTest extends TestCase
 
         self::assertSame(['Page'], array_keys($read['imports']));
         self::assertSame(['Amount' => 'Class reference "\\Vendor\\Library\\Money" from "App\\Billing\\View\\InvoiceView" could not be resolved.'], $read['unresolved']);
+    }
+
+    public function test_read_strictly_an_import_from_outside_the_tree_fails(): void
+    {
+        // The reader every release before took: still there, for a caller that wants each import.
+        $helper = new PhpDocTypeHelper();
+        self::assertSame(['Page', 'Cursor'], array_keys($helper->extractImportedTypes(self::RESOLVED, 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser())));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('could not be resolved');
+        $helper->extractImportedTypes(self::ONE_UNRESOLVED, 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser());
+    }
+
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function spellings(): iterable
+    {
+        yield 'as a type' => ['list<Amount>', true];
+        yield 'in a union' => ['Amount|null', true];
+        yield 'as a shape key' => ['array{Amount: int}', false];
+        yield 'as a string literal' => ["'Amount'|'other'", false];
+        yield 'inside a longer name' => ['AmountView', false];
+    }
+
+    #[DataProvider('spellings')]
+    public function test_an_unresolved_import_is_used_only_where_a_type_names_it(string $type, bool $used): void
+    {
+        $failure = (new PhpDocTypeHelper())->unresolvedImportUsedIn((new PhpDocShapeParser())->parse($type), ['Amount' => 'Amount is not found.'], 'This alias');
+
+        self::assertSame($used, null !== $failure);
     }
 }

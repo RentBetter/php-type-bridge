@@ -98,6 +98,13 @@ final class PhpDocTypeCollectorTest extends TestCase
         (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnresolvedImportUsedFixtures');
     }
 
+    public function test_an_unresolved_imports_name_spelt_as_a_key_or_a_literal_is_no_use_of_it(): void
+    {
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnresolvedImportSpelledFixtures');
+
+        self::assertSame(['LedgerView'], array_keys($domains['Common']->types));
+    }
+
     public function test_an_import_from_outside_the_tree_that_no_alias_uses_is_no_matter(): void
     {
         $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/InheritedAliasAndOutOfTreeImportFixtures');

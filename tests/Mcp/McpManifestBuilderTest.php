@@ -1282,6 +1282,31 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => ['string', 'null']], $body['labels']['items']);
     }
 
+    public function testACollectionEntryKeptAnEmptyStringTakesNoNullWhereANotBlankRefusesIt(): void
+    {
+        // Its entry_options give each entry empty_data '': a null sent for one reaches validation
+        // as '', which NotBlank(allowNull: true) refuses and a NotNull lets through.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
+        $codes = new CollectedFormField(name: 'codes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotBlank(allowNull: true)], entryBlankStaysString: true);
+        $notes = new CollectedFormField(name: 'notes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotNull()], entryBlankStaysString: true);
+        $contract = (new PhpDocShapeParser())->parse('array{codes?: list<string|null>, notes?: list<string|null>}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $body = $this->toolWithBody('PUT', [$codes, $notes], $contract)['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $body['codes']['items']);
+        self::assertSame(['type' => ['string', 'null']], $body['notes']['items']);
+    }
+
+    public function testARegexOnAValueTheFormTransformsIsNoPattern(): void
+    {
+        // It validates what the transformer makes of the value — `so-12` uppercased, say — not what
+        // a caller sends, so as a pattern it would refuse what the server takes.
+        $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Regex('/^[A-Z]+-[0-9]+$/')], transformsValue: true);
+
+        self::assertSame(['type' => 'string'], $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code']);
+    }
+
     public function testAFieldRebuiltWithItsDeclaredContractsKeepsItsTrim(): void
     {
         $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, trim: false);

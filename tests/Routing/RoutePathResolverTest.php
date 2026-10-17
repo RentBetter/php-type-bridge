@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Routing;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
+use PTGS\TypeBridge\Tests\Fixture\RequirementRoutedMcpFixtures\Codes\Controller\CodeController;
 use PTGS\TypeBridge\Tests\Fixture\RoutingApp\Health\HealthController;
 use PTGS\TypeBridge\Tests\Fixture\RoutingApp\Projects\Controller\ProjectController;
 
@@ -38,6 +39,17 @@ final class RoutePathResolverTest extends TestCase
     {
         // Invokable controllers are keyed by the bare FQCN, matching Symfony's own convention.
         self::assertSame('/health', $this->resolver()->pathFor(HealthController::class, '__invoke'));
+    }
+
+    public function testAMethodRoutedTwiceResolvesToTheRouteItsAttributeDeclares(): void
+    {
+        // The route its first #[Route] declares, not the last the collection lists; given the path
+        // a #[Route] declares, the route that serves that one.
+        $resolver = new RoutePathResolver(__DIR__ . '/../Fixture/RequirementRoutedMcpFixtures', 'config/routes.yaml');
+
+        self::assertSame('/notes/{id}', $resolver->pathFor(CodeController::class, 'showNoteAction'));
+        self::assertSame('[0-9]+', $resolver->routeFor(CodeController::class, 'showNoteAction')?->getRequirement('id'));
+        self::assertSame('/legacy/{slug}', $resolver->pathFor(CodeController::class, 'showNoteAction', '/legacy/{slug}'));
     }
 
     public function testUnknownMethodsResolveToNull(): void

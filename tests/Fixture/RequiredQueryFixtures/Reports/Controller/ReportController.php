@@ -8,8 +8,11 @@ use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyRegionFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LayeredRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\MonthlyReportFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\NorthRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\NullableProductFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\OpenRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\QuarterlyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportListFilterType;
@@ -75,6 +78,30 @@ final class ReportController
     #[ApiRequest(query: AnyRegionFilterType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function listAnyRegionReports(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/north', methods: ['GET'])]
+    #[ApiRequest(query: NorthRegionFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listNorthReports(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/open', methods: ['GET'])]
+    #[ApiRequest(query: OpenRegionFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function showOpenRegionReport(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/layered', methods: ['GET'])]
+    #[ApiRequest(query: LayeredRegionFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listLayeredReports(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

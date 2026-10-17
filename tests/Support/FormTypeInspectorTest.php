@@ -115,6 +115,27 @@ final class FormTypeInspectorTest extends TestCase
         self::assertCount(2, $fields['tags']->withDeclared([], [], null)->entryConstraints);
     }
 
+    public function test_it_records_whether_a_blank_entry_stays_an_empty_string(): void
+    {
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+
+        self::assertTrue($fields['codes']->entryBlankStaysString, "Its entry_options give each entry empty_data ''");
+        self::assertFalse($fields['tags']->entryBlankStaysString);
+        self::assertFalse($fields['title']->entryBlankStaysString, 'No entries at all');
+        self::assertTrue($fields['codes']->withDeclared([], [], null)->entryBlankStaysString);
+    }
+
+    public function test_it_records_whether_the_form_transforms_a_value_before_it_is_validated(): void
+    {
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+
+        self::assertFalse($fields['title']->transformsValue);
+        self::assertFalse($fields['code']->transformsValue, "TextType's own transformer only makes a null ''");
+        self::assertTrue($fields['count']->transformsValue, 'A number is read from what was sent');
+        self::assertTrue($fields['ref']->transformsValue, 'A model transformer');
+        self::assertTrue($fields['ref']->withDeclared([], [], null)->transformsValue);
+    }
+
     public function test_it_records_whether_the_form_trims_a_fields_value(): void
     {
         $fields = array_column((new FormTypeInspector())->inspect(\PTGS\TypeBridge\Tests\Fixture\ReimportedScopeFixtures\Reports\Form\ScopedReportFilterType::class)['fields'], null, 'name');

@@ -83,6 +83,17 @@ final class McpManifestGeneratorTest extends TestCase
         self::assertSame(['type' => 'number'], $properties['page'] ?? null);
     }
 
+    public function testAMethodRoutedTwiceIsDescribedByItsFirstRoute(): void
+    {
+        // Its params are named from the first #[Route]; its path and their requirements must be
+        // that route's too, not whichever route the collection happens to list last.
+        $dir = __DIR__ . '/../Fixture/RequirementRoutedMcpFixtures';
+        $tool = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name')['ShowNote'] ?? [];
+
+        self::assertSame('/notes/{id}', $tool['path'] ?? null);
+        self::assertSame(['type' => 'number'], $tool['inputSchema']['properties']['id'] ?? null);
+    }
+
     public function testWithoutRoutingTheAttributePathStands(): void
     {
         // Existing consumers configure no routing and put the full path on the attribute;

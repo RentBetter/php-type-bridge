@@ -22,4 +22,11 @@ final class NoteData
     /** @var list<string|null> */
     #[Assert\All([new Assert\NotNull(groups: ['strict']), new Assert\Length(max: 50)])]
     public array $notes = [];
+
+    /** @var list<string|null> */
+    #[Assert\All([new Assert\NotBlank(allowNull: true)])]
+    public array $codes = [];
+
+    #[Assert\Regex('/^[A-Z]+-[0-9]+$/')]
+    public ?string $ref = null;
 }

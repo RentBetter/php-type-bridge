@@ -18,4 +18,17 @@ final class CodeController
     {
         throw new \LogicException('Fixture only.');
     }
+
+    /**
+     * Routed twice: what is described — its path, and each param's name and requirement — is the
+     * first route, its own `{id}` a number, not the `{slug}` the second serves.
+     */
+    #[Route('/notes/{id}', requirements: ['id' => '[0-9]+'], methods: ['GET'])]
+    #[Route('/legacy/{slug}', methods: ['GET'])]
+    #[ApiResponses([CodeResponse::class])]
+    #[McpTool(description: 'A note.')]
+    public function showNoteAction(): CodeResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
 }
