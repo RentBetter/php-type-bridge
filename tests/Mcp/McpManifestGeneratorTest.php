@@ -59,6 +59,41 @@ final class McpManifestGeneratorTest extends TestCase
         self::assertSame(['/api/ping'], array_column($manifest['tools'], 'path'));
     }
 
+    public function testWhetherARouteMatchesByCharacterIsWhatTheRouterServes(): void
+    {
+        // The method says `utf8: false`; the import that loads it says `utf8: true`, and the import
+        // wins. Matched by character, `\w` is Unicode in PCRE and ASCII in JSON Schema: no pattern.
+        $dir = __DIR__ . '/../Fixture/Utf8RoutedMcpFixtures';
+        $manifest = (new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir));
+
+        $code = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties']['code'] ?? null;
+        self::assertSame(['type' => 'string'], $code);
+    }
+
+    public function testWhatAPathParamMustLookLikeIsWhatTheRouterServes(): void
+    {
+        // The method says a code is lettered; the import that loads it says a number will do too,
+        // and the import wins: the tool must not refuse `123`, which the router serves.
+        $dir = __DIR__ . '/../Fixture/RequirementRoutedMcpFixtures';
+        $manifest = (new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir));
+
+        $properties = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties'] ?? [];
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]{2,5}-[0-9]+|[0-9]+)$'], $properties['code'] ?? null);
+        // And what it is: the import's `[0-9]+` is a number.
+        self::assertSame(['type' => 'number'], $properties['page'] ?? null);
+    }
+
+    public function testAMethodRoutedTwiceIsDescribedByItsFirstRoute(): void
+    {
+        // Its params are named from the first #[Route]; its path and their requirements must be
+        // that route's too, not whichever route the collection happens to list last.
+        $dir = __DIR__ . '/../Fixture/RequirementRoutedMcpFixtures';
+        $tool = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name')['ShowNote'] ?? [];
+
+        self::assertSame('/notes/{id}', $tool['path'] ?? null);
+        self::assertSame(['type' => 'number'], $tool['inputSchema']['properties']['id'] ?? null);
+    }
+
     public function testWithoutRoutingTheAttributePathStands(): void
     {
         // Existing consumers configure no routing and put the full path on the attribute;

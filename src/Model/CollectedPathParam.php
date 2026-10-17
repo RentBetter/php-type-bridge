@@ -9,6 +9,9 @@ namespace PTGS\TypeBridge\Model;
  * The raw route requirement is retained so later versions can attach a Zod schema or a
  * value-resolver target keyed off the same {@see \PTGS\TypeBridge\Routing\PathParam} pattern,
  * without changing this object's consumers.
+ *
+ * `utf8` is the route's own `utf8` option when it states one — whether the router matches the
+ * requirement by character (PCRE `u`) or by byte — and null when it leaves it to the router's default.
  */
 final readonly class CollectedPathParam
 {
@@ -16,5 +19,6 @@ final readonly class CollectedPathParam
         public string $name,
         public string $tsType,
         public ?string $requirement = null,
+        public ?bool $utf8 = null,
     ) {}
 }

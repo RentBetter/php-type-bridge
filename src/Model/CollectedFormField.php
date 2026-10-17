@@ -31,6 +31,19 @@ final readonly class CollectedFormField
      *                                                field with no children: one whose type reads the submitted
      *                                                value whole, so the form shows nothing of what it takes.
      *                                                Null for any other field, and where `_self` is not a shape
+     * @param bool                     $trim          the field's `trim` option: whether the form trims what it is
+     *                                                 sent (Symfony's StringUtil::trim) before it is validated
+     * @param bool                     $blankStaysString whether a blank value reaches validation as '' rather than
+     *                                                 null: a text field whose `empty_data` is '', which TextType
+     *                                                 keeps a string (a number's transformer still makes it null)
+     * @param list<Constraint>         $entryConstraints what each entry of a collection is validated against: its
+     *                                                 `entry_options` constraints and an All on its property
+     * @param bool                     $entryBlankStaysString whether a collection entry's blank value reaches
+     *                                                 validation as '', as `$blankStaysString` says of a field
+     * @param bool                     $transformsValue whether the form transforms a submitted value before it is
+     *                                                 validated: a model transformer, or a view transformer but
+     *                                                 TextType's own (which only turns a null into ''). What a
+     *                                                 constraint then sees is not what was sent
      */
     public function __construct(
         public string $name,
@@ -53,6 +66,11 @@ final readonly class CollectedFormField
         public array $constraints = [],
         public ?string $ownerClass = null,
         public ?ShapeType $contract = null,
+        public bool $trim = true,
+        public bool $blankStaysString = false,
+        public array $entryConstraints = [],
+        public bool $entryBlankStaysString = false,
+        public bool $transformsValue = false,
     ) {}
 
     /**
@@ -85,6 +103,11 @@ final readonly class CollectedFormField
             constraints: $this->constraints,
             ownerClass: $this->ownerClass,
             contract: $contract,
+            trim: $this->trim,
+            blankStaysString: $this->blankStaysString,
+            entryConstraints: $this->entryConstraints,
+            entryBlankStaysString: $this->entryBlankStaysString,
+            transformsValue: $this->transformsValue,
         );
     }
 }

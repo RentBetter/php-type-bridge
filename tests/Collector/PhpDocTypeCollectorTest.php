@@ -89,4 +89,36 @@ final class PhpDocTypeCollectorTest extends TestCase
         self::assertInstanceOf(ValueOfType::class, $statusFields['value']->type);
         self::assertSame('ProjectStatus', $statusFields['value']->type->enumClass);
     }
+
+    public function test_an_alias_typed_with_an_import_from_outside_the_tree_says_which(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/could not be resolved/');
+
+        (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnresolvedImportUsedFixtures');
+    }
+
+    public function test_an_unresolved_imports_name_spelt_as_a_key_or_a_literal_is_no_use_of_it(): void
+    {
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnresolvedImportSpelledFixtures');
+
+        self::assertSame(['LedgerView'], array_keys($domains['Common']->types));
+    }
+
+    public function test_an_import_from_outside_the_tree_that_no_alias_uses_is_no_matter(): void
+    {
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/InheritedAliasAndOutOfTreeImportFixtures');
+
+        self::assertSame(['Page'], array_keys($domains['Common']->types));
+    }
+
+    public function test_an_alias_typed_with_an_imported_php_stan_only_alias_says_so(): void
+    {
+        // RowSource keeps `Row` for PHPStan; RowView emits a `Row` of its own. LineView imports
+        // RowSource's, which is never emitted — it is not quietly RowView's instead.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/"Row" is #\\[PhpStanOnly\\] on .*RowSource.*Line on .*LineView/s');
+
+        (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/PhpStanOnlyImportedFixtures');
+    }
 }

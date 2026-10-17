@@ -104,12 +104,9 @@ final class SelfShapeEmitter implements TypeEmitter
         $this->assertNullableMatchesPreserveNullConfig($field, $shapeName, $context);
 
         // An included key is absent unless the request asks for it, whatever its PHP spelling.
-        $optional = $field->optional || $context->converter->isIncluded($field->type);
-        $type = $field->type;
-        if ($type instanceof NullableType && $type->optional) {
-            $optional = true;
-            $type = $type->inner;
-        }
+        $optional = $field->mayBeLeftOut() || $context->converter->isIncluded($field->type);
+        // `key: ?T` is emitted `key?: T`: left out, not sent as null.
+        $type = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
 
         return \sprintf('  %s%s: %s;', TypeToTsConverter::propertyName($field->name), $optional ? '?' : '', $context->convert($type, $scope));
     }

@@ -12,6 +12,7 @@ use PTGS\TypeBridge\Emitter\DomainAssembler;
 use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
+use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Support\RootSources;
@@ -75,9 +76,11 @@ final class GenerateTypesCommand extends Command
         $files = [];
         if (!$discoveredOnly) {
             $enumResolver->scanDirectory($sourceDir);
-            $responseCollector = new ResponseClassCollector(domainGuesser: $domainGuesser);
+            // One reader of the source files for every collector: each file is read and parsed once.
+            $classFiles = new ClassFileTypes(domainGuesser: $domainGuesser);
+            $responseCollector = new ResponseClassCollector(domainGuesser: $domainGuesser, files: $classFiles);
             $files = $emitter->emit(
-                (new PhpDocTypeCollector(domainGuesser: $domainGuesser))->collect($sourceDir),
+                (new PhpDocTypeCollector(domainGuesser: $domainGuesser, files: $classFiles))->collect($sourceDir),
                 $responseCollector->collect($sourceDir),
                 (new EndpointContractCollector(
                     domainGuesser: $domainGuesser,
@@ -85,6 +88,7 @@ final class GenerateTypesCommand extends Command
                     mcpDescriptionAttribute: $config->mcpDescriptionAttribute,
                     mcpDescriptionProperty: $config->mcpDescriptionProperty,
                     routePathResolver: $config->routePathResolver(),
+                    files: $classFiles,
                 ))->collect($sourceDir, $responseCollector->collectIndex($sourceDir)),
             );
         }

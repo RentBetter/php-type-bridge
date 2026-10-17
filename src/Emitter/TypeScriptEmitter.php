@@ -11,7 +11,6 @@ use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
-use PTGS\TypeBridge\Model\CollectedResponseProperty;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
@@ -231,7 +230,7 @@ final class TypeScriptEmitter
     public function emit(array $domains, array $responses = [], array $contracts = []): array
     {
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
-        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses));
+        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses), array_keys($this->typeAliases));
         $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
 
@@ -468,6 +467,9 @@ final class TypeScriptEmitter
         // Helpers every module with endpoints shares, declared once like the aliases.
         $helpers = [];
         if ([] !== $contracts) {
+            if (EndpointContractEmitter::anyTakesQueryForm($contracts)) {
+                $helpers[] = new EmittedBlock(40, '// Endpoint inputs', EndpointContractEmitter::AS_QUERY_HELPER, 'AsQuery');
+            }
             if (EndpointContractEmitter::anyTakesIncludeQuery($contracts, $this->includes)) {
                 $helpers[] = new EmittedBlock(40, '// Endpoint inputs', EndpointContractEmitter::includeQueryHelper($this->includes), 'IncludeQuery');
             }
@@ -619,13 +621,13 @@ final class TypeScriptEmitter
         }
 
         foreach ($responses as $response) {
-            $this->appendImportedTypes($domain, $this->referenced($response->imports, array_map(
-                static fn(CollectedResponseProperty $property): ParsedType => $property->parsed,
-                $response->properties,
-            )), $imports);
             foreach ($response->properties as $property) {
+                // Each property imports what the file it is written in imports, and the aliases of
+                // that file's module it names bare.
+                $this->appendImportedTypes($domain, $this->referenced($property->imports, [$property->parsed]), $imports);
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
-                $this->appendClassTypes($domain, $property->parsed, $imports);
+                $imported = array_fill_keys(array_map(static fn(ImportedType $import): string => $import->targetTypeName, $property->imports), true);
+                $this->appendClassTypes($domain, $property->parsed, $imports, $property->writtenInDomain ?? $domain, $imported);
             }
         }
 
@@ -773,27 +775,37 @@ final class TypeScriptEmitter
     }
 
     /**
-     * Imports for the classes a type names where no alias answers to the name — see
-     * {@see ClassTypeResolver}. The same test the converter makes, so what is imported is what
-     * is referenced.
+     * Imports for the names a type uses bare that no import answers to: the classes it names where
+     * no alias of the module it is written in does — see {@see ClassTypeResolver} — and that
+     * module's aliases, where it is not this one. A config alias is never imported: this module
+     * declares its own. The same choice the converter makes, so what is imported is what is
+     * referenced.
      *
      * @param array<string, list<string>> $imports
+     * @param string|null $aliasDomain the module the type is written in, where it is not this one
+     * @param array<string, true> $imported the names the file's imports answer to
      */
-    private function appendClassTypes(string $domain, ParsedType $type, array &$imports): void
+    private function appendClassTypes(string $domain, ParsedType $type, array &$imports, ?string $aliasDomain = null, array $imported = []): void
     {
+        $aliasDomain ??= $domain;
         if ($type instanceof NameRefType) {
-            if (null !== $type->class && null !== $this->classTypes && !$this->symbols->has($domain, $type->name)) {
-                $symbol = $this->classTypes->resolve($type->class);
-                if ($symbol->targetDomain !== $domain) {
-                    $imports[$symbol->targetDomain][] = $symbol->canonicalName;
-                }
+            if (isset($imported[$type->name]) || $this->symbols->isShared($type->name)) {
+                return;
+            }
+
+            $symbol = $this->converter->classSymbol($type, $aliasDomain);
+            if (null !== $symbol && $symbol->targetDomain !== $domain) {
+                $imports[$symbol->targetDomain][] = $symbol->canonicalName;
+            }
+            if (null === $symbol && $aliasDomain !== $domain) {
+                $imports[$aliasDomain][] = $this->symbolFor($aliasDomain, $type->name);
             }
 
             return;
         }
 
         foreach ($this->childTypes($type) as $child) {
-            $this->appendClassTypes($domain, $child, $imports);
+            $this->appendClassTypes($domain, $child, $imports, $aliasDomain, $imported);
         }
     }
 

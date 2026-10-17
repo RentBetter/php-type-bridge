@@ -58,15 +58,22 @@ final readonly class EmitContext
      * type names to the local symbol (alias-aware) it resolves to in this file.
      *
      * @param list<\PTGS\TypeBridge\Model\ImportedType> $imports
+     * @param string|null $aliasDomain the module a bare name is an alias of, where it is not this one
+     *        ({@see ConversionScope::$aliasDomain})
      */
-    public function scopeFor(array $imports): ConversionScope
+    public function scopeFor(array $imports, ?string $aliasDomain = null): ConversionScope
     {
         $symbols = [];
         foreach ($imports as $importedType) {
+            // A class may declare what is never emitted (a #[PhpStanOnly] alias): it is no symbol
+            // here. The collectors fail what is typed with one, imported or declared.
+            if (!$this->symbols->has($importedType->targetDomain, $importedType->targetTypeName)) {
+                continue;
+            }
             $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
         }
 
-        return new ConversionScope($this->domain, $symbols, $this->foreignAliases);
+        return new ConversionScope($this->domain, $symbols, $this->foreignAliases, $aliasDomain === $this->domain ? null : $aliasDomain);
     }
 
     public function localReferenceFor(string $foreignDomain, string $name): string

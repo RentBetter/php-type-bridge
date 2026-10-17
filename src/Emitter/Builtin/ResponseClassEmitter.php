@@ -40,11 +40,23 @@ final class ResponseClassEmitter implements TypeEmitter
 
     private function render(CollectedApiResponseClass $response, EmitContext $context): string
     {
-        $scope = $context->scopeFor($response->imports);
-
+        // A 204 is sent with no body at all; the collector gives it no properties.
         if (204 === $response->status && [] === $response->properties) {
-            return \sprintf('export type %s = null;', $context->names->responseDeclarationName($response));
+            $name = $context->names->responseDeclarationName($response);
+            $lines = [\sprintf('export type %s = null;', $name)];
+            // One that declares properties of its own was an interface of them, under the interface
+            // prefix: the name stays a while, deprecated, so code that imports it still compiles.
+            $was = $context->naming->interfaceName($response->name);
+            if ($was !== $name && self::declaresProperties($response->className)) {
+                $lines[] = \sprintf('/** @deprecated A 204 is sent with no body; use %s. */', $name);
+                $lines[] = \sprintf('export type %s = %s;', $was, $name);
+            }
+
+            return implode("\n", $lines);
         }
+
+        // One scope per file a property is written in, not one per property.
+        $scopes = [];
 
         $name = $context->names->responseDeclarationName($response);
         $lines = [\sprintf('export interface %s {', $name)];
@@ -55,7 +67,8 @@ final class ResponseClassEmitter implements TypeEmitter
                 '  %s%s: %s;',
                 $property->name,
                 $property->optional || $isIncluded ? '?' : '',
-                $context->convert($property->parsed, $scope),
+                // Converted in the scope of the file it is written in.
+                $context->convert($property->parsed, $scopes[$property->writtenIn ?? $response->className] ??= $context->scopeFor($property->imports, aliasDomain: $property->writtenInDomain)),
             );
 
             // Present whenever it is asked for: a side-load (an empty list when nothing is
@@ -72,6 +85,24 @@ final class ResponseClassEmitter implements TypeEmitter
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Whether the class declares public properties of its own, inherited ones aside.
+     */
+    private static function declaresProperties(string $class): bool
+    {
+        if (!class_exists($class)) {
+            return false;
+        }
+
+        foreach ((new ReflectionClass($class))->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            if (!$property->isStatic() && $property->getDeclaringClass()->getName() === $class) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function isSideLoad(string $class, string $property, EmitContext $context): bool

@@ -77,7 +77,7 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface UpdateProjectResponse {', $projects);
         self::assertStringContainsString('project: ProjectView;', $projects);
         self::assertStringContainsString('export type DeleteProjectResponse = null;', $projects);
-        self::assertStringContainsString('export type ListProjectsQuery = ProjectFiltersData;', $projects);
+        self::assertStringContainsString('export type ListProjectsQuery = AsQuery<ProjectFiltersData>;', $projects);
         self::assertStringContainsString('export type ShowProjectPathParams = ProjectPathParams;', $projects);
         self::assertStringContainsString('export type CreateProjectBody = CreateProjectRequestData;', $projects);
         self::assertStringContainsString('export type UpdateProjectBody = UpdateProjectRequestData;', $projects);
@@ -138,7 +138,7 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface ICreateProjectRequestData {', $projects);
         self::assertStringContainsString('export interface IUpdateProjectRequestData {', $projects);
         self::assertStringContainsString('export interface IShowProjectResponse {', $projects);
-        self::assertStringContainsString('export type ListProjectsQueryParams = IProjectFiltersData;', $projects);
+        self::assertStringContainsString('export type ListProjectsQueryParams = AsQuery<IProjectFiltersData>;', $projects);
         self::assertStringContainsString('export type ShowProjectRouteParams = IProjectPathParams;', $projects);
         self::assertStringContainsString('export type CreateProjectPayload = ICreateProjectRequestData;', $projects);
         self::assertStringContainsString('export type UpdateProjectPayload = IUpdateProjectRequestData;', $projects);
