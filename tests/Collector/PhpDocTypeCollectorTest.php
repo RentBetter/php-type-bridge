@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Collector;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\NameRefType;
@@ -27,7 +28,9 @@ final class PhpDocTypeCollectorTest extends TestCase
 
         $projectView = $domains['Projects']->types['ProjectView'];
         self::assertInstanceOf(IntersectionType::class, $projectView->parsed);
-        self::assertSame('TimestampedView', $projectView->parsed->base->name);
+        // The name it is imported as; the import says which type that is.
+        self::assertSame('TimestampedData', $projectView->parsed->base->name);
+        self::assertSame('TimestampedView', self::importedAs('TimestampedData', $projectView->imports)?->targetTypeName);
 
         $fields = [];
         foreach ($projectView->parsed->extra->fields as $field) {
@@ -35,7 +38,8 @@ final class PhpDocTypeCollectorTest extends TestCase
         }
 
         self::assertInstanceOf(NameRefType::class, $fields['client']->type);
-        self::assertSame('ClientView', $fields['client']->type->name);
+        self::assertSame('ClientData', $fields['client']->type->name);
+        self::assertSame('ClientView', self::importedAs('ClientData', $projectView->imports)?->targetTypeName);
         self::assertInstanceOf(ValueOfType::class, $fields['status']->type);
         self::assertSame('ProjectStatus', $fields['status']->type->enumClass);
         self::assertTrue($fields['nickname']->optional);
@@ -52,7 +56,8 @@ final class PhpDocTypeCollectorTest extends TestCase
 
         $ownerView = $domains['Projects']->types['ProjectOwnerView'];
         self::assertInstanceOf(IntersectionType::class, $ownerView->parsed);
-        self::assertSame('ProjectBaseView', $ownerView->parsed->base->name);
+        self::assertSame('ProjectBaseData', $ownerView->parsed->base->name);
+        self::assertSame('ProjectBaseView', self::importedAs('ProjectBaseData', $ownerView->imports)?->targetTypeName);
 
         $ownerFields = [];
         foreach ($ownerView->parsed->extra->fields as $field) {
@@ -67,7 +72,8 @@ final class PhpDocTypeCollectorTest extends TestCase
 
         $adminView = $domains['Projects']->types['ProjectAdminView'];
         self::assertInstanceOf(IntersectionType::class, $adminView->parsed);
-        self::assertSame('ProjectBaseView', $adminView->parsed->base->name);
+        self::assertSame('ProjectBaseData', $adminView->parsed->base->name);
+        self::assertSame('ProjectBaseView', self::importedAs('ProjectBaseData', $adminView->imports)?->targetTypeName);
 
         $adminFields = [];
         foreach ($adminView->parsed->extra->fields as $field) {
@@ -129,5 +135,19 @@ final class PhpDocTypeCollectorTest extends TestCase
         $this->expectExceptionMessageMatches('/"Row" is #\\[PhpStanOnly\\] on .*RowSource.*Line on .*LineView/s');
 
         (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/PhpStanOnlyImportedFixtures');
+    }
+
+    /**
+     * @param list<ImportedType> $imports
+     */
+    private static function importedAs(string $name, array $imports): ?ImportedType
+    {
+        foreach ($imports as $import) {
+            if ($name === $import->localAlias) {
+                return $import;
+            }
+        }
+
+        return null;
     }
 }

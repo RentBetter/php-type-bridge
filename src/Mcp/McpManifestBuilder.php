@@ -20,8 +20,10 @@ use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\AttributeText;
+use PTGS\TypeBridge\Support\HeldConstraints;
 use ReflectionProperty;
 use Symfony\Component\Routing\Route;
+use Throwable;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\Choice;
 use Symfony\Component\Validator\Constraints\Count;
@@ -30,10 +32,10 @@ use Symfony\Component\Validator\Constraints\GreaterThanOrEqual;
 use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\LessThan;
 use Symfony\Component\Validator\Constraints\LessThanOrEqual;
-use Symfony\Component\Validator\Constraints\NotBlank;
-use Symfony\Component\Validator\Constraints\NotNull;
 use Symfony\Component\Validator\Constraints\Range;
 use Symfony\Component\Validator\Constraints\Regex;
+use Symfony\Component\Validator\Validation;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
  * Builds the MCP tool manifest (the `tools.json` structure) from collected endpoint contracts.
@@ -45,8 +47,9 @@ use Symfony\Component\Validator\Constraints\Regex;
  * same shape the generated TypeScript is typed from, so a tool and a typed client never disagree
  * about one endpoint; the form speaks only for what the contract does not say, and for the values a
  * choice field accepts, which only the built form knows. One exception: the body of a POST — a
- * request that makes something — requires a field its constraints refuse blank (NotBlank, NotNull),
- * since a contract the request shares with an update declares every key optional, and a model would
+ * request that makes something — requires a field its constraints refuse blank (a NotBlank, a NotNull,
+ * a Count — whatever refuses what its form makes of a value left out), since a contract the request
+ * shares with an update declares every key optional, and a model would
  * otherwise learn what it can't leave out only from a 422. A body key the contract types `T|null` takes
  * null — an update's "clear this" — where `?T` is only ever left out. A key the contract declares as a scalar or
  * a shape (a record's id, or the fields to make one) is published as either (`anyOf`), though its form
@@ -68,6 +71,11 @@ final class McpManifestBuilder
      * The bounds where the tighter of two is the larger value; for the rest it is the smaller.
      */
     private const array LOWER_BOUNDS = ['minimum', 'exclusiveMinimum', 'minLength', 'minItems'];
+
+    /**
+     * What a field's blank value is asked of: Symfony's own validator.
+     */
+    private ?ValidatorInterface $validator = null;
 
     /**
      * @param IncludeConvention  $includes          whose `query` parameters every tool with a response body takes
@@ -189,6 +197,9 @@ final class McpManifestBuilder
     }
 
     /**
+     * The fields as arguments, each with the key its contract declares: its own, or for a query
+     * extending a shape (`Base & array{…}`), one it inherits, read where that shape is declared.
+     *
      * @param array<string, mixed> $properties
      * @param list<string>         $required
      * @param bool                 $makes      whether the request makes something (a POST body), so a
@@ -202,18 +213,14 @@ final class McpManifestBuilder
             return;
         }
 
-        $declared = [];
-        foreach ($reference->contract->fields ?? [] as $key) {
-            $declared[$key->name] = $key;
-        }
-
+        $declared = [...self::shapeKeys($reference->inheritedContract), ...self::shapeKeys($reference->contract)];
         foreach ($reference->fields as $field) {
             $key = $declared[$field->name] ?? null;
             $properties[$field->name] = $this->fieldSchema($field, $key?->type, $json);
             if ($json && $this->takesNull($key, $field)) {
                 $properties[$field->name] = self::withNull($properties[$field->name]);
             }
-            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && self::refusesBlank($field))) {
+            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && $this->refusesBlank($field))) {
                 $required[] = $field->name;
             }
         }
@@ -221,26 +228,33 @@ final class McpManifestBuilder
 
     /**
      * Whether a submitted value is refused blank or missing. A field left out, sent as null or sent
-     * blank reaches validation as null — which a NotNull refuses, and a NotBlank unless it allows
-     * null — or, where the form keeps it a string, as '': which any NotBlank refuses, and a NotNull
-     * lets through.
+     * blank reaches validation as its form makes it ({@see CollectedFormField::$blankValue}) — null,
+     * '', an empty list, an unticked box — and whether that is refused is its constraints' to say,
+     * asked of Symfony's validator: a NotNull refuses a null and lets '' through, a NotBlank refuses
+     * an empty list though it allows a null, a Count or a Length refuses too few.
      */
-    private static function refusesBlank(CollectedFormField $field): bool
+    private function refusesBlank(CollectedFormField $field): bool
     {
-        return self::refusesBlankValue($field->constraints, $field->blankStaysString);
+        return $this->refuses($field->constraints, $field->blankValue);
     }
 
     /**
+     * Whether any of the constraints refuses the value, nested ones included. One that can't be asked
+     * of the value alone — it reads the object the value is on, or its validator is a service the
+     * builder has none of — says nothing here.
+     *
      * @param list<Constraint> $constraints
      */
-    private static function refusesBlankValue(array $constraints, bool $blankStaysString): bool
+    private function refuses(array $constraints, mixed $value): bool
     {
+        $this->validator ??= Validation::createValidator();
         foreach ($constraints as $constraint) {
-            $refused = $blankStaysString
-                ? $constraint instanceof NotBlank
-                : $constraint instanceof NotNull || ($constraint instanceof NotBlank && !$constraint->allowNull);
-            if ($refused) {
-                return true;
+            try {
+                if (\count($this->validator->validate($value, $constraint)) > 0) {
+                    return true;
+                }
+            } catch (Throwable) {
+                continue;
             }
         }
 
@@ -268,7 +282,7 @@ final class McpManifestBuilder
 
         // A contract one create and one update share says `string|null`; a NotNull, or a NotBlank
         // that does not allow null, still refuses it with a 422.
-        return !self::refusesBlank($field);
+        return !$this->refusesBlank($field);
     }
 
     /**
@@ -322,7 +336,7 @@ final class McpManifestBuilder
     private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null, bool $json = false): array
     {
         $schema = $this->valueSchema($field, $declared, $json);
-        $schema = [...$schema, ...$this->bounds($field->constraints, $schema['type']), ...$this->patternOf($field, $schema['type'])];
+        $schema = [...$schema, ...$this->bounds(HeldConstraints::always($field->constraints), $schema['type']), ...$this->patternOf($field, $schema['type'])];
 
         // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
         // is a compound form with a scalar the form lifts out before submit; the form shows only the
@@ -370,20 +384,7 @@ final class McpManifestBuilder
         }
 
         if ($field->compound && [] !== $field->children) {
-            $properties = $this->childSchemas($field->children, self::shapeKeys($declared), $json);
-            $required = [];
-            foreach ($field->children as $child) {
-                if ($child->required) {
-                    $required[] = $child->name;
-                }
-            }
-
-            $schema = ['type' => 'object', 'properties' => $properties];
-            if ([] !== $required) {
-                $schema['required'] = $required;
-            }
-
-            return $schema;
+            return $this->objectSchema($field->children, self::shapeKeys($declared), $json);
         }
 
         return ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
@@ -548,8 +549,9 @@ final class McpManifestBuilder
     }
 
     /**
-     * A collection's entry: its type, or for a compound entry its fields — each taking null, sent
-     * as JSON, where the entry's declared shape types it `T|null`.
+     * A collection's entry: its type — the scalar the contract declares it, as for a field, its form
+     * type's name a guess at it otherwise — or for a compound entry its fields, each taking null,
+     * sent as JSON, where the entry's declared shape types it `T|null`.
      *
      * @param ParsedType|null $item the type the contract gives an entry (`list<T>`'s T), if it does
      *
@@ -559,18 +561,36 @@ final class McpManifestBuilder
     {
         if ([] === $field->entryChildren) {
             \assert(null !== $field->entryTypeClass);
-            $schema = ['type' => $this->scalarTypeOf($field->entryTypeClass)];
+            $schema = ['type' => $this->declaredScalar($item) ?? $this->scalarTypeOf($field->entryTypeClass)];
 
             // An entry takes null where its contract admits one and nothing it is held to refuses it,
-            // as the entry reaches validation: null, or '' where its options keep a blank a string.
-            return $json && null !== $item && ShapeField::admitsNull($item) && !self::refusesBlankValue($field->entryConstraints, $field->entryBlankStaysString)
+            // as the entry reaches validation: null, '' where its options keep a blank a string,
+            // false for a checkbox.
+            return $json && null !== $item && ShapeField::admitsNull($item) && !$this->refuses($field->entryConstraints, $field->entryBlankValue)
                 ? self::withNull($schema)
                 : $schema;
         }
 
-        $properties = $this->childSchemas($field->entryChildren, self::shapeKeys($item), $json);
+        return $this->objectSchema($field->entryChildren, self::shapeKeys($item), $json);
+    }
+
+    /**
+     * A compound form as an object: each field with the type its declared key gives it and, sent as
+     * JSON, null where that key takes one; required where the form requires it.
+     *
+     * @param list<CollectedFormField> $children
+     * @param array<string, ShapeField> $keys the keys the compound's declared shape names
+     *
+     * @return array{type: 'object', properties: array<string, array<string, mixed>>, required?: list<string>}
+     */
+    private function objectSchema(array $children, array $keys, bool $json): array
+    {
+        $properties = [];
         $required = [];
-        foreach ($field->entryChildren as $child) {
+        foreach ($children as $child) {
+            $key = $keys[$child->name] ?? null;
+            $schema = $this->fieldSchema($child, $key?->type, $json);
+            $properties[$child->name] = $json && $this->takesNull($key, $child) ? self::withNull($schema) : $schema;
             if ($child->required) {
                 $required[] = $child->name;
             }
@@ -585,36 +605,19 @@ final class McpManifestBuilder
     }
 
     /**
-     * The schemas of a compound form's fields, each with the type its declared key gives it and,
-     * sent as JSON, null where that key takes one.
-     *
-     * @param list<CollectedFormField> $children
-     * @param array<string, ShapeField> $keys the keys the compound's declared shape names
-     *
-     * @return array<string, array<string, mixed>>
-     */
-    private function childSchemas(array $children, array $keys, bool $json): array
-    {
-        $properties = [];
-        foreach ($children as $child) {
-            $key = $keys[$child->name] ?? null;
-            $schema = $this->fieldSchema($child, $key?->type, $json);
-            $properties[$child->name] = $json && $this->takesNull($key, $child) ? self::withNull($schema) : $schema;
-        }
-
-        return $properties;
-    }
-
-    /**
-     * The keys of the shape a type declares — itself, or the one shape of a nullable or a union.
+     * The keys of the shape a type declares, by name — itself, or the one shape of a nullable or a
+     * union.
      *
      * @return array<string, ShapeField>
      */
     private static function shapeKeys(?ParsedType $type): array
     {
-        $shape = self::soleMember($type, ShapeType::class);
+        $keys = [];
+        foreach (self::soleMember($type, ShapeType::class)->fields ?? [] as $key) {
+            $keys[$key->name] = $key;
+        }
 
-        return null === $shape ? [] : array_column(array_map(static fn (ShapeField $key): array => ['name' => $key->name, 'key' => $key], $shape->fields), 'key', 'name');
+        return $keys;
     }
 
     /**
@@ -681,7 +684,9 @@ final class McpManifestBuilder
      * A string's Regex constraint as the schema's `pattern`, when it has exactly one and it reads the
      * same in JSON Schema's dialect ({@see self::regexPattern()}). Two must both hold, which one
      * `pattern` cannot say; one that can't be carried over would leave the other claiming to be the
-     * whole rule.
+     * whole rule. Counted wherever they are nested on the value ({@see HeldConstraints}): one in a
+     * Sequentially or a Compound holds as one beside them, and one among an AtLeastOneOf's
+     * alternatives or a When's may not hold at all, so is no pattern — and one more to count.
      *
      * @return array{pattern?: string}
      */
@@ -691,11 +696,11 @@ final class McpManifestBuilder
             return [];
         }
 
-        $regexes = array_values(array_filter($field->constraints, static fn (Constraint $constraint): bool => $constraint instanceof Regex));
-        if (1 !== \count($regexes)) {
+        $regexes = array_values(array_filter(HeldConstraints::any($field->constraints), static fn (Constraint $constraint): bool => $constraint instanceof Regex));
+        if (1 !== \count($regexes) || !\in_array($regexes[0], HeldConstraints::always($field->constraints), true)) {
             return [];
         }
-        $pattern = self::regexPattern($regexes[0], $field);
+        $pattern = $this->regexPattern($regexes[0], $field);
 
         return null === $pattern ? [] : ['pattern' => $pattern];
     }
@@ -738,7 +743,7 @@ final class McpManifestBuilder
      * nothing refuses it (refusesBlank()). And PCRE's `$` without `D` also matches before a final
      * newline, which trimming leaves none of.
      */
-    private static function regexPattern(Regex $regex, CollectedFormField $field): ?string
+    private function regexPattern(Regex $regex, CollectedFormField $field): ?string
     {
         if (!$regex->match || null !== $regex->normalizer || $field->transformsValue) {
             return null;
@@ -779,7 +784,7 @@ final class McpManifestBuilder
         }
 
         // A blank value reaches the validator as null, trimmed or not, and the Regex lets it through.
-        $blank = !self::refusesBlank($field);
+        $blank = !$this->refusesBlank($field);
 
         if ($field->trim) {
             // The rule as it reads the trimmed value. A padded value the server would trim is

@@ -25,10 +25,10 @@ final class NoteController
     }
 
     /**
-     * A requirement and a default written inline: the router serves `{page}` holding to `\d+` and
-     * `{slug}` defaulting to `intro`, and that is the path a client is given.
+     * A requirement and a default written inline: the router serves `{page}` holding to `[0-9]+`
+     * and `{slug}` defaulting to `intro`, and that is the path a client is given.
      */
-    #[Route('/pages/{page<\d+>}/{slug?intro}', methods: ['GET'])]
+    #[Route('/pages/{page<[0-9]+>}/{slug?intro}', methods: ['GET'])]
     #[Route('/legacy/pages/{page}/{slug}', methods: ['GET'], priority: 1)]
     #[ApiResponses([NoteResponse::class])]
     #[McpTool(description: 'A page.')]

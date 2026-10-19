@@ -229,11 +229,13 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * Resolves the names in a parsed type that only make sense where it was written: imported
-     * aliases become the names they were imported as; a bare name that is not an alias of the
-     * file but names a class is annotated with that class, so the emitter can fall back to the
-     * class's own type; and class constants — `self::STATUS_*` — become the literal values of
-     * the constants they match.
+     * Resolves the names in a parsed type that only make sense where it was written: an imported
+     * alias keeps the name the file imports it as — the scope the type is converted in
+     * ({@see \PTGS\TypeBridge\Emitter\EmitContext::scopeFor()}) says which type that is, so one
+     * imported under another name is never taken for an alias the file declares with its emitted
+     * name; a bare name that is not an alias of the file but names a class is annotated with that
+     * class, so the emitter can fall back to the class's own type; and class constants —
+     * `self::STATUS_*` — become the literal values of the constants they match.
      *
      * @param array<string, ImportedType> $imports
      * @param ?string $ownerClass the class whose docblock holds the type
@@ -260,7 +262,7 @@ final class PhpDocTypeHelper
             }
 
             if (null === $leaf->class && isset($imports[$leaf->name])) {
-                return new NameRefType($imports[$leaf->name]->targetTypeName);
+                return $leaf;
             }
 
             // Written as a qualified name: a class by syntax, resolved as PHP would.

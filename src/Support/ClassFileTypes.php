@@ -8,9 +8,10 @@ use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Model\ImportedType;
 
 /**
- * What a class's file says its types mean — its source, the aliases it declares, the types it
- * imports, the classes it `use`s — read once per file however many collectors, properties and
- * queries ask, and read the same way for each of them.
+ * What a class's file says its types mean — the aliases it declares, the types it imports, the
+ * classes it `use`s — worked out once per file however many collectors, properties and queries ask,
+ * and the same way for each of them; and the classes a source tree declares, scanned once. What is
+ * kept is what was read out of a file, not its source.
  *
  * A file may import anything for its own code, so an import that can't be followed is set aside
  * with why, and fails only what is typed with it ({@see PhpDocTypeHelper::unresolvedImportUsedIn()}):
@@ -19,14 +20,11 @@ use PTGS\TypeBridge\Model\ImportedType;
  */
 final class ClassFileTypes
 {
-    /** @var array<string, string|false> by file */
-    private array $contents = [];
+    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>}|false> by file; false where it can't be read */
+    private array $files = [];
 
-    /** @var array<string, array<string, string>> by file */
-    private array $definitions = [];
-
-    /** @var array<string, array<string, string>> by file */
-    private array $classImports = [];
+    /** @var array<string, array<string, string>> by source directory: class => file */
+    private array $classes = [];
 
     /** @var array<string, array{imports: array<string, ImportedType>, unresolved: array<string, string>, phpStanOnly: array<string, string>}> by source directory and class */
     private array $imports = [];
@@ -41,11 +39,29 @@ final class ClassFileTypes
     ) {}
 
     /**
-     * The file's source; null where it can't be read.
+     * The classes a source tree declares, class => file, scanned once however many collectors ask.
+     *
+     * @return array<string, string>
+     */
+    public function classesIn(string $srcDir): array
+    {
+        return $this->classes[$srcDir] ??= $this->classLocator->classesIn($srcDir);
+    }
+
+    /**
+     * Whether the file can be read.
+     */
+    public function readable(string $file): bool
+    {
+        return false !== $this->read($file);
+    }
+
+    /**
+     * The file's source, read afresh; null where it can't be read.
      */
     public function content(string $file): ?string
     {
-        $content = $this->contents[$file] ??= is_file($file) ? file_get_contents($file) : false;
+        $content = is_file($file) ? file_get_contents($file) : false;
 
         return false === $content ? null : $content;
     }
@@ -57,7 +73,7 @@ final class ClassFileTypes
      */
     public function definitions(string $file): array
     {
-        return $this->definitions[$file] ??= $this->docHelper->extractPhpStanTypes($this->content($file) ?? '');
+        return $this->read($file)['definitions'] ?? [];
     }
 
     /**
@@ -67,7 +83,26 @@ final class ClassFileTypes
      */
     public function classImports(string $file): array
     {
-        return $this->classImports[$file] ??= $this->docHelper->classImports($this->content($file) ?? '');
+        return $this->read($file)['classImports'] ?? [];
+    }
+
+    /**
+     * What the file declares and `use`s, read out of it once.
+     *
+     * @return array{definitions: array<string, string>, classImports: array<string, string>}|false
+     */
+    private function read(string $file): array|false
+    {
+        if (\array_key_exists($file, $this->files)) {
+            return $this->files[$file];
+        }
+
+        $content = $this->content($file);
+
+        return $this->files[$file] = null === $content ? false : [
+            'definitions' => $this->docHelper->extractPhpStanTypes($content),
+            'classImports' => $this->docHelper->classImports($content),
+        ];
     }
 
     /**

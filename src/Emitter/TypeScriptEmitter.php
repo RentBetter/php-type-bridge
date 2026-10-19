@@ -626,7 +626,7 @@ final class TypeScriptEmitter
                 // that file's module it names bare.
                 $this->appendImportedTypes($domain, $this->referenced($property->imports, [$property->parsed]), $imports);
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
-                $imported = array_fill_keys(array_map(static fn(ImportedType $import): string => $import->targetTypeName, $property->imports), true);
+                $imported = array_fill_keys(array_map(static fn(ImportedType $import): string => $import->localAlias, $property->imports), true);
                 $this->appendClassTypes($domain, $property->parsed, $imports, $property->writtenInDomain ?? $domain, $imported);
             }
         }
@@ -707,7 +707,7 @@ final class TypeScriptEmitter
 
         return array_values(array_filter(
             $importedTypes,
-            static fn(ImportedType $imported): bool => isset($names[$imported->targetTypeName]),
+            static fn(ImportedType $imported): bool => isset($names[$imported->localAlias]),
         ));
     }
 

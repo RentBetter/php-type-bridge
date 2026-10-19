@@ -144,6 +144,16 @@ final class FormTypeInspectorTest extends TestCase
         self::assertTrue($fields['ref']->withDeclared([], [], null)->transformsValue);
     }
 
+    public function test_a_choice_or_an_all_nested_where_it_always_holds_is_read_too(): void
+    {
+        // A Sequentially's constraints hold as if written beside it: its Choice narrows the values,
+        // its All holds each entry.
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+
+        self::assertSame(['bug', 'idea'], $fields['kind']->choiceValues);
+        self::assertSame([NotNull::class], array_map(static fn(object $constraint): string => $constraint::class, $fields['refs']->entryConstraints));
+    }
+
     public function test_a_listener_that_rewrites_what_is_sent_transforms_it_too(): void
     {
         // Before it is validated, as a transformer would: UrlType given a default protocol adds it

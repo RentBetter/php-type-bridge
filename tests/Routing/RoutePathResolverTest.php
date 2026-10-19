@@ -61,7 +61,7 @@ final class RoutePathResolverTest extends TestCase
         self::assertSame('/api/notes/{id}', $resolver->pathFor(TwiceRoutedNoteController::class, 'showNoteAction'));
         self::assertSame('[0-9]+', $resolver->routeFor(TwiceRoutedNoteController::class, 'showNoteAction')?->getRequirement('id'));
         self::assertSame('/api/pages/{page}/{slug}', $resolver->pathFor(TwiceRoutedNoteController::class, 'showPageAction'));
-        self::assertSame('\\d+', $resolver->routeFor(TwiceRoutedNoteController::class, 'showPageAction')?->getRequirement('page'));
+        self::assertSame('[0-9]+', $resolver->routeFor(TwiceRoutedNoteController::class, 'showPageAction')?->getRequirement('page'));
     }
 
     public function testUnknownMethodsResolveToNull(): void

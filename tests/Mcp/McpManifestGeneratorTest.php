@@ -106,14 +106,14 @@ final class McpManifestGeneratorTest extends TestCase
 
     public function testARequirementOrADefaultWrittenInlineIsReadAsTheRouterReadsIt(): void
     {
-        // `{page<\d+>}` is the param `page`, holding to `\d+`; `{slug?intro}` is `slug`. Routed or
-        // not, the path a client is given names them as the router serves them.
+        // `{page<[0-9]+>}` is the param `page`, a number; `{slug?intro}` is `slug`. Routed or not,
+        // the path a client is given names them as the router serves them.
         $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
         foreach (['/api/pages/{page}/{slug}' => TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir), '/pages/{page}/{slug}' => new TypeBridgeConfig()] as $path => $config) {
             $page = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowPage'] ?? [];
 
             self::assertSame($path, $page['path'] ?? null);
-            self::assertSame(['type' => 'string', 'pattern' => '^(?:\\d+)$'], $page['inputSchema']['properties']['page'] ?? null);
+            self::assertSame(['type' => 'number'], $page['inputSchema']['properties']['page'] ?? null);
             self::assertSame(['type' => 'string'], $page['inputSchema']['properties']['slug'] ?? null);
             self::assertSame(['page', 'slug'], $page['inputSchema']['required'] ?? null);
         }

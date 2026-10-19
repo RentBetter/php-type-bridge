@@ -76,7 +76,8 @@ final class GenerateTypesCommand extends Command
         $files = [];
         if (!$discoveredOnly) {
             $enumResolver->scanDirectory($sourceDir);
-            // One reader of the source files for every collector: each file is read and parsed once.
+            // One reader of the source files for every collector: the tree is scanned, and each file
+            // read for what it declares and imports, once.
             $classFiles = new ClassFileTypes(domainGuesser: $domainGuesser);
             $responseCollector = new ResponseClassCollector(domainGuesser: $domainGuesser, files: $classFiles);
             $files = $emitter->emit(
@@ -89,6 +90,7 @@ final class GenerateTypesCommand extends Command
                     mcpDescriptionProperty: $config->mcpDescriptionProperty,
                     routePathResolver: $config->routePathResolver(),
                     files: $classFiles,
+                    typeAliases: $config->typeAliases,
                 ))->collect($sourceDir, $responseCollector->collectIndex($sourceDir)),
             );
         }

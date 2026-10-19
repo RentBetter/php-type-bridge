@@ -31,11 +31,17 @@ final readonly class PhpStanOnly
     }
 
     /**
-     * The class's say on which of its aliases are for PHPStan alone; null where it says none are.
+     * The class's say on which of its aliases are for PHPStan alone; null where it says none are, and
+     * where it can't be loaded to say: a class kept under src/ for tooling, whose declaration needs a
+     * require-dev package, throws in an install without one.
      */
     public static function of(string $class): ?self
     {
-        if (!class_exists($class) && !interface_exists($class) && !trait_exists($class) && !enum_exists($class)) {
+        try {
+            if (!class_exists($class) && !interface_exists($class) && !trait_exists($class) && !enum_exists($class)) {
+                return null;
+            }
+        } catch (\Error) {
             return null;
         }
 

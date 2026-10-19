@@ -15,9 +15,16 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Parser\IntersectionType;
+use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\MapType;
+use PTGS\TypeBridge\Parser\NameRefType;
+use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
+use PTGS\TypeBridge\Parser\ScalarType;
+use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\AttributeText;
@@ -60,6 +67,8 @@ final class EndpointContractCollector
      *        part of that path, and the method attribute alone cannot see them. Without one a
      *        tool carries the attribute's own path; with one, a tool the router cannot place
      *        fails collection rather than shipping a path the application does not serve
+     * @param array<string, string> $typeAliases the project-wide aliases, name => TypeScript type: a key
+     *        typed with one that admits null takes null, as one its file declares does
      */
     public function __construct(
         private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
@@ -74,6 +83,7 @@ final class EndpointContractCollector
         private readonly ?RoutePathResolver $routePathResolver = null,
         private readonly PhpDocShapeParser $shapeParser = new PhpDocShapeParser(),
         ?ClassFileTypes $files = null,
+        private readonly array $typeAliases = [],
     ) {
         $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
         $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
@@ -88,7 +98,7 @@ final class EndpointContractCollector
      */
     public function collect(string $srcDir, array $responseIndex): array
     {
-        $classFiles = $this->classLocator->classesIn($srcDir);
+        $classFiles = $this->files->classesIn($srcDir);
         $contracts = [];
         /** @var array<string, string> derived endpoint name => Class::method that claimed it */
         $seenNames = [];
@@ -375,7 +385,7 @@ final class EndpointContractCollector
      */
     private function contractPath(ReflectionMethod $method, string $attributePath): string
     {
-        return $this->routePathResolver?->pathFor($method->getDeclaringClass()->getName(), $method->getName(), $attributePath) ?? $attributePath;
+        return $this->routePathResolver?->pathFor($method->getDeclaringClass()->getName(), $method->getName()) ?? $attributePath;
     }
 
     /**
@@ -391,7 +401,7 @@ final class EndpointContractCollector
             return $attributePath;
         }
 
-        $served = $this->routePathResolver->pathFor($method->getDeclaringClass()->getName(), $method->getName(), $attributePath);
+        $served = $this->routePathResolver->pathFor($method->getDeclaringClass()->getName(), $method->getName());
         if (null !== $error = $this->routePathResolver->loadError()) {
             throw new RuntimeException(\sprintf('Cannot resolve served route paths for MCP tools: %s', $error));
         }
@@ -428,7 +438,7 @@ final class EndpointContractCollector
             $httpMethod = strtoupper($firstMethod);
         }
 
-        return [$httpMethod, \is_string($path) ? $path : ''];
+        return [$httpMethod, \is_string($path) ? RoutePathResolver::declaredPath($path) : ''];
     }
 
     /**
@@ -473,19 +483,21 @@ final class EndpointContractCollector
 
         $arguments = $routeAttributes[0]->getArguments();
         $pathTemplate = $arguments['path'] ?? $arguments[0] ?? null;
-        if (!\is_string($pathTemplate) || 0 === preg_match_all('/\{(\w+)\}/', $pathTemplate, $matches)) {
-            return null;
-        }
-
         $requirements = $arguments['requirements'] ?? [];
         if (!\is_array($requirements)) {
             $requirements = [];
+        }
+        // As the router reads it: a requirement or a default written inline is the route's, and the
+        // path names the param alone.
+        $declared = \is_string($pathTemplate) ? RoutePathResolver::declaredRoute($pathTemplate, $requirements) : null;
+        if (null === $declared || 0 === preg_match_all('/\{(\w+)\}/', $declared->getPath(), $matches)) {
+            return null;
         }
 
         // Whether the router matches the requirements by character (`u`) or by byte: the option as
         // the router has it when its config is loaded — an import's overrides the attribute's —
         // else the attribute's; with neither, the router's default, which is not known here.
-        $served = $this->routePathResolver?->routeFor($method->getDeclaringClass()->getName(), $method->getName(), $pathTemplate);
+        $served = $this->routePathResolver?->routeFor($method->getDeclaringClass()->getName(), $method->getName());
         $options = $arguments['options'] ?? [];
         $utf8 = null !== $served
             ? ($served->hasOption('utf8') ? $served->getOption('utf8') : null)
@@ -496,7 +508,7 @@ final class EndpointContractCollector
         foreach ($matches[1] as $name) {
             // What a segment must look like, too, is the router's: an import's requirement
             // overrides the attribute's as its `utf8` does.
-            $requirement = null !== $served ? $served->getRequirement($name) : $requirements[$name] ?? null;
+            $requirement = ($served ?? $declared)->getRequirement($name);
             $requirement = \is_string($requirement) ? $requirement : null;
             $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
             $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8);
@@ -595,7 +607,7 @@ final class EndpointContractCollector
             ));
         }
 
-        if (null === $this->files->content($file)) {
+        if (!$this->files->readable($file)) {
             throw new RuntimeException(\sprintf(
                 'Input contract class "%s" could not be read from "%s".',
                 $ownerClass,
@@ -619,7 +631,7 @@ final class EndpointContractCollector
             typeName: $this->docHelper->emittedTypeName('_self', $ownerClass),
             domain: $this->domainGuesser->guess($srcDir, $file),
             fields: $fields,
-            contract: self::shapeOf($self),
+            contract: $this->withAliasNulls(self::shapeOf($self), $ownerClass, $file, $srcDir, $classFiles),
             inheritedContract: $query && $self instanceof IntersectionType
                 ? $this->inheritedShape($self, $ownerClass, $file, $srcDir, $classFiles)
                 : null,
@@ -639,7 +651,7 @@ final class EndpointContractCollector
     {
         $base = $depth > 8 ? null : $this->aliasDefinition($self->base->name, $class, $file, $srcDir, $classFiles);
         $parsed = null === $base ? null : $this->parseType($base['definition']);
-        $own = self::shapeOf($parsed);
+        $own = null === $base ? null : $this->withAliasNulls(self::shapeOf($parsed), $base['class'], $base['file'], $srcDir, $classFiles);
         if (null === $base || null === $own) {
             return null;
         }
@@ -672,11 +684,121 @@ final class EndpointContractCollector
 
         $import = $depth > 8 ? null : $this->files->imports($class, $file, $srcDir, $classFiles)['imports'][$alias] ?? null;
         $target = null === $import ? null : $classFiles[$import->targetClass] ?? null;
-        if (null === $import || null === $target || null === $this->files->content($target)) {
+        if (null === $import || null === $target || !$this->files->readable($target)) {
             return null;
         }
 
         return $this->aliasDefinition($import->sourceAlias ?? '_self', $import->targetClass, $target, $srcDir, $classFiles, $depth + 1);
+    }
+
+    /**
+     * The shape with what an alias admits said where the shape is read: a key typed with one that
+     * admits null — `MaybeCode` where `MaybeCode = string|null` — is read as `MaybeCode|null`, the
+     * same type, so a reader of the shape alone (whether a key may be left out of a query, whether a
+     * body key takes null, an entry of a list) sees what the TypeScript does through the alias. An
+     * alias the file declares or imports is read where it is declared; a project-wide one from the
+     * config. A key's name and every other part of its type stay as written.
+     *
+     * @param string                $class the class whose file the shape is written in
+     * @param array<string, string> $classFiles
+     */
+    private function withAliasNulls(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles): ?ShapeType
+    {
+        $read = null === $shape ? null : $this->aliasNulls($shape, $class, $file, $srcDir, $classFiles);
+
+        return $read instanceof ShapeType ? $read : $shape;
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     */
+    private function aliasNulls(ParsedType $type, string $class, string $file, string $srcDir, array $classFiles): ParsedType
+    {
+        $admitsNull = fn (ParsedType $member): bool => $member instanceof NameRefType && null === $member->class && $this->aliasAdmitsNull($member->name, $class, $file, $srcDir, $classFiles);
+
+        return match (true) {
+            $admitsNull($type) => new NullableType($type, optional: false),
+            // `?MaybeCode` is a key left out when null whatever the alias says.
+            $type instanceof NullableType => $type->inner instanceof NameRefType ? $type : new NullableType($this->aliasNulls($type->inner, $class, $file, $srcDir, $classFiles), $type->optional),
+            $type instanceof UnionType => new UnionType([
+                ...array_map(fn (ParsedType $member): ParsedType => $member instanceof NameRefType ? $member : $this->aliasNulls($member, $class, $file, $srcDir, $classFiles), $type->types),
+                ...[] !== array_filter($type->types, $admitsNull) && !ShapeField::admitsNull($type) ? [new ScalarType('null')] : [],
+            ]),
+            $type instanceof ListType => new ListType($this->aliasNulls($type->inner, $class, $file, $srcDir, $classFiles)),
+            $type instanceof MapType => new MapType($type->key, $this->aliasNulls($type->value, $class, $file, $srcDir, $classFiles)),
+            $type instanceof ShapeType => new ShapeType(array_map(
+                fn (ShapeField $key): ShapeField => new ShapeField($key->name, $this->aliasNulls($key->type, $class, $file, $srcDir, $classFiles), $key->optional),
+                $type->fields,
+            ), $type->unsealed),
+            default => $type,
+        };
+    }
+
+    /**
+     * Whether the alias a file names admits null: as it is declared — in the file, or where it is
+     * imported from, through any alias that names another — or, for one no file declares, as the
+     * config's TypeScript type for it does.
+     *
+     * @param array<string, string> $classFiles
+     */
+    private function aliasAdmitsNull(string $alias, string $class, string $file, string $srcDir, array $classFiles, int $depth = 0): bool
+    {
+        $declared = $depth > 8 ? null : $this->aliasDefinition($alias, $class, $file, $srcDir, $classFiles);
+        if (null === $declared) {
+            return isset($this->typeAliases[$alias]) && self::typeScriptAdmitsNull($this->typeAliases[$alias]);
+        }
+
+        $parsed = $this->parseType($declared['definition']);
+        $members = match (true) {
+            $parsed instanceof NullableType => [new ScalarType('null')],
+            $parsed instanceof UnionType => $parsed->types,
+            null === $parsed => [],
+            default => [$parsed],
+        };
+        foreach ($members as $member) {
+            $admits = match (true) {
+                $member instanceof ScalarType => 'null' === $member->base(),
+                $member instanceof NameRefType => null === $member->class && $this->aliasAdmitsNull($member->name, $declared['class'], $declared['file'], $srcDir, $classFiles, $depth + 1),
+                default => false,
+            };
+            if ($admits) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a TypeScript type admits null: `null` among the members of its union, read outside
+     * any brackets or quotes (`string | null`, not `Array<string | null>`).
+     */
+    private static function typeScriptAdmitsNull(string $type): bool
+    {
+        $members = [];
+        $member = '';
+        $depth = 0;
+        $quote = null;
+        foreach (str_split($type) as $character) {
+            if (null !== $quote) {
+                $quote = $character === $quote ? null : $quote;
+            } elseif (str_contains('\'"`', $character)) {
+                $quote = $character;
+            } elseif (str_contains('<([{', $character)) {
+                ++$depth;
+            } elseif (str_contains('>)]}', $character)) {
+                --$depth;
+            } elseif ('|' === $character && 0 === $depth) {
+                $members[] = trim($member);
+                $member = '';
+
+                continue;
+            }
+            $member .= $character;
+        }
+        $members[] = trim($member);
+
+        return \in_array('null', $members, true);
     }
 
     /**

@@ -11,11 +11,15 @@ use ReflectionProperty;
 use RuntimeException;
 use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
+use Symfony\Component\Form\Extension\Core\EventListener\TrimListener;
+use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
+use Symfony\Component\Form\Extension\Core\Type\CollectionType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
+use Symfony\Component\Form\FormEvents;
 use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\FormTypeInterface;
 use Symfony\Component\Form\Forms;
@@ -120,9 +124,9 @@ final class FormTypeInspector
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
                 trim: false !== $this->resolveOption($config, 'trim'),
-                blankStaysString: self::keepsBlankAString($config),
+                blankValue: $this->blankValue($config),
                 entryConstraints: $this->entryConstraints($entry, $constraints),
-                entryBlankStaysString: null !== $entry && self::keepsBlankAString($entry->getFormConfig()),
+                entryBlankValue: null === $entry ? null : $this->blankValue($entry->getFormConfig()),
                 transformsValue: self::transformsValue($config),
             );
         }
@@ -131,28 +135,44 @@ final class FormTypeInspector
     }
 
     /**
-     * Whether a blank value reaches validation as '' rather than null. A field with no view
-     * transformer turns '' into null; TextType, given `empty_data: ''`, adds itself as one so the
-     * value stays a string — null submitted included. Another type's transformer (a number's, a
-     * choice's) makes a blank null all the same, so only TextType's counts.
+     * What a field reaches validation as when it is left out of a request, sent as null or sent
+     * blank: Symfony submits it null, and its form makes of that what its type does. A collection is
+     * emptied and a multiple choice chooses none, []; a checkbox is left unticked, false. A text
+     * field given `empty_data: ''` keeps it a string — TextType adds itself as a view transformer
+     * then — and anything else is null: a field with no view transformer turns '' into null, and
+     * another type's transformer, a number's or a single choice's, makes a blank none all the same.
      *
      * @param FormConfigInterface<mixed> $config
      */
-    private static function keepsBlankAString(FormConfigInterface $config): bool
+    private function blankValue(FormConfigInterface $config): mixed
     {
+        for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
+            $inner = $type->getInnerType();
+            if ($inner instanceof CheckboxType) {
+                return false;
+            }
+            if ($inner instanceof CollectionType) {
+                return [];
+            }
+        }
+        if ($this->isMultipleChoice($config)) {
+            return [];
+        }
         foreach ($config->getViewTransformers() as $transformer) {
             if ($transformer instanceof TextType) {
-                return true;
+                return '';
             }
         }
 
-        return false;
+        return null;
     }
 
     /**
      * Whether the form changes a submitted value before it is validated: a model transformer does, and
      * a view transformer — a number's, a date's, a choice's — but TextType's own, which turns only a
-     * null into ''.
+     * null into ''. So does a listener that rewrites what was sent before it is read (PRE_SUBMIT) or
+     * once it is (SUBMIT): UrlType's adding a default protocol, a project's own. Symfony's trimming is
+     * the `trim` option's to say.
      *
      * @param FormConfigInterface<mixed> $config
      */
@@ -166,14 +186,21 @@ final class FormTypeInspector
                 return true;
             }
         }
+        foreach ([FormEvents::PRE_SUBMIT, FormEvents::SUBMIT] as $event) {
+            foreach ($config->getEventDispatcher()->getListeners($event) as $listener) {
+                if (!\is_array($listener) || !$listener[0] instanceof TrimListener) {
+                    return true;
+                }
+            }
+        }
 
         return false;
     }
 
     /**
      * What each entry of a collection is held to: the constraints its entry type gives it — its own
-     * and its `entry_options`', resolved as the collection builds each entry — and those an All on
-     * the collection's own constraints applies to every entry, Default group alone in both.
+     * and its `entry_options`', resolved as the collection builds each entry — and those an All the
+     * collection is always held to applies to every entry, Default group alone in both.
      *
      * @param FormBuilderInterface<mixed>|null $entry       the collection's entry, built as it builds one
      * @param list<Constraint>                 $constraints the collection field's own
@@ -183,7 +210,7 @@ final class FormTypeInspector
     private function entryConstraints(?FormBuilderInterface $entry, array $constraints): array
     {
         $held = null === $entry ? [] : $this->collectConstraints($entry->getFormConfig(), null);
-        foreach ($constraints as $constraint) {
+        foreach (HeldConstraints::always($constraints) as $constraint) {
             if ($constraint instanceof All) {
                 $nested = \is_array($constraint->constraints) ? $constraint->constraints : [$constraint->constraints];
                 $held = [...$held, ...array_values(array_filter($nested, static fn(mixed $one): bool => $one instanceof Constraint && self::isValidatedByDefault($one)))];
@@ -200,9 +227,10 @@ final class FormTypeInspector
      * choice where a type sets it (an id, say), the choices themselves in a plain list — so
      * reading them here answers every type in the choice family the same way, its own included.
      *
-     * An `Assert\Choice` with explicit `choices` narrows them. Its choices are model data, an
-     * enum case rather than its id, so they become values through the same choice list; with
-     * `match: false` they are the ones refused instead.
+     * An `Assert\Choice` with explicit `choices` narrows them — one the field is always held to,
+     * beside its others or in a Sequentially or a Compound ({@see HeldConstraints::always()}). Its
+     * choices are model data, an enum case rather than its id, so they become values through the
+     * same choice list; with `match: false` they are the ones refused instead.
      *
      * Null for a field with no choice list, and for one that loads its choices: a loader may
      * query (EntityType's does), and inspection never runs one.
@@ -224,7 +252,7 @@ final class FormTypeInspector
         }
 
         $values = $choiceList->getValues();
-        foreach ($constraints as $constraint) {
+        foreach (HeldConstraints::always($constraints) as $constraint) {
             if (!$constraint instanceof Choice || null === $constraint->choices) {
                 continue;
             }

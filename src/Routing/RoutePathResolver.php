@@ -56,20 +56,21 @@ final class RoutePathResolver
      * configured, or the routing file could not be loaded). Which route, for a method routed more
      * than once: see routeFor().
      */
-    public function pathFor(string $className, string $methodName, ?string $declaredPath = null): ?string
+    public function pathFor(string $className, string $methodName): ?string
     {
-        return $this->routeFor($className, $methodName, $declaredPath)?->getPath();
+        return $this->routeFor($className, $methodName)?->getPath();
     }
 
     /**
      * The route Symfony serves a controller method at — its path, requirements and options as the
      * routing config leaves them, an import's overriding the attribute's — or null, as pathFor().
      *
-     * A method routed more than once is served at each. Given the path a #[Route] on it declares,
-     * this is the route serving that one: the first whose path ends with it, a prefix or a class
-     * #[Route] coming before. Otherwise, the first route loaded, which is its first #[Route]'s.
+     * A method routed more than once is served at each; this is the route its first #[Route]
+     * declares, as the attribute loader marks it ({@see ControllerAttributeClassLoader::ATTRIBUTE}),
+     * whatever order the router lists them in. A method only routing config routes is served at the
+     * first route loaded.
      */
-    public function routeFor(string $className, string $methodName, ?string $declaredPath = null): ?Route
+    public function routeFor(string $className, string $methodName): ?Route
     {
         $routes = $this->routes();
 
@@ -83,15 +84,39 @@ final class RoutePathResolver
             return null;
         }
 
-        if (null !== $declaredPath) {
-            foreach ($served as $route) {
-                if (str_ends_with($route->getPath(), $declaredPath)) {
-                    return $route;
-                }
+        foreach ($served as $route) {
+            if (0 === $route->getOption(ControllerAttributeClassLoader::ATTRIBUTE)) {
+                return $route;
             }
         }
 
         return $served[0];
+    }
+
+    /**
+     * A #[Route] path as the router serves it, its requirements and defaults with it. One written
+     * inline is the route's, not the path's: `{page<\\d+>}` is served as `{page}` holding to `\\d+`,
+     * and `{slug?intro}` as `{slug}` defaulting to `intro` — Symfony's own Route reads them off. Null
+     * for a path or a requirement Symfony refuses.
+     *
+     * @param array<array-key, mixed> $requirements the attribute's own, which win over inline ones
+     */
+    public static function declaredRoute(string $path, array $requirements = []): ?Route
+    {
+        try {
+            return new Route($path, requirements: array_filter($requirements, static fn (mixed $requirement, int|string $name): bool => \is_string($name) && \is_string($requirement), \ARRAY_FILTER_USE_BOTH));
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * A #[Route] path as the router serves it ({@see self::declaredRoute()}); one with nothing
+     * written inline is as it is written.
+     */
+    public static function declaredPath(string $path): string
+    {
+        return false === strpbrk($path, '<?') ? $path : self::declaredRoute($path)?->getPath() ?? $path;
     }
 
     /**

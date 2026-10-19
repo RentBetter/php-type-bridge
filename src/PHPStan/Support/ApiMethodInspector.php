@@ -72,11 +72,12 @@ final class ApiMethodInspector
         }
 
         // The router's answer wins where it has one: it already accounts for the routing-config
-        // prefix and any class-level #[Route], which the attribute read above cannot see.
+        // prefix and any class-level #[Route], which the attribute read above cannot see — and is
+        // the route the first #[Route] declares, as the generator publishes it.
         $resolvedPath = $this->routePathResolver?->pathFor($className, $methodName);
 
         return new InspectedApiMethod(
-            path: $resolvedPath ?? $path,
+            path: $resolvedPath ?? (null === $path ? null : RoutePathResolver::declaredPath($path)),
             httpMethods: $httpMethods,
             hasApiRequest: [] !== $method->getAttributes(ApiRequest::class),
             hasApiResponses: [] !== $responsesAttributes,

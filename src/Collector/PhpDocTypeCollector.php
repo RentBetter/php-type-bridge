@@ -20,7 +20,7 @@ final class PhpDocTypeCollector
 
     public function __construct(
         private readonly PhpDocShapeParser $parser = new PhpDocShapeParser(),
-        private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
+        PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
         ?ClassFileTypes $files = null,
@@ -33,12 +33,11 @@ final class PhpDocTypeCollector
      */
     public function collect(string $srcDir): array
     {
-        $classFiles = $this->classLocator->classesIn($srcDir);
+        $classFiles = $this->files->classesIn($srcDir);
         $domains = [];
 
         foreach ($classFiles as $className => $file) {
-            $content = $this->files->content($file);
-            if (null === $content) {
+            if (!$this->files->readable($file)) {
                 continue;
             }
 
@@ -56,16 +55,17 @@ final class PhpDocTypeCollector
             }
             // A class may declare what it serialises to by importing a type as its `_self`
             // rather than writing the shape itself; it then has nothing of its own to emit.
-            $importsSelf = !isset($definitions['_self']) && 1 === preg_match('/@(?:phpstan|psalm)-import-type\s+\S+\s+from\s+\S+\s+as\s+_self\b/', $content);
+            $importsSelf = !isset($definitions['_self']) && 1 === preg_match('/@(?:phpstan|psalm)-import-type\s+\S+\s+from\s+\S+\s+as\s+_self\b/', $this->files->content($file) ?? '');
             if ([] === $definitions && !$importsSelf) {
                 continue;
             }
 
             // An import that can't be emitted fails only an alias that uses it: a file may import
-            // anything for its own code. A `_self` imported from an alias kept for PHPStan is still
+            // anything for its own code. One of an alias kept for PHPStan is no symbol of any
+            // module, so it is none of what the file emits; a `_self` imported from one is still
             // recorded as the class's, and fails where something names the class.
             $read = $this->files->imports($className, $file, $srcDir, $classFiles);
-            $imports = $read['imports'];
+            $imports = array_diff_key($read['imports'], $read['phpStanOnly']);
             $unresolved = [...$read['unresolved'], ...$read['phpStanOnly'], ...$phpStanOnly];
 
             $classImports = $this->files->classImports($file);
@@ -77,8 +77,8 @@ final class PhpDocTypeCollector
             if ($importsSelf && isset($read['unresolved']['_self'])) {
                 throw new RuntimeException(\sprintf('%s It is what %s serialises to.', $read['unresolved']['_self'], $className));
             }
-            if ($importsSelf && isset($imports['_self'])) {
-                $domains[$domain]->selfImports[$className] = $imports['_self'];
+            if ($importsSelf && isset($read['imports']['_self'])) {
+                $domains[$domain]->selfImports[$className] = $read['imports']['_self'];
             }
 
             foreach ($definitions as $alias => $definition) {

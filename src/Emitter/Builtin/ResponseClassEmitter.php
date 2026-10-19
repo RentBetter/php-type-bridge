@@ -47,7 +47,7 @@ final class ResponseClassEmitter implements TypeEmitter
             // One that declares properties of its own was an interface of them, under the interface
             // prefix: the name stays a while, deprecated, so code that imports it still compiles.
             $was = $context->naming->interfaceName($response->name);
-            if ($was !== $name && self::declaresProperties($response->className)) {
+            if ($was !== $name && $response->declaresProperties) {
                 $lines[] = \sprintf('/** @deprecated A 204 is sent with no body; use %s. */', $name);
                 $lines[] = \sprintf('export type %s = %s;', $was, $name);
             }
@@ -85,24 +85,6 @@ final class ResponseClassEmitter implements TypeEmitter
         }
 
         return implode("\n", $lines);
-    }
-
-    /**
-     * Whether the class declares public properties of its own, inherited ones aside.
-     */
-    private static function declaresProperties(string $class): bool
-    {
-        if (!class_exists($class)) {
-            return false;
-        }
-
-        foreach ((new ReflectionClass($class))->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
-            if (!$property->isStatic() && $property->getDeclaringClass()->getName() === $class) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static function isSideLoad(string $class, string $property, EmitContext $context): bool

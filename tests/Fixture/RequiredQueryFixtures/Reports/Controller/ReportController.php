@@ -8,6 +8,7 @@ use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedRegionFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedScopeFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ConfigProductFilterType;
@@ -139,6 +140,14 @@ final class ReportController
     #[ApiRequest(query: ConfigProductFilterType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function listConfigProductReports(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/aliasedScope', methods: ['GET'])]
+    #[ApiRequest(query: AliasedScopeFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listAliasedScopeReports(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

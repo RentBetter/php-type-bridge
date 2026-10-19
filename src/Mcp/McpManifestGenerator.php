@@ -24,7 +24,8 @@ final class McpManifestGenerator
      */
     public function generate(string $sourceDir, TypeBridgeConfig $config): array
     {
-        // One reader of the source files for both collectors: each file is read and parsed once.
+        // One reader of the source files for both collectors: the tree is scanned, and each file read
+        // for what it declares and imports, once.
         $files = new ClassFileTypes();
         $collector = new EndpointContractCollector(
             requirementTypes: $config->requirementTypes,
@@ -34,6 +35,7 @@ final class McpManifestGenerator
             mcpDescriptionProperty: $config->mcpDescriptionProperty,
             routePathResolver: $config->routePathResolver(),
             files: $files,
+            typeAliases: $config->typeAliases,
         );
         $contracts = $collector->collect($sourceDir, (new ResponseClassCollector(files: $files))->collectIndex($sourceDir));
 

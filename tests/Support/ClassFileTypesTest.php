@@ -45,12 +45,10 @@ final class ClassFileTypesTest extends TestCase
         self::assertNull(PhpStanOnly::of(DevOnlyRule::class));
     }
 
-    public function test_a_source_tree_is_scanned_once_however_many_collectors_ask(): void
+    public function test_it_lists_the_classes_a_source_tree_declares(): void
     {
-        $files = new ClassFileTypes();
-
-        self::assertSame((new PhpFileClassLocator())->classesIn(self::SRC), $files->classesIn(self::SRC));
-        self::assertSame($files->classesIn(self::SRC), $files->classesIn(self::SRC));
+        // As the locator scans them; the collectors sharing one reader ask it, not the locator.
+        self::assertSame((new PhpFileClassLocator())->classesIn(self::SRC), (new ClassFileTypes())->classesIn(self::SRC));
     }
 
     public function test_a_file_is_read_once_however_often_it_is_asked_for(): void

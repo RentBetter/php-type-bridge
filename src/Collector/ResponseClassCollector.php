@@ -74,7 +74,7 @@ final class ResponseClassCollector
      */
     private function readIndex(string $srcDir): array
     {
-        $classFiles = $this->classLocator->classesIn($srcDir);
+        $classFiles = $this->files->classesIn($srcDir);
         $responses = [];
 
         foreach ($classFiles as $className => $file) {
@@ -148,6 +148,7 @@ final class ResponseClassCollector
                 error: $this->statusCodeResolver->isError($reflection),
                 properties: $properties,
                 imports: array_values($context['imports']),
+                declaresProperties: self::declaresProperties($reflection),
             );
         }
 
@@ -189,7 +190,7 @@ final class ResponseClassCollector
      */
     private function readTypeContext(string $className, string $file, string $srcDir, array $classFiles): ?array
     {
-        if (null === $this->files->content($file)) {
+        if (!$this->files->readable($file)) {
             return null;
         }
 
@@ -228,7 +229,7 @@ final class ResponseClassCollector
      */
     private function readLibraryTypeContext(string $className, string $file, string $srcDir, array $classFiles): ?array
     {
-        if (null === $this->files->content($file)) {
+        if (!$this->files->readable($file)) {
             return null;
         }
 
@@ -268,6 +269,22 @@ final class ResponseClassCollector
         }
 
         return $class->getName();
+    }
+
+    /**
+     * Whether the class declares public properties of its own, inherited ones aside.
+     *
+     * @param ReflectionClass<object> $class
+     */
+    private static function declaresProperties(ReflectionClass $class): bool
+    {
+        foreach ($class->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            if (!$property->isStatic() && $property->getDeclaringClass()->getName() === $class->getName()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

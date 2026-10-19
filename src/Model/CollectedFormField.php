@@ -33,13 +33,16 @@ final readonly class CollectedFormField
      *                                                Null for any other field, and where `_self` is not a shape
      * @param bool                     $trim          the field's `trim` option: whether the form trims what it is
      *                                                 sent (Symfony's StringUtil::trim) before it is validated
-     * @param bool                     $blankStaysString whether a blank value reaches validation as '' rather than
-     *                                                 null: a text field whose `empty_data` is '', which TextType
-     *                                                 keeps a string (a number's transformer still makes it null)
+     * @param mixed                    $blankValue    what the field reaches validation as when it is left out of a
+     *                                                 request, sent as null or sent blank — it is submitted null, and
+     *                                                 this is what its form makes of that: null for most; '' for a
+     *                                                 text field whose `empty_data` is '', which TextType keeps a
+     *                                                 string; [] for a collection or a multiple choice; false for a
+     *                                                 checkbox
      * @param list<Constraint>         $entryConstraints what each entry of a collection is validated against: its
      *                                                 `entry_options` constraints and an All on its property
-     * @param bool                     $entryBlankStaysString whether a collection entry's blank value reaches
-     *                                                 validation as '', as `$blankStaysString` says of a field
+     * @param mixed                    $entryBlankValue what a collection entry reaches validation as when it is
+     *                                                 sent as null or blank, as `$blankValue` says of a field
      * @param bool                     $transformsValue whether the form transforms a submitted value before it is
      *                                                 validated: a model transformer, or a view transformer but
      *                                                 TextType's own (which only turns a null into ''). What a
@@ -67,9 +70,9 @@ final readonly class CollectedFormField
         public ?string $ownerClass = null,
         public ?ShapeType $contract = null,
         public bool $trim = true,
-        public bool $blankStaysString = false,
+        public mixed $blankValue = null,
         public array $entryConstraints = [],
-        public bool $entryBlankStaysString = false,
+        public mixed $entryBlankValue = null,
         public bool $transformsValue = false,
     ) {}
 
@@ -104,9 +107,9 @@ final readonly class CollectedFormField
             ownerClass: $this->ownerClass,
             contract: $contract,
             trim: $this->trim,
-            blankStaysString: $this->blankStaysString,
+            blankValue: $this->blankValue,
             entryConstraints: $this->entryConstraints,
-            entryBlankStaysString: $this->entryBlankStaysString,
+            entryBlankValue: $this->entryBlankValue,
             transformsValue: $this->transformsValue,
         );
     }

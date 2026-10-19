@@ -45,4 +45,11 @@ final class NoteData
 
     /** @var list<bool> */
     public array $flags = [];
+
+    #[Assert\Sequentially([new Assert\Choice(choices: ['bug', 'idea'])])]
+    public ?string $kind = null;
+
+    /** @var list<string|null> */
+    #[Assert\Sequentially([new Assert\All([new Assert\NotNull()])])]
+    public array $refs = [];
 }

@@ -168,6 +168,8 @@ final class EndpointQueryTest extends TestCase
         self::assertStringContainsString('export const ListAliasedProductReports: Endpoint<ListAliasedProductReportsEndpointMap, { query?: ListAliasedProductReportsQuery }> = {', $reports);
         self::assertStringContainsString('export const ListImportedProductReports: Endpoint<ListImportedProductReportsEndpointMap, { query?: ListImportedProductReportsQuery }> = {', $reports);
         self::assertStringContainsString('export const ListConfigProductReports: Endpoint<ListConfigProductReportsEndpointMap, { query?: ListConfigProductReportsQuery }> = {', $reports);
+        // Read where the shape it inherits the key from declares it.
+        self::assertStringContainsString('export const ListAliasedScopeReports: Endpoint<ListAliasedScopeReportsEndpointMap, { query?: ListAliasedScopeReportsQuery }> = {', $reports);
         // One that admits none is still a key a caller must send.
         self::assertStringContainsString('export const ShowAliasedRegionReport: Endpoint<ShowAliasedRegionReportEndpointMap, { query: ShowAliasedRegionReportQuery }> = {', $reports);
     }
@@ -176,7 +178,10 @@ final class EndpointQueryTest extends TestCase
     {
         $contracts = (new EndpointContractCollector(typeAliases: ['MaybeText' => 'string | null']))->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
 
-        foreach (['listAliasedProductReports' => [], 'listImportedProductReports' => [], 'listConfigProductReports' => [], 'showAliasedRegionReport' => ['region']] as $method => $required) {
+        // A key the query inherits through an intersection is read as its own is: `region: string|null`
+        // from RegionScope, a key the server takes left out, is no required argument either; WeeklyReport's
+        // inherited `product: string` still is.
+        foreach (['listAliasedProductReports' => [], 'listImportedProductReports' => [], 'listConfigProductReports' => [], 'listAliasedScopeReports' => [], 'listAnyRegionReports' => [], 'showAliasedRegionReport' => ['region'], 'showWeeklyReport' => ['product']] as $method => $required) {
             $query = self::contract($contracts, $method)->request?->query;
             self::assertNotNull($query);
             $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, $method), 'GET')]])['tools'][0];
@@ -192,6 +197,7 @@ final class EndpointQueryTest extends TestCase
 
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['tags']['items']);
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['code']);
     }
 
     /**
