@@ -184,7 +184,7 @@ final class EndpointQueryTest extends TestCase
         // A key the query inherits through an intersection is read as its own is: `region: string|null`
         // from RegionScope, a key the server takes left out, is no required argument either; WeeklyReport's
         // inherited `product: string` still is.
-        foreach (['listAliasedProductReports' => [], 'listImportedProductReports' => [], 'listConfigProductReports' => [], 'listAliasedScopeReports' => [], 'listAnyRegionReports' => [], 'showAliasedRegionReport' => ['region'], 'listLeftOutProductReports' => ['product'], 'showWeeklyReport' => ['product']] as $method => $required) {
+        foreach (['listAliasedProductReports' => [], 'listImportedProductReports' => [], 'listConfigProductReports' => [], 'listAliasedScopeReports' => [], 'listAnyRegionReports' => [], 'showAliasedRegionReport' => ['region'], 'listLeftOutProductReports' => ['product'], 'showWeeklyReport' => ['product'], 'listLayeredProductReports' => ['product']] as $method => $required) {
             $query = self::contract($contracts, $method)->request?->query;
             self::assertNotNull($query);
             $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, $method), 'GET')]])['tools'][0];
@@ -201,6 +201,20 @@ final class EndpointQueryTest extends TestCase
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['tags']['items']);
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['code']);
+    }
+
+    public function test_a_key_required_at_any_level_an_input_extends_is_required(): void
+    {
+        // ProductRoot requires `product`; ProductLayer extending it says `product?:`. The Endpoint and
+        // the tool read one set of keys, intersected as TypeScript intersects them.
+        $reports = $this->emit()['Reports'];
+        self::assertStringContainsString('export const ListLayeredProductReports: Endpoint<ListLayeredProductReportsEndpointMap, { query: ListLayeredProductReportsQuery }> = {', $reports);
+
+        $contracts = (new EndpointContractCollector())->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $keys = self::contract($contracts, 'listLayeredProductReports')->request?->query?->keys();
+        self::assertNotNull($keys);
+        self::assertSame(['product', 'team', 'q'], array_map(static fn(ShapeField $key): string => $key->name, $keys->fields));
+        self::assertFalse($keys->fields[0]->mayBeLeftOut(inQuery: true));
     }
 
     public function test_as_query_leaves_a_primitive_as_it_is(): void

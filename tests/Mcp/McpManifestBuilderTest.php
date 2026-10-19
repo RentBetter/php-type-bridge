@@ -997,8 +997,9 @@ final class McpManifestBuilderTest extends TestCase
         yield 'a group and an alternation' => ['(?:draft|live)-\d+', '^(?:(?:draft|live)-\d+)$'];
         yield 'escaped syntax' => ['v\d+\.\d+', '^(?:v\d+\.\d+)$'];
         yield 'a dash at a class edge' => ['[a-z0-9-]+', '^(?:[a-z0-9-]+)$'];
-        yield 'anchors Symfony strips' => ['^[a-z]+$', '^(?:[a-z]+)$'];
-        yield 'anchors Symfony strips, \A and \z' => ['\A[a-z]+\z', '^(?:[a-z]+)$'];
+        // As the router holds it — the collector has taken the anchors off, once — so an escaped
+        // dollar at its end is the character, not an anchor to strip again.
+        yield 'an escaped dollar at the end' => ['a\$', '^(?:a\$)$'];
         yield 'a lazy quantifier' => ['[a-z]+?x', '^(?:[a-z]+?x)$'];
         yield 'an open-ended count' => ['\d{2,}', '^(?:\d{2,})$'];
         yield 'a dash first and last in a class' => ['[-a-z][a-z-]', '^(?:[-a-z][a-z-])$'];
@@ -1152,6 +1153,9 @@ final class McpManifestBuilderTest extends TestCase
         yield 'two, one of them among alternatives' => [[new Regex('/^[A-Z]+$/D'), new AtLeastOneOf([new Regex('/^[0-9]+$/D'), new Length(max: 3)])], null];
         yield 'one, among alternatives' => [[new AtLeastOneOf([new Regex('/^[A-Z]+$/D'), new Length(max: 3)])], null];
         yield 'a letter for a delimiter' => [[new Regex('a^b$a')], null];
+        // A range may start at a dash; one out of order compiles in neither dialect.
+        yield 'a range from a dash' => [[new Regex('/^[--0]+$/D')], '^(?:[--0]+)$'];
+        yield 'a range from a dash, out of order' => [[new Regex('/^[--!]+$/D')], null];
         yield 'an extended flag' => [[new Regex('/^[a-z]+$/x')], null];
     }
 
@@ -1345,6 +1349,62 @@ final class McpManifestBuilderTest extends TestCase
         );
 
         self::assertSame(['product'], (new McpManifestBuilder())->build(['tasks' => [$endpoint]])['tools'][0]['inputSchema']['required'] ?? []);
+    }
+
+    public function testAKeyAnIntersectionLetsTakeNullOnOneSideOnlyTakesNone(): void
+    {
+        // `Base & array{description?: string|null}` where Base says `description?: string`: the
+        // intersection admits no null, as the TypeScript's `Base & {…}` doesn't.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $description = $this->scalarField('description', $text, required: false);
+        $endpoint = new CollectedEndpointContract(
+            name: 'saveTask',
+            domain: 'tasks',
+            controllerClass: 'App\\TaskController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                body: new CollectedInputReference(null, 'App\\TaskData', 'TaskData', 'tasks', [$description], $this->shape('array{description?: string|null}'), $this->shape('array{description?: string}')),
+            ),
+            mcp: new CollectedMcpTool(name: 'saveTask', description: 'Save a task.', httpMethod: 'PUT', httpPath: '/tasks', destructive: true),
+        );
+
+        $schema = (new McpManifestBuilder())->build(['tasks' => [$endpoint]])['tools'][0]['inputSchema'];
+        self::assertSame(['type' => 'string'], $schema['properties']['description']);
+        self::assertArrayNotHasKey('required', $schema);
+    }
+
+    public function testANestedKeyIsRequiredAsItsContractSays(): void
+    {
+        // An embedded form never sets `required`, which defaults to true; the contract says `line2`
+        // may be left out — inside an object as at the top. A POST still requires what its form
+        // refuses blank, nested or not.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $address = new CollectedFormField(
+            name: 'address',
+            formTypeClass: 'App\\AddressType',
+            required: true,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\AddressData',
+            children: [
+                $this->scalarField('line1', $text, required: true),
+                $this->scalarField('line2', $text, required: true),
+                new CollectedFormField(name: 'postcode', formTypeClass: $text, required: true, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]),
+            ],
+        );
+        $contract = $this->shape('array{address: array{line1: string, line2?: string, postcode?: string}}');
+
+        self::assertSame(['line1'], $this->toolWithBody('PUT', [$address], $contract)['inputSchema']['properties']['address']['required']);
+        self::assertSame(['line1', 'postcode'], $this->toolWithBody('POST', [$address], $contract)['inputSchema']['properties']['address']['required']);
+    }
+
+    public function testAKeyTypedMixedMayBeLeftOutOfAQuery(): void
+    {
+        // `mixed` admits null, as its TypeScript `unknown` does: AsQuery<T> makes it optional.
+        $filter = $this->scalarField('filter', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true);
+
+        self::assertArrayNotHasKey('required', $this->toolTaking([$filter], $this->shape('array{filter: mixed}'))['inputSchema']);
     }
 
     public function testAQueryKeyThatMayBeNullMayBeLeftOut(): void

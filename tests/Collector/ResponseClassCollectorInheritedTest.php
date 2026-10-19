@@ -121,6 +121,20 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString("export interface ShowNoteResponse {\n  title: string;\n}", $notes);
     }
 
+    public function test_a_property_of_a_base_with_no_file_is_published_as_declared(): void
+    {
+        // Declared at run time, as eval or a PHP extension declares a class: there is no file to
+        // read its names in, but its public properties are sent, so they are published — typed as
+        // their declarations say, a name meaning the class it spells in full.
+        if (!class_exists('PTGS\\TypeBridge\\Tests\\Fixture\\FilelessBaseFixtures\\FilelessBase', false)) {
+            eval('namespace PTGS\\TypeBridge\\Tests\\Fixture\\FilelessBaseFixtures; abstract class FilelessBase { public int $count = 0; /** @var list<string> */ public array $tags = []; }');
+        }
+
+        $notes = self::emit(self::fixtures('FilelessBaseFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  title: string;\n  count: number;\n  tags: string[];\n}", $notes);
+    }
+
     public function test_a_204_says_whether_it_declares_properties_of_its_own(): void
     {
         // What it was emitted as before it was null is the collected model's to say, not a question

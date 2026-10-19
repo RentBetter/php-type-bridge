@@ -59,4 +59,15 @@ final class NoteController
     {
         throw new \LogicException('Fixture only.');
     }
+
+    /**
+     * A string requirement written anchored: its pattern is the router's, anchors off once.
+     */
+    #[Route('/anchored-codes/{code}', requirements: ['code' => '^[a-z]+$'], methods: ['GET'])]
+    #[ApiResponses([NoteResponse::class])]
+    #[McpTool(description: 'An anchored code.')]
+    public function showAnchoredCodeAction(): NoteResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
 }

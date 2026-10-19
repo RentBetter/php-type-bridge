@@ -91,6 +91,8 @@ final class FormTypeInspectorTest extends TestCase
         self::assertSame([], $fields['kinds']->blankValue, 'A multiple choice chooses none');
         self::assertNull($fields['status']->blankValue, 'A single choice is none');
         self::assertFalse($fields['pinned']->blankValue, 'A checkbox is left unticked');
+        self::assertSame('n/a', $fields['fallback']->blankValue, 'Its empty_data');
+        self::assertSame(0, $fields['quantity']->blankValue, "Its empty_data, as the number's transformer reads it");
     }
 
     public function test_it_records_what_each_collection_entry_is_held_to(): void

@@ -140,6 +140,8 @@ final class McpManifestGeneratorTest extends TestCase
             $anchored = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowAnchored'] ?? [];
 
             self::assertSame(['type' => 'number'], $anchored['inputSchema']['properties']['id'] ?? null);
+            $code = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowAnchoredCode'] ?? [];
+            self::assertSame(['type' => 'string', 'pattern' => '^(?:[a-z]+)$'], $code['inputSchema']['properties']['code'] ?? null);
         }
     }
 

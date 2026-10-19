@@ -52,4 +52,8 @@ final class NoteData
     /** @var list<string|null> */
     #[Assert\Sequentially([new Assert\All([new Assert\NotNull()])])]
     public array $refs = [];
+
+    public ?string $fallback = null;
+
+    public ?int $quantity = null;
 }

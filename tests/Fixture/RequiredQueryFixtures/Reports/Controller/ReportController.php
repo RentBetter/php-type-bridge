@@ -13,6 +13,7 @@ use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyProductF
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ConfigProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ImportedProductFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LayeredProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LayeredRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LeftOutProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\MonthlyReportFilterType;
@@ -158,6 +159,14 @@ final class ReportController
     #[ApiRequest(query: AliasedRegionFilterType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function showAliasedRegionReport(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/layeredProduct', methods: ['GET'])]
+    #[ApiRequest(query: LayeredProductFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listLayeredProductReports(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

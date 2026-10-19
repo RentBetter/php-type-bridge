@@ -30,6 +30,7 @@ use Symfony\Component\Validator\Constraints\NotNull;
  * A collection's blank is an empty list, a multiple choice's too, a checkbox's false; and a listener
  * that rewrites what is sent before it is validated — UrlType's protocol, a lowercased slug — changes
  * it as much as a transformer does. A Choice or an All nested in a Sequentially holds as one beside it.
+ * An `empty_data` holding a value is what a blank becomes: `'n/a'`, or `'0'` read as the number 0.
  *
  * @extends AbstractFormType<NoteData>
  */
@@ -53,7 +54,9 @@ final class NoteType extends AbstractFormType
             ->add('slug', TextType::class)
             ->add('flags', CollectionType::class, ['entry_type' => CheckboxType::class, 'allow_add' => true])
             ->add('kind', ChoiceType::class, ['choices' => ['Bug' => 'bug', 'Idea' => 'idea', 'Chore' => 'chore']])
-            ->add('refs', CollectionType::class, ['entry_type' => TextType::class, 'allow_add' => true]);
+            ->add('refs', CollectionType::class, ['entry_type' => TextType::class, 'allow_add' => true])
+            ->add('fallback', TextType::class, ['empty_data' => 'n/a'])
+            ->add('quantity', IntegerType::class, ['empty_data' => '0']);
         $builder->get('ref')->addModelTransformer(new CallbackTransformer(
             static fn(?string $value): ?string => $value,
             static fn(?string $value): ?string => null === $value ? null : strtoupper($value),
