@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Attribute;
 
 use Attribute;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 
 /**
  * `@phpstan-type` aliases that type PHP arrays which are never serialised — working data holding
@@ -28,5 +29,21 @@ final readonly class PhpStanOnly
     public function covers(string $alias): bool
     {
         return [] === $this->aliases || \in_array($alias, $this->aliases, true);
+    }
+
+    /**
+     * The class's say on which of its aliases are for PHPStan alone; null where it says none are, and
+     * where it can't be loaded to say: a class kept under src/ for tooling, whose declaration needs a
+     * require-dev package, throws in an install without one.
+     */
+    public static function of(string $class): ?self
+    {
+        if (!(new PhpFileClassLocator())->isLoadable($class)) {
+            return null;
+        }
+
+        $attributes = (new \ReflectionClass($class))->getAttributes(self::class);
+
+        return [] === $attributes ? null : $attributes[0]->newInstance();
     }
 }

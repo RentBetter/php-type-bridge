@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Support;
 
+use Closure;
 use PTGS\TypeBridge\Contract\ContractFormType;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use ReflectionAttribute;
@@ -11,15 +12,25 @@ use ReflectionProperty;
 use RuntimeException;
 use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
+use Symfony\Component\Form\Extension\Core\CoreExtension;
+use Symfony\Component\Form\Extension\Core\EventListener\TrimListener;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
+use Symfony\Component\Form\Extension\Core\Type\CollectionType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
+use Symfony\Component\Form\Form;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
+use Symfony\Component\Form\FormEvents;
+use Symfony\Component\Form\FormFactory;
 use Symfony\Component\Form\FormFactoryInterface;
+use Symfony\Component\Form\FormRegistry;
+use Symfony\Component\Form\FormRegistryInterface;
 use Symfony\Component\Form\FormTypeInterface;
-use Symfony\Component\Form\Forms;
+use Symfony\Component\Form\ResolvedFormTypeFactory;
 use Symfony\Component\OptionsResolver\Exception\ExceptionInterface as OptionsException;
 use Symfony\Component\Validator\Constraint;
+use Symfony\Component\Validator\Constraints\All;
 use Symfony\Component\Validator\Constraints\Choice;
 use Symfony\Component\Validator\Validation;
 use Throwable;
@@ -28,15 +39,20 @@ final class FormTypeInspector
 {
     private FormFactoryInterface $formFactory;
 
+    /** The types the inspection factory knows, where it built that factory itself; null for one given it. */
+    private ?FormRegistryInterface $registry = null;
+
     public function __construct(?FormFactoryInterface $formFactory = null)
     {
         // The validator extension makes form-level validation options (constraints,
         // validation_groups, …) valid when a form is built for inspection — consuming apps
         // routinely attach field constraints. No validation is ever run here; the form is
         // built only to read its field structure.
-        $this->formFactory = $formFactory ?? Forms::createFormFactoryBuilder()
-            ->addExtension(new ValidatorExtension(Validation::createValidator()))
-            ->getFormFactory();
+        if (null === $formFactory) {
+            $this->registry = new FormRegistry([new CoreExtension(), new ValidatorExtension(Validation::createValidator())], new ResolvedFormTypeFactory());
+            $formFactory = new FormFactory($this->registry);
+        }
+        $this->formFactory = $formFactory;
     }
 
     /**
@@ -95,6 +111,7 @@ final class FormTypeInspector
             $propertyPath = $this->resolvePropertyPath($config, $name);
             $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
             $constraints = $this->collectConstraints($config, $property);
+            $entry = $this->entryBuilder($config);
 
             $fields[] = new CollectedFormField(
                 name: $name,
@@ -105,21 +122,128 @@ final class FormTypeInspector
                 dataClass: $config->getDataClass(),
                 propertyPath: $propertyPath,
                 entryTypeClass: $this->resolveEntryTypeClass($config),
-                entryDataClass: $this->resolveEntryDataClass($config),
+                entryDataClass: self::entryDataClass($entry),
                 enumClass: $this->resolveStringOption($config, 'class'),
                 input: $this->resolveStringOption($config, 'input'),
                 multiple: $this->isMultipleChoice($config),
                 hasModelTransformers: [] !== $config->getModelTransformers(),
                 hasViewTransformers: [] !== $config->getViewTransformers(),
                 children: $this->collectFields($child),
-                entryChildren: $this->collectEntryFields($config),
+                entryChildren: null !== $entry && $entry->getCompound() ? $this->collectFields($entry) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
+                trim: false !== $this->resolveOption($config, 'trim'),
+                blankValue: $this->blankValue($config),
+                entryConstraints: $this->entryConstraints($entry, $constraints),
+                entryBlankValue: null === $entry ? null : $this->blankValue($entry->getFormConfig()),
+                transformsValue: self::transformsValue($config),
             );
         }
 
         return $fields;
+    }
+
+    /**
+     * What a field reaches validation as when it is left out of a request, sent as null or sent
+     * blank: Symfony submits it null, and its form makes of that what Form::submit() does — its
+     * `empty_data`, through its view transformers and then its model ones, '' read as null where it
+     * has no view transformer. So a text field is null, or '' where TextType keeps an `empty_data` of
+     * '' a string, or `'n/a'` where that is its `empty_data`; a number is null, or 0 from an
+     * `empty_data` of '0'; a checkbox is left unticked, false; a choice is none, a multiple one [].
+     * Listeners, which see only what was sent, are not run.
+     *
+     * A compound field is what its type makes it: a collection is emptied, []; an expanded choice
+     * chooses none; an embedded form is null as far as its own constraints go. A choice a loader
+     * fills is never loaded here, and one whose transformers refuse a blank is taken as null.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private function blankValue(FormConfigInterface $config): mixed
+    {
+        if ($config->getCompound()) {
+            for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
+                if ($type->getInnerType() instanceof CollectionType) {
+                    return [];
+                }
+            }
+
+            return $this->isMultipleChoice($config) ? [] : null;
+        }
+        if (null !== $this->resolveOption($config, 'choice_loader')) {
+            return $this->isMultipleChoice($config) ? [] : null;
+        }
+
+        try {
+            $value = $config->getEmptyData();
+            if ($value instanceof Closure) {
+                $value = $value(new Form($config), null);
+            }
+            $viewTransformers = $config->getViewTransformers();
+            if ([] === $viewTransformers && '' === $value) {
+                $value = null;
+            }
+            foreach ([...array_reverse($viewTransformers), ...array_reverse($config->getModelTransformers())] as $transformer) {
+                $value = $transformer->reverseTransform($value);
+            }
+
+            return $value;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Whether the form changes a submitted value before it is validated: a model transformer does, and
+     * a view transformer — a number's, a date's, a choice's — but TextType's own, which turns only a
+     * null into ''. So does a listener that rewrites what was sent before it is read (PRE_SUBMIT) or
+     * once it is (SUBMIT): UrlType's adding a default protocol, a project's own. Symfony's trimming is
+     * the `trim` option's to say.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private static function transformsValue(FormConfigInterface $config): bool
+    {
+        if ([] !== $config->getModelTransformers()) {
+            return true;
+        }
+        foreach ($config->getViewTransformers() as $transformer) {
+            if (!$transformer instanceof TextType) {
+                return true;
+            }
+        }
+        foreach ([FormEvents::PRE_SUBMIT, FormEvents::SUBMIT] as $event) {
+            foreach ($config->getEventDispatcher()->getListeners($event) as $listener) {
+                if (!\is_array($listener) || !$listener[0] instanceof TrimListener) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * What each entry of a collection is held to: the constraints its entry type gives it — its own
+     * and its `entry_options`', resolved as the collection builds each entry — and those an All the
+     * collection is always held to applies to every entry, Default group alone in both.
+     *
+     * @param FormBuilderInterface<mixed>|null $entry       the collection's entry, built as it builds one
+     * @param list<Constraint>                 $constraints the collection field's own
+     *
+     * @return list<Constraint>
+     */
+    private function entryConstraints(?FormBuilderInterface $entry, array $constraints): array
+    {
+        $held = null === $entry ? [] : $this->collectConstraints($entry->getFormConfig(), null);
+        foreach (HeldConstraints::always($constraints) as $constraint) {
+            if ($constraint instanceof All) {
+                $nested = \is_array($constraint->constraints) ? $constraint->constraints : [$constraint->constraints];
+                $held = [...$held, ...array_values(array_filter($nested, static fn(mixed $one): bool => $one instanceof Constraint && self::isValidatedByDefault($one)))];
+            }
+        }
+
+        return $held;
     }
 
     /**
@@ -129,9 +253,10 @@ final class FormTypeInspector
      * choice where a type sets it (an id, say), the choices themselves in a plain list — so
      * reading them here answers every type in the choice family the same way, its own included.
      *
-     * An `Assert\Choice` with explicit `choices` narrows them. Its choices are model data, an
-     * enum case rather than its id, so they become values through the same choice list; with
-     * `match: false` they are the ones refused instead.
+     * An `Assert\Choice` with explicit `choices` narrows them — one the field is always held to,
+     * beside its others or in a Sequentially or a Compound ({@see HeldConstraints::always()}). Its
+     * choices are model data, an enum case rather than its id, so they become values through the
+     * same choice list; with `match: false` they are the ones refused instead.
      *
      * Null for a field with no choice list, and for one that loads its choices: a loader may
      * query (EntityType's does), and inspection never runs one.
@@ -153,7 +278,7 @@ final class FormTypeInspector
         }
 
         $values = $choiceList->getValues();
-        foreach ($constraints as $constraint) {
+        foreach (HeldConstraints::always($constraints) as $constraint) {
             if (!$constraint instanceof Choice || null === $constraint->choices) {
                 continue;
             }
@@ -189,11 +314,17 @@ final class FormTypeInspector
             $constraints = [...$constraints, ...$this->propertyConstraints($property)];
         }
 
-        return array_values(array_filter($constraints, static function (Constraint $constraint): bool {
-            $groups = $constraint->groups;
+        return array_values(array_filter($constraints, self::isValidatedByDefault(...)));
+    }
 
-            return null === $groups || \in_array(Constraint::DEFAULT_GROUP, $groups, true);
-        }));
+    /**
+     * Whether a request is validated against the constraint: it is in the Default group.
+     */
+    private static function isValidatedByDefault(Constraint $constraint): bool
+    {
+        $groups = $constraint->groups;
+
+        return null === $groups || \in_array(Constraint::DEFAULT_GROUP, $groups, true);
     }
 
     /**
@@ -235,25 +366,36 @@ final class FormTypeInspector
     }
 
     /**
-     * A collection's entries do not exist on the builder — only a prototype does — so a
-     * compound entry type is built on its own and its fields collected, giving the
-     * emitters the shape of each item rather than an opaque entry class.
+     * A collection's entries do not exist on the builder — only a prototype does — so its entry type
+     * is built on its own, with the collection's `entry_options` as each entry is: the emitters get
+     * the shape of an item, not an opaque entry class, and what an item is held to. Those its type
+     * doesn't define are left out: they belong to a form extension the application loads and
+     * inspection doesn't (`csrf_protection`, a documentation bundle's), and say nothing it reads.
      *
      * @param FormConfigInterface<mixed> $config
      *
-     * @return list<CollectedFormField>
+     * @return FormBuilderInterface<mixed>|null null for a field that is no collection
      */
-    private function collectEntryFields(FormConfigInterface $config): array
+    private function entryBuilder(FormConfigInterface $config): ?FormBuilderInterface
     {
         $entryTypeClass = $this->resolveEntryTypeClass($config);
         if (null === $entryTypeClass) {
-            return [];
+            return null;
         }
 
+        $entryOptions = $this->resolveOption($config, 'entry_options');
+        $entryOptions = \is_array($entryOptions) ? $entryOptions : [];
+
         try {
-            $entryBuilder = $this->formFactory->createNamedBuilder(
+            if (null !== $this->registry) {
+                $defined = $this->registry->getType($entryTypeClass)->getOptionsResolver()->getDefinedOptions();
+                $entryOptions = array_intersect_key($entryOptions, array_flip($defined));
+            }
+
+            return $this->formFactory->createNamedBuilder(
                 name: '__entry__',
                 type: $entryTypeClass,
+                options: $entryOptions,
             );
         } catch (OptionsException|FormException $exception) {
             // Same fact as a top-level form that cannot be built, one level down: a collection
@@ -268,12 +410,6 @@ final class FormTypeInspector
                 $exception->getMessage(),
             ), previous: $exception);
         }
-
-        if (!$entryBuilder->getCompound()) {
-            return [];
-        }
-
-        return $this->collectFields($entryBuilder);
     }
 
     /**
@@ -350,36 +486,12 @@ final class FormTypeInspector
     }
 
     /**
-     * @param FormConfigInterface<mixed> $config
+     * @param FormBuilderInterface<mixed>|null $entry
      */
-    private function resolveEntryDataClass(FormConfigInterface $config): ?string
+    private static function entryDataClass(?FormBuilderInterface $entry): ?string
     {
-        $entryTypeClass = $this->resolveEntryTypeClass($config);
-        if (null === $entryTypeClass) {
-            return null;
-        }
-
-        try {
-            $entryBuilder = $this->formFactory->createNamedBuilder(
-                name: '__entry__',
-                type: $entryTypeClass,
-            );
-        } catch (OptionsException|FormException $exception) {
-            // Same fact as a top-level form that cannot be built, one level down: a collection
-            // whose entry type needs options — an EnumType without its `class`, say — cannot be
-            // inspected either. This build sits inside collectFields(), which runs *outside*
-            // inspect()'s try, so without catching it here the exception leaves the inspector
-            // entirely and PHPStan reports an internal error and abandons the whole run rather
-            // than reporting the one form.
-            throw new RuntimeException(\sprintf(
-                'Collection entry type "%s" cannot be built for inspection: %s Give the option a default, or keep the form off the contract surface.',
-                $entryTypeClass,
-                $exception->getMessage(),
-            ), previous: $exception);
-        }
-
         /** @var class-string|null $dataClass */
-        $dataClass = $entryBuilder->getOption('data_class');
+        $dataClass = $entry?->getOption('data_class');
 
         return $dataClass;
     }

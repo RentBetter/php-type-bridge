@@ -14,6 +14,7 @@ use Symfony\Component\Routing\Loader\DirectoryLoader;
 use Symfony\Component\Routing\Loader\GlobFileLoader;
 use Symfony\Component\Routing\Loader\Psr4DirectoryLoader;
 use Symfony\Component\Routing\Loader\YamlFileLoader;
+use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouteCollection;
 use Throwable;
 
@@ -35,8 +36,8 @@ use Throwable;
  */
 final class RoutePathResolver
 {
-    /** @var array<string, string>|null controller `Class::method` => path */
-    private ?array $pathsByController = null;
+    /** @var array<string, non-empty-list<Route>>|null controller `Class::method` => the routes Symfony serves it at, in the order it loads them */
+    private ?array $routesByController = null;
 
     private ?string $loadError = null;
 
@@ -52,20 +53,80 @@ final class RoutePathResolver
 
     /**
      * The served path for a controller method, or null when it has no route (or routing is not
-     * configured, or the routing file could not be loaded).
+     * configured, or the routing file could not be loaded). Which route, for a method routed more
+     * than once: see routeFor().
      */
     public function pathFor(string $className, string $methodName): ?string
     {
-        $paths = $this->paths();
+        return $this->routeFor($className, $methodName)?->getPath();
+    }
+
+    /**
+     * The route Symfony serves a controller method at — its path, requirements and options as the
+     * routing config leaves them, an import's overriding the attribute's — or null, as pathFor().
+     *
+     * A method routed more than once is served at each; this is the route its first #[Route]
+     * declares, as the attribute loader marks it ({@see ControllerAttributeClassLoader::ATTRIBUTE}),
+     * whatever order the router lists them in. A method only routing config routes is served at the
+     * first route loaded.
+     */
+    public function routeFor(string $className, string $methodName): ?Route
+    {
+        $routes = $this->routes();
 
         // Symfony keys an invokable controller's route by the bare class name, so that key
         // answers for __invoke and nothing else — a constructor or helper on the same class
         // has no route, and must not inherit one.
-        if ('__invoke' === $methodName) {
-            return $paths[$className . '::__invoke'] ?? $paths[$className] ?? null;
+        $served = '__invoke' === $methodName
+            ? $routes[$className . '::__invoke'] ?? $routes[$className] ?? null
+            : $routes[$className . '::' . $methodName] ?? null;
+        if (null === $served) {
+            return null;
         }
 
-        return $paths[$className . '::' . $methodName] ?? null;
+        foreach ($served as $route) {
+            if (0 === $route->getOption(ControllerAttributeClassLoader::ATTRIBUTE)) {
+                return $route;
+            }
+        }
+
+        return $served[0];
+    }
+
+    /**
+     * A #[Route] path as the router serves it, its requirements and defaults with it. One written
+     * inline is the route's, not the path's: `{page<\\d+>}` is served as `{page}` holding to `\\d+`,
+     * `{slug?intro}` as `{slug}` defaulting to `intro`, and `{slug:note}` as `{slug}` mapped to the
+     * `note` argument — Symfony's own Route reads them off. Null for a path or a requirement Symfony
+     * refuses.
+     *
+     * @param array<array-key, mixed> $requirements the attribute's own, which win over inline ones
+     */
+    public static function declaredRoute(string $path, array $requirements = []): ?Route
+    {
+        try {
+            return new Route($path, requirements: array_filter($requirements, static fn (mixed $requirement, int|string $name): bool => \is_string($name) && \is_string($requirement), \ARRAY_FILTER_USE_BOTH));
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * A #[Route] path as the router serves it ({@see self::declaredRoute()}); one with nothing
+     * written inline — none of the characters Symfony itself looks for — is as it is written.
+     */
+    public static function declaredPath(string $path): string
+    {
+        return false === strpbrk($path, '<?:') ? $path : self::declaredRoute($path)?->getPath() ?? $path;
+    }
+
+    /**
+     * A route requirement as the router holds it: Symfony's own Route takes off a leading `^` or
+     * `\\A` and a trailing `$` or `\\z`. Null for one it refuses.
+     */
+    public static function servedRequirement(string $requirement): ?string
+    {
+        return self::declaredRoute('/', ['value' => $requirement])?->getRequirement('value');
     }
 
     /**
@@ -73,22 +134,22 @@ final class RoutePathResolver
      */
     public function loadError(): ?string
     {
-        $this->paths();
+        $this->routes();
 
         return $this->loadError;
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, non-empty-list<Route>>
      */
-    private function paths(): array
+    private function routes(): array
     {
-        if (null !== $this->pathsByController) {
-            return $this->pathsByController;
+        if (null !== $this->routesByController) {
+            return $this->routesByController;
         }
 
         if (null === $this->routingFile) {
-            return $this->pathsByController = [];
+            return $this->routesByController = [];
         }
 
         try {
@@ -96,18 +157,18 @@ final class RoutePathResolver
         } catch (Throwable $exception) {
             $this->loadError = $exception->getMessage();
 
-            return $this->pathsByController = [];
+            return $this->routesByController = [];
         }
 
-        $paths = [];
+        $routes = [];
         foreach ($collection as $route) {
             $controller = $route->getDefault('_controller');
             if (\is_string($controller) && '' !== $controller) {
-                $paths[$controller] = $route->getPath();
+                $routes[$controller][] = $route;
             }
         }
 
-        return $this->pathsByController = $paths;
+        return $this->routesByController = $routes;
     }
 
     private function load(): RouteCollection

@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Mcp;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
+use PTGS\TypeBridge\Support\ClassFileTypes;
 
 /**
  * The MCP tool manifest for a source tree: every #[McpTool] endpoint contract under it,
@@ -23,6 +24,9 @@ final class McpManifestGenerator
      */
     public function generate(string $sourceDir, TypeBridgeConfig $config): array
     {
+        // One reader of the source files for both collectors: the tree is scanned, and each file read
+        // for what it declares and imports, once.
+        $files = new ClassFileTypes();
         $collector = new EndpointContractCollector(
             requirementTypes: $config->requirementTypes,
             mcpScopeAttribute: $config->mcpScopeAttribute,
@@ -30,8 +34,10 @@ final class McpManifestGenerator
             mcpDescriptionAttribute: $config->mcpDescriptionAttribute,
             mcpDescriptionProperty: $config->mcpDescriptionProperty,
             routePathResolver: $config->routePathResolver(),
+            files: $files,
+            typeAliases: $config->typeAliases,
         );
-        $contracts = $collector->collect($sourceDir, (new ResponseClassCollector())->collectIndex($sourceDir));
+        $contracts = $collector->collect($sourceDir, (new ResponseClassCollector(files: $files, typeAliases: $config->typeAliases))->collectIndex($sourceDir));
 
         return (new McpManifestBuilder($config->includes, $config->mcpParamDescriptions()))->build($contracts);
     }

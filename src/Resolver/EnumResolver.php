@@ -26,9 +26,13 @@ final class EnumResolver
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
     ) {}
 
-    public function scanDirectory(string $srcDir): void
+    /**
+     * @param array<string, string>|null $classFiles the tree's classes, class => file, where they are
+     *        already scanned
+     */
+    public function scanDirectory(string $srcDir, ?array $classFiles = null): void
     {
-        foreach ($this->classLocator->classesIn($srcDir) as $className => $file) {
+        foreach ($classFiles ?? $this->classLocator->classesIn($srcDir) as $className => $file) {
             if (!enum_exists($className)) {
                 continue;
             }

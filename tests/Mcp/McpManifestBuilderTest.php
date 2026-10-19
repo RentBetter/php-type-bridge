@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Tests\Mcp;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
@@ -19,6 +20,7 @@ use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
+use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
@@ -30,7 +32,18 @@ use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Authorize;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
+use PTGS\TypeBridge\Tests\Fixture\ConstraintFixtures\NoteCode;
+use Symfony\Component\Validator\Constraint;
+use Symfony\Component\Validator\Constraints\AtLeastOneOf;
+use Symfony\Component\Validator\Constraints\Choice;
+use Symfony\Component\Validator\Constraints\Count;
+use Symfony\Component\Validator\Constraints\IsTrue;
+use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\NotNull;
+use Symfony\Component\Validator\Constraints\Range;
+use Symfony\Component\Validator\Constraints\Regex;
+use Symfony\Component\Validator\Constraints\Sequentially;
 
 final class McpManifestBuilderTest extends TestCase
 {
@@ -835,6 +848,739 @@ final class McpManifestBuilderTest extends TestCase
             'search' => ['type' => 'string'],
             'tags' => ['type' => 'string'],
         ], $tool['inputSchema']['properties']);
+    }
+
+    public function testABodyKeyTheContractTypesTOrNullTakesNull(): void
+    {
+        // An update's "clear this": left out, the field keeps its value; sent as null, it is
+        // cleared. The contract says so with `T|null` (a project's preserveNull), where `?T` is a
+        // key only ever left out — and a model told the key is a plain string could never send it.
+        $fields = [
+            $this->scalarField('description', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextareaType', required: false),
+            new CollectedFormField(name: 'priority', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\IntegerType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Range(min: 1, max: 5)]),
+            new CollectedFormField(name: 'size', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\EnumType', required: false, mapped: true, compound: false, dataClass: null, choiceValues: ['S', 'M', 'L']),
+            $this->scalarField('title', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false),
+        ];
+        $contract = new ShapeType([
+            new ShapeField('description', new NullableType(new ScalarType('string'), optional: false), optional: true),
+            new ShapeField('priority', new NullableType(new ScalarType('int'), optional: false), optional: true),
+            new ShapeField('size', new NullableType(new ScalarType('string'), optional: false), optional: true),
+            // `?T`: left out, never sent as null.
+            new ShapeField('title', new NullableType(new ScalarType('string'), optional: true), optional: true),
+        ]);
+
+        self::assertSame([
+            'description' => ['type' => ['string', 'null']],
+            'priority' => ['type' => ['integer', 'null'], 'minimum' => 1, 'maximum' => 5],
+            'size' => ['type' => ['string', 'null'], 'enum' => ['S', 'M', 'L', null]],
+            'title' => ['type' => 'string'],
+        ], $this->toolWithBody('PUT', $fields, $contract)['inputSchema']['properties']);
+    }
+
+    public function testAUnionWithNullAmongSeveralMembersTakesNullToo(): void
+    {
+        // `'open'|'closed'|null` and `string|array{…}|null` parse to a union, not a nullable: the
+        // null is one member of several, and still a value the contract lets be sent.
+        $assignee = new CollectedFormField(
+            name: 'assignee',
+            formTypeClass: 'App\\EmbeddedPersonType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\PersonData',
+            children: [$this->scalarField('name', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true)],
+        );
+        $status = new CollectedFormField(name: 'status', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\ChoiceType', required: false, mapped: true, compound: false, dataClass: null, choiceValues: ['open', 'closed']);
+        $contract = (new PhpDocShapeParser())->parse("array{status?: 'open'|'closed'|null, assignee?: string|array{name: string}|null}");
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $properties = $this->toolWithBody('PUT', [$status, $assignee], $contract)['inputSchema']['properties'];
+
+        self::assertSame(['type' => ['string', 'null'], 'enum' => ['open', 'closed', null]], $properties['status']);
+        self::assertSame(['anyOf' => [
+            ['type' => 'string'],
+            ['type' => 'object', 'properties' => ['name' => ['type' => 'string']], 'required' => ['name']],
+            ['type' => 'null'],
+        ]], $properties['assignee']);
+    }
+
+    public function testAKeyItsValidationRefusesNullDoesNotTakeNull(): void
+    {
+        // One contract serving a create and an update says `string|null`; the field's NotNull, or a
+        // NotBlank that doesn't allow null, still refuses it — so a model told null is fine would
+        // be sent back a 422.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $field = static fn (string $name, array $constraints): CollectedFormField => new CollectedFormField(name: $name, formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: $constraints);
+        $fields = [
+            $field('name', [new NotBlank()]),
+            $field('code', [new NotNull()]),
+            $field('notes', [new NotBlank(allowNull: true)]),
+        ];
+        $contract = (new PhpDocShapeParser())->parse('array{name?: string|null, code?: string|null, notes?: string|null}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $post = $this->toolWithBody('POST', $fields, $contract)['inputSchema'];
+
+        self::assertSame(['type' => 'string'], $post['properties']['name']);
+        self::assertSame(['type' => 'string'], $post['properties']['code']);
+        self::assertSame(['type' => ['string', 'null']], $post['properties']['notes']);
+        self::assertSame(['name', 'code'], $post['required']);
+    }
+
+    public function testAKeyInsideAShapeTakesNullWhereItsContractSaysSo(): void
+    {
+        // A field read whole publishes the shape its data class declares; a key in that shape typed
+        // `T|null` is one an update clears as much as a top-level one, and `?T` is one left out.
+        $address = new CollectedFormField(
+            name: 'address',
+            formTypeClass: 'App\\AddressType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\AddressData',
+            contract: (new PhpDocShapeParser())->parse("array{line1: string, line2: string|null, region?: ?string, tags?: list<string|null>, kind?: 'home'|'work'|null}"),
+        );
+
+        $body = $this->toolWithBody('PUT', [$address], new ShapeType([]))['inputSchema']['properties']['address'];
+
+        self::assertSame([
+            'type' => 'object',
+            'properties' => [
+                'line1' => ['type' => 'string'],
+                'line2' => ['type' => ['string', 'null']],
+                'region' => ['type' => 'string'],
+                'tags' => ['type' => 'array', 'items' => ['type' => ['string', 'null']]],
+                'kind' => ['enum' => ['home', 'work', null]],
+            ],
+            'required' => ['line1', 'line2'],
+        ], $body);
+
+        // A query string carries no null, however the shape types its keys.
+        $query = $this->toolTaking([$address], new ShapeType([]))['inputSchema']['properties']['address'];
+        self::assertSame(['type' => 'string'], $query['properties']['line2']);
+        self::assertSame(['type' => 'string'], $query['properties']['tags']['items']);
+        self::assertSame(['enum' => ['home', 'work']], $query['properties']['kind']);
+    }
+
+    public function testAKeyWhoseValueIsQuestionMarkTIsOptionalAsItsTypeScriptIs(): void
+    {
+        // `product: ?string` is emitted `product?: string` — left off when null — so the tool must
+        // not require what the typed client may leave out.
+        $tool = $this->toolTaking(
+            fields: [$this->scalarField('product', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true)],
+            contract: (new PhpDocShapeParser())->parse('array{product: ?string}'),
+        );
+
+        self::assertArrayNotHasKey('required', $tool['inputSchema']);
+    }
+
+    public function testAQueryKeyTypedTOrNullStaysItsTypeForAQueryStringCannotSendNull(): void
+    {
+        $tool = $this->toolTaking(
+            fields: [$this->scalarField('ratio', 'App\\Form\\RatioType', required: false)],
+            contract: new ShapeType([new ShapeField('ratio', new NullableType(new ScalarType('float'), optional: false), optional: true)]),
+        );
+
+        self::assertSame(['type' => 'number'], $tool['inputSchema']['properties']['ratio']);
+    }
+
+    /**
+     * @return iterable<string, array{string, ?string}>
+     */
+    public static function routeRequirements(): iterable
+    {
+        // Published: what reads the same, and compiles, as Unicode-mode ECMA-262 — anchored, since
+        // JSON Schema's `pattern` matches anywhere and a route matches its segment whole.
+        yield 'a code' => ['[A-Z]{1,5}-[0-9]+', '^(?:[A-Z]{1,5}-[0-9]+)$'];
+        yield 'a uuid' => ['[0-9a-f]{8}-[0-9a-f]{4}-[13-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', '^(?:[0-9a-f]{8}-[0-9a-f]{4}-[13-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$'];
+        yield 'digits' => ['\d{4}', '^(?:\d{4})$'];
+        yield 'a group and an alternation' => ['(?:draft|live)-\d+', '^(?:(?:draft|live)-\d+)$'];
+        yield 'escaped syntax' => ['v\d+\.\d+', '^(?:v\d+\.\d+)$'];
+        yield 'a dash at a class edge' => ['[a-z0-9-]+', '^(?:[a-z0-9-]+)$'];
+        // As the router holds it — the collector has taken the anchors off, once — so an escaped
+        // dollar at its end is the character, not an anchor to strip again.
+        yield 'an escaped dollar at the end' => ['a\$', '^(?:a\$)$'];
+        yield 'a lazy quantifier' => ['[a-z]+?x', '^(?:[a-z]+?x)$'];
+        yield 'an open-ended count' => ['\d{2,}', '^(?:\d{2,})$'];
+        yield 'a dash first and last in a class' => ['[-a-z][a-z-]', '^(?:[-a-z][a-z-])$'];
+        yield 'an escaped dash and a class escape in a class' => ['[\-\d_]+', '^(?:[\-\d_]+)$'];
+        yield 'a backspace in a class' => ['[\b]', '^(?:[\b])$'];
+        yield 'an empty alternative' => ['(?:a|)b', '^(?:(?:a|)b)$'];
+
+        // Not published: PCRE's, or an error in Unicode mode, or a different rule there.
+        yield 'an inline flag' => ['(?i)[a-z]+', null];
+        yield 'a lookbehind' => ['(?<!x)y', null];
+        yield 'a possessive quantifier' => ['a++', null];
+        yield 'an escaped underscore' => ['user\_[a-z]+', null];
+        yield 'an escaped dash outside a class' => ['[A-Z]+\-[0-9]+', null];
+        yield 'a backreference' => ['(a)\1', null];
+        yield 'an octal escape' => ['\012', null];
+        yield 'a range from a class escape' => ['[\w-\.]+', null];
+        yield 'a lone brace' => ['{[a-z]+}', null];
+        yield 'an open-ended brace' => ['a{,3}', null];
+        yield 'a POSIX class' => ['[[:alpha:]]+', null];
+        yield 'a negated POSIX class' => ['[^[:space:]]+', null];
+        yield 'a POSIX class mid-bracket' => ['[a-z[:digit:]]+', null];
+        yield 'a Unicode property' => ['\p{L}+', null];
+        yield 'a hex escape PCRE-style' => ['\x{41}', null];
+        // \s takes NBSP and U+2028 in Unicode-mode ECMA, not in PCRE; PCRE's \v is every vertical
+        // space, ECMA's only U+000B.
+        yield 'whitespace' => ['\S+', null];
+        yield 'vertical space' => ['[^\v]+', null];
+        // A route's dot matches a newline (Symfony compiles with `s`); ECMA's never does.
+        yield 'a dot' => ['a.b', null];
+        // Resolved by the router from the container: the literal text is not the rule.
+        yield 'a container parameter' => ['%app.locales%', null];
+        yield 'an env placeholder' => ['%env(LOCALES)%', null];
+        yield 'non-ASCII' => ['[a-zé]+', null];
+        yield 'a count out of order' => ['a{5,2}', null];
+        yield 'a range out of order' => ['[z-a]', null];
+        yield 'an empty class' => ['[]a]', null];
+        yield 'an empty negated class' => ['[^]a]', null];
+        yield 'a quantifier on a quantifier' => ['a**', null];
+        yield 'a quantifier on a word boundary' => ['\b+', null];
+        yield 'a quantifier with nothing before it' => ['*a', null];
+        yield 'a quantifier at a group start' => ['(*a)', null];
+        yield 'an unclosed group' => ['(a', null];
+        yield 'an unopened group' => ['a)', null];
+        yield 'a lookahead' => ['(?=a)b', null];
+        yield 'a range to a class escape' => ['[a-\d]', null];
+        yield 'an unclosed class' => ['[a-z', null];
+        yield 'a trailing backslash' => ['a\\', null];
+    }
+
+    #[DataProvider('routeRequirements')]
+    public function testAStringPathSegmentPublishesItsRouteRequirementOnlyWhereJsonSchemaReadsItTheSame(string $requirement, ?string $pattern): void
+    {
+        // A route without `utf8`: its requirement is matched byte by byte, as ECMA would match it
+        // only where nothing in it can match a byte of a multibyte character.
+        $schema = $this->pathTool([new CollectedPathParam('segment', 'string', $requirement, utf8: false)])['segment'];
+
+        self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    /**
+     * @return iterable<string, array{string, ?bool, ?string}>
+     */
+    public static function utf8Requirements(): iterable
+    {
+        // Without `utf8` PCRE matches bytes: what can match a byte of a multibyte character — a
+        // negated class, \D, \W — reads differently from ECMA, which matches code points.
+        yield 'bytes: a negated class' => ['[^/]+', false, null];
+        yield 'bytes: \W' => ['a\Wb', false, null];
+        yield 'bytes: digits' => ['\d{4}', false, '^(?:\d{4})$'];
+        // With it, PCRE's \d \w \b are Unicode (UCP); ECMA's stay ASCII.
+        yield 'utf8: a negated class' => ['[^/]+', true, '^(?:[^/]+)$'];
+        yield 'utf8: digits' => ['\d{4}', true, null];
+        yield 'utf8: a word' => ['\w+', true, null];
+        yield 'utf8: ASCII ranges' => ['[a-z0-9]+', true, '^(?:[a-z0-9]+)$'];
+        // Not stated on the route — the router's default decides — so only what reads the same both ways.
+        yield 'unknown: a negated class' => ['[^/]+', null, null];
+        yield 'unknown: digits' => ['\d{4}', null, null];
+        yield 'unknown: ASCII ranges' => ['[a-z0-9]+', null, '^(?:[a-z0-9]+)$'];
+    }
+
+    #[DataProvider('utf8Requirements')]
+    public function testARouteRequirementReadsAsItsUtf8OptionMatchesIt(string $requirement, ?bool $utf8, ?string $pattern): void
+    {
+        $schema = $this->pathTool([new CollectedPathParam('segment', 'string', $requirement, utf8: $utf8)])['segment'];
+
+        self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    public function testANumberOrUnrequiredSegmentHasNoPattern(): void
+    {
+        self::assertSame(
+            ['checkNumber' => ['type' => 'number'], 'anything' => ['type' => 'string']],
+            $this->pathTool([new CollectedPathParam('checkNumber', 'number', '[0-9]+'), new CollectedPathParam('anything', 'string')]),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{list<Constraint>, ?string}>
+     */
+    public static function regexConstraints(): iterable
+    {
+        // PCRE's `$` also matches before a final newline (no D flag), so the published rule allows
+        // one; with D it doesn't.
+        yield 'anchored' => [[new Regex('/^[A-Z]{1,5}$/')], '^(?:[A-Z]{1,5})\n?$'];
+        yield 'anchored, D' => [[new Regex('/^[A-Z]{1,5}$/D')], '^(?:[A-Z]{1,5})$'];
+        yield 'a grouped alternation' => [[new Regex('/^(none|[A-Z]{1,5}-G[0-9]+)$/')], '^(?:(none|[A-Z]{1,5}-G[0-9]+))\n?$'];
+        yield 'another delimiter' => [[new Regex('#^[a-z]+/[a-z]+$#')], '^(?:[a-z]+/[a-z]+)\n?$'];
+        yield 'an escaped delimiter' => [[new Regex('/^[a-z]+\/[a-z]+$/D')], '^(?:[a-z]+\/[a-z]+)$'];
+        yield 'escaped syntax' => [[new Regex('/^[a-z]+\.[a-z]+$/D')], '^(?:[a-z]+\.[a-z]+)$'];
+        yield 'the Unicode flag' => [[new Regex('/^[a-z]+$/uD')], '^(?:[a-z]+)$'];
+        // Without `u` PCRE matches bytes; with it, its \d \w \b are Unicode. Each is published only
+        // where it reads the same as ECMA's code points and ASCII classes.
+        yield 'bytes: digits' => [[new Regex('/^\d{4}$/D')], '^(?:\d{4})$'];
+        yield 'bytes: a word' => [[new Regex('/^\w+$/D')], '^(?:\w+)$'];
+        yield 'bytes: a negated class' => [[new Regex('/^[^<>]{1,3}$/')], null];
+        yield 'bytes: \W' => [[new Regex('/^\W$/')], null];
+        yield 'bytes: \D' => [[new Regex('/^\D+$/')], null];
+        yield 'utf8: a negated class' => [[new Regex('/^[^<>]{1,3}$/uD')], '^(?:[^<>]{1,3})$'];
+        yield 'utf8: a word' => [[new Regex('/^\w+$/u')], null];
+        yield 'utf8: digits' => [[new Regex('/^\d{4}$/u')], null];
+        yield 'utf8: a word boundary' => [[new Regex('/^a\b$/u')], null];
+        yield 'bracket delimiters' => [[new Regex('{^[a-z]+$}')], '^(?:[a-z]+)\n?$'];
+        yield 'an escaped delimiter that is no syntax' => [[new Regex('#^a\#b$#D')], '^(?:a#b)$'];
+        // PCRE reads the body as written, escaped delimiter and all: `\-` stays a literal dash in a
+        // class, as Unicode mode reads it too, and `\,` a literal comma, which Unicode mode refuses —
+        // where unescaping would make a range or a quantifier of them.
+        yield 'a dash delimiter, escaped in a class' => [[new Regex('-^[a\-z]+$-D')], '^(?:[a\-z]+)$'];
+        yield 'a comma delimiter, escaped in a count' => [[new Regex(',^a{2\,3}$,D')], null];
+        yield 'an escaped backslash before the end' => [[new Regex('/^a\\\\$/D')], '^(?:a\\\\)$'];
+
+        // Matched anywhere in PCRE; padding it with `.*` would refuse a newline PCRE crosses.
+        yield 'unanchored' => [[new Regex('/[a-z]+-[a-z]+/')], null];
+        yield 'anchored at the start only' => [[new Regex('/^abc/')], null];
+        yield 'anchored at the end only' => [[new Regex('/abc$/')], null];
+        yield 'an escaped dollar, not an anchor' => [[new Regex('/^\d+\$/')], null];
+        // `^a|b$` is `(^a)|(b$)`; wrapped whole it would be another rule.
+        yield 'an alternation outside any group' => [[new Regex('/^a|b$/')], null];
+        yield 'a case flag' => [[new Regex('/^[a-z]+$/i')], null];
+        yield 'whitespace' => [[new Regex('/^\S+$/')], null];
+        yield 'a dot' => [[new Regex('/^a.b$/')], null];
+        // The validator matches the normalised value; the client would check what is sent.
+        yield 'a normaliser' => [[new Regex(pattern: '/^[A-Z]{2,5}$/', normalizer: 'trim')], null];
+        yield 'must not match' => [[new Regex(pattern: '/^[0-9]+$/', match: false)], null];
+        // Both must hold, which one `pattern` cannot say.
+        yield 'two' => [[new Regex('/^[A-Z]+$/'), new Regex('/^.{2,5}$/')], null];
+        // A rule nested where it always holds — in a sequence, in a project's compound rule — is the
+        // field's as much as one written beside the others; one among alternatives may not hold.
+        yield 'one, in a sequence' => [[new Sequentially([new Regex('/^[A-Z]{1,5}$/D')])], '^(?:[A-Z]{1,5})$'];
+        yield 'one, in a compound rule' => [[new NoteCode()], '^(?:[A-Z]+)$'];
+        yield 'two, one of them in a sequence' => [[new Regex('/^[A-Z]+$/D'), new Sequentially([new Regex('/^[A-Z]{2,5}$/D')])], null];
+        yield 'two, one of them among alternatives' => [[new Regex('/^[A-Z]+$/D'), new AtLeastOneOf([new Regex('/^[0-9]+$/D'), new Length(max: 3)])], null];
+        yield 'one, among alternatives' => [[new AtLeastOneOf([new Regex('/^[A-Z]+$/D'), new Length(max: 3)])], null];
+        yield 'a letter for a delimiter' => [[new Regex('a^b$a')], null];
+        // A range may start at a dash; one out of order compiles in neither dialect.
+        yield 'a range from a dash' => [[new Regex('/^[--0]+$/D')], '^(?:[--0]+)$'];
+        yield 'a range from a dash, out of order' => [[new Regex('/^[--!]+$/D')], null];
+        yield 'an extended flag' => [[new Regex('/^[a-z]+$/x')], null];
+    }
+
+    /**
+     * @param list<Constraint> $constraints
+     */
+    #[DataProvider('regexConstraints')]
+    public function testAStringsRegexConstraintIsItsPatternOnlyWhereJsonSchemaReadsItTheSame(array $constraints, ?string $pattern): void
+    {
+        // Untrimmed and refused blank, the value the Regex sees is the one sent: the pattern is the
+        // rule alone. Trimming and blank values are testAStringsRegexAllowsWhatTheFormAndValidatorAllow.
+        $field = new CollectedFormField(
+            name: 'code',
+            formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType',
+            required: false,
+            mapped: true,
+            compound: false,
+            dataClass: null,
+            constraints: [...$constraints, new NotBlank()],
+            trim: false,
+        );
+
+        $schema = $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code'];
+
+        self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    /**
+     * @return iterable<string, array{bool, list<Constraint>, string, ?string}>
+     */
+    public static function normalisedValues(): iterable
+    {
+        // The form trims what it is sent (`trim`, on by default) before the Regex sees it. The
+        // pattern is the rule as it reads the trimmed value: a padded value the server would trim
+        // is refused, which costs a caller nothing, and the pattern needs nothing — no `\p{…}` —
+        // that only Unicode-mode regex reads. A blank value the form hands on as null, trimmed or
+        // not: the Regex lets that through, and only a NotNull or a NotBlank that doesn't allow
+        // null refuses it.
+        yield 'trimmed, blank allowed' => [true, [], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})?$'];
+        yield 'trimmed, NotBlank' => [true, [new NotBlank()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})$'];
+        yield 'trimmed, NotNull' => [true, [new NotNull()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})$'];
+        yield 'trimmed, NotBlank allowing null' => [true, [new NotBlank(allowNull: true)], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})?$'];
+        // Trimmed, PCRE's `$` has no final newline left to allow.
+        yield 'trimmed, D' => [true, [new NotBlank()], '/^[A-Z]{2,5}$/D', '^(?:[A-Z]{2,5})$'];
+        yield 'as sent, blank allowed' => [false, [], '/^[A-Z]{2,5}$/', '^(?:(?:[A-Z]{2,5})\n?)?$'];
+        yield 'as sent, blank allowed, D' => [false, [], '/^[A-Z]{2,5}$/D', '^(?:[A-Z]{2,5})?$'];
+        yield 'as sent, NotBlank' => [false, [new NotBlank()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
+        yield 'as sent, NotNull' => [false, [new NotNull()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
+        yield 'as sent, NotBlank allowing null' => [false, [new NotBlank(allowNull: true)], '/^[A-Z]{2,5}$/', '^(?:(?:[A-Z]{2,5})\n?)?$'];
+        // A rule that can match what the form trims can't be told apart from the padding.
+        yield 'trimmed, the rule matches a space' => [true, [new NotBlank()], '/^[a-z ]+$/', null];
+        yield 'trimmed, the rule matches a tab' => [true, [new NotBlank()], '/^a\tb$/', null];
+        yield 'trimmed, the rule has a negated class' => [true, [new NotBlank()], '/^[^<>]+$/u', null];
+        yield 'as sent, the rule matches a space' => [false, [new NotBlank()], '/^[a-z ]+$/', '^(?:[a-z ]+)\n?$'];
+    }
+
+    /**
+     * @param list<Constraint> $constraints
+     */
+    #[DataProvider('normalisedValues')]
+    public function testAStringsRegexAllowsWhatTheFormAndValidatorAllow(bool $trim, array $constraints, string $regex, ?string $pattern): void
+    {
+        $field = new CollectedFormField(
+            name: 'code',
+            formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType',
+            required: false,
+            mapped: true,
+            compound: false,
+            dataClass: null,
+            constraints: [new Regex($regex), ...$constraints],
+            trim: $trim,
+        );
+
+        $schema = $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code'];
+
+        self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+    }
+
+    /**
+     * @return iterable<string, array{list<Constraint>, string}>
+     */
+    public static function emptyStringValues(): iterable
+    {
+        // A text field whose `empty_data` is '' keeps a blank value a string: the Regex lets ''
+        // through, so does a NotNull, and any NotBlank refuses it.
+        yield 'nothing else' => [[], '^(?:[A-Z]+)?$'];
+        yield 'NotNull' => [[new NotNull()], '^(?:[A-Z]+)?$'];
+        yield 'NotBlank' => [[new NotBlank()], '^(?:[A-Z]+)$'];
+        yield 'NotBlank allowing null' => [[new NotBlank(allowNull: true)], '^(?:[A-Z]+)$'];
+    }
+
+    /**
+     * @param list<Constraint> $constraints
+     */
+    #[DataProvider('emptyStringValues')]
+    public function testABlankValueKeptAnEmptyStringIsAllowedWhereItsConstraintsTakeOne(array $constraints, string $pattern): void
+    {
+        $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Regex('/^[A-Z]+$/'), ...$constraints], blankValue: '');
+
+        self::assertSame(['type' => 'string', 'pattern' => $pattern], $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code']);
+    }
+
+    public function testAFieldThatKeepsABlankStringIsRequiredAndTakesNoNullWhereANotBlankRefusesIt(): void
+    {
+        // Left out or sent as null, it reaches validation as '' — which NotBlank(allowNull: true)
+        // refuses, though it would let a null through.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $title = new CollectedFormField(name: 'title', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(allowNull: true)], blankValue: '');
+        $note = new CollectedFormField(name: 'note', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotNull()], blankValue: '');
+        $contract = (new PhpDocShapeParser())->parse('array{title?: string|null, note?: string|null}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $tool = $this->toolWithBody('POST', [$title, $note], $contract);
+        self::assertSame(['title'], $tool['inputSchema']['required']);
+        self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['title']);
+        // A NotNull takes the '' a null becomes.
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
+    }
+
+    /**
+     * @return iterable<string, array{mixed, Constraint, bool}>
+     */
+    public static function blankValues(): iterable
+    {
+        // A field left out of a request or sent null reaches validation as its form makes it: a
+        // collection's or a multiple choice's an empty list, a checkbox's false, a text field's that
+        // keeps a blank a string ''. Each refused by more than a NotNull or a NotBlank.
+        yield 'an empty list, a NotBlank allowing null' => [[], new NotBlank(allowNull: true), true];
+        yield 'an empty list, a Count' => [[], new Count(min: 1), true];
+        yield 'an empty list, a NotNull' => [[], new NotNull(), false];
+        yield 'an unticked checkbox, a NotBlank allowing null' => [false, new NotBlank(allowNull: true), true];
+        yield 'an unticked checkbox, an IsTrue' => [false, new IsTrue(), true];
+        yield 'an unticked checkbox, a NotNull' => [false, new NotNull(), false];
+        yield "'', a Length" => ['', new Length(min: 1), true];
+        yield "'', a Choice" => ['', new Choice(choices: ['open', 'closed']), true];
+        yield 'null, a Length' => [null, new Length(min: 1), false];
+        yield 'null, a NotBlank allowing it' => [null, new NotBlank(allowNull: true), false];
+    }
+
+    #[DataProvider('blankValues')]
+    public function testWhatAFieldsConstraintsAreAskedAboutIsTheBlankItsFormMakes(mixed $blank, Constraint $constraint, bool $refused): void
+    {
+        $field = new CollectedFormField(name: 'value', formTypeClass: 'App\\ValueType', required: false, mapped: true, compound: false, dataClass: null, constraints: [$constraint], blankValue: $blank);
+
+        $tool = $this->toolWithBody('POST', [$field], $this->shape('array{value?: string|null}'));
+        // A request that makes something can't go without what its form refuses blank; and a null
+        // sent is that same blank, published only where it is taken.
+        self::assertSame($refused ? ['value'] : [], $tool['inputSchema']['required'] ?? []);
+        self::assertSame($refused ? 'string' : ['string', 'null'], $tool['inputSchema']['properties']['value']['type']);
+    }
+
+    public function testAnEntrysBlankIsTheOneItsFormMakesToo(): void
+    {
+        $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
+        $checkbox = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CheckboxType';
+        $flags = new CollectedFormField(name: 'flags', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $checkbox, entryConstraints: [new NotBlank(allowNull: true)], entryBlankValue: false);
+
+        $body = $this->toolWithBody('PUT', [$flags], $this->shape('array{flags?: list<bool|null>}'))['inputSchema']['properties'];
+        self::assertSame(['type' => 'boolean'], $body['flags']['items']);
+    }
+
+    public function testAConstraintNestedWhereItAlwaysHoldsIsHeldToo(): void
+    {
+        // A sequence's NotBlank refuses a blank as much as one written beside it; and its Length
+        // bounds the value as much.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $name = new CollectedFormField(name: 'name', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new Sequentially([new NotBlank(), new Length(max: 40)])]);
+        $code = new CollectedFormField(name: 'code', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NoteCode()], trim: false);
+
+        $tool = $this->toolWithBody('POST', [$name, $code], $this->shape('array{name?: string|null, code?: string|null}'));
+        self::assertSame(['name', 'code'], $tool['inputSchema']['required']);
+        self::assertSame(['type' => 'string', 'maxLength' => 40], $tool['inputSchema']['properties']['name']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['code']);
+    }
+
+    public function testAKeyAnIntersectionRequiresOnEitherSideIsRequired(): void
+    {
+        // `Base & array{product?: string}` where Base says `product: string`: both hold, so the key
+        // can't be left out — as the Endpoint's `query:` says.
+        $product = $this->scalarField('product', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false);
+        $endpoint = new CollectedEndpointContract(
+            name: 'listTasks',
+            domain: 'tasks',
+            controllerClass: 'App\\ListController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                query: new CollectedInputReference(null, 'App\\TaskFilterData', 'TaskFilterData', 'tasks', [$product], $this->shape('array{product?: string}'), $this->shape('array{product: string}')),
+            ),
+            mcp: new CollectedMcpTool(name: 'listTasks', description: 'The tasks.', httpMethod: 'GET', httpPath: '/tasks', destructive: false),
+        );
+
+        self::assertSame(['product'], (new McpManifestBuilder())->build(['tasks' => [$endpoint]])['tools'][0]['inputSchema']['required'] ?? []);
+    }
+
+    public function testAKeyAnIntersectionLetsTakeNullOnOneSideOnlyTakesNone(): void
+    {
+        // `Base & array{description?: string|null}` where Base says `description?: string`: the
+        // intersection admits no null, as the TypeScript's `Base & {…}` doesn't.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $description = $this->scalarField('description', $text, required: false);
+        $endpoint = new CollectedEndpointContract(
+            name: 'saveTask',
+            domain: 'tasks',
+            controllerClass: 'App\\TaskController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                body: new CollectedInputReference(null, 'App\\TaskData', 'TaskData', 'tasks', [$description], $this->shape('array{description?: string|null}'), $this->shape('array{description?: string}')),
+            ),
+            mcp: new CollectedMcpTool(name: 'saveTask', description: 'Save a task.', httpMethod: 'PUT', httpPath: '/tasks', destructive: true),
+        );
+
+        $schema = (new McpManifestBuilder())->build(['tasks' => [$endpoint]])['tools'][0]['inputSchema'];
+        self::assertSame(['type' => 'string'], $schema['properties']['description']);
+        self::assertArrayNotHasKey('required', $schema);
+    }
+
+    public function testANestedKeyIsRequiredAsItsContractSays(): void
+    {
+        // An embedded form never sets `required`, which defaults to true; the contract says `line2`
+        // may be left out — inside an object as at the top. A POST still requires what its form
+        // refuses blank, nested or not.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $address = new CollectedFormField(
+            name: 'address',
+            formTypeClass: 'App\\AddressType',
+            required: true,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\AddressData',
+            children: [
+                $this->scalarField('line1', $text, required: true),
+                $this->scalarField('line2', $text, required: true),
+                new CollectedFormField(name: 'postcode', formTypeClass: $text, required: true, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]),
+            ],
+        );
+        $contract = $this->shape('array{address: array{line1: string, line2?: string, postcode?: string}}');
+
+        self::assertSame(['line1'], $this->toolWithBody('PUT', [$address], $contract)['inputSchema']['properties']['address']['required']);
+        self::assertSame(['line1', 'postcode'], $this->toolWithBody('POST', [$address], $contract)['inputSchema']['properties']['address']['required']);
+    }
+
+    public function testAKeyTypedMixedMayBeLeftOutOfAQuery(): void
+    {
+        // `mixed` admits null, as its TypeScript `unknown` does: AsQuery<T> makes it optional.
+        $filter = $this->scalarField('filter', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true);
+
+        self::assertArrayNotHasKey('required', $this->toolTaking([$filter], $this->shape('array{filter: mixed}'))['inputSchema']);
+    }
+
+    public function testAQueryKeyThatMayBeNullMayBeLeftOut(): void
+    {
+        // A query string carries no null: `product: string|null` is sent by leaving it out.
+        $product = $this->scalarField('product', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true);
+        $contract = (new PhpDocShapeParser())->parse('array{product: string|null}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $schema = $this->toolTaking([$product], $contract)['inputSchema'];
+        self::assertArrayNotHasKey('required', $schema);
+        self::assertSame(['type' => 'string'], $schema['properties']['product']);
+    }
+
+    public function testACollectionEntryItsConstraintsHoldToANonNullValueTakesNoNull(): void
+    {
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $tags = new CollectedFormField(name: 'tags', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType', required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotNull()]);
+        $labels = new CollectedFormField(name: 'labels', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType', required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text);
+        $contract = (new PhpDocShapeParser())->parse('array{tags?: list<string|null>, labels?: list<string|null>}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $body = $this->toolWithBody('PUT', [$tags, $labels], $contract)['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $body['tags']['items']);
+        self::assertSame(['type' => ['string', 'null']], $body['labels']['items']);
+    }
+
+    public function testACollectionEntryKeptAnEmptyStringTakesNoNullWhereANotBlankRefusesIt(): void
+    {
+        // Its entry_options give each entry empty_data '': a null sent for one reaches validation
+        // as '', which NotBlank(allowNull: true) refuses and a NotNull lets through.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
+        $codes = new CollectedFormField(name: 'codes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotBlank(allowNull: true)], entryBlankValue: '');
+        $notes = new CollectedFormField(name: 'notes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotNull()], entryBlankValue: '');
+        $contract = (new PhpDocShapeParser())->parse('array{codes?: list<string|null>, notes?: list<string|null>}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $body = $this->toolWithBody('PUT', [$codes, $notes], $contract)['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $body['codes']['items']);
+        self::assertSame(['type' => ['string', 'null']], $body['notes']['items']);
+    }
+
+    public function testARegexOnAValueTheFormTransformsIsNoPattern(): void
+    {
+        // It validates what the transformer makes of the value — `so-12` uppercased, say — not what
+        // a caller sends, so as a pattern it would refuse what the server takes.
+        $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Regex('/^[A-Z]+-[0-9]+$/')], transformsValue: true);
+
+        self::assertSame(['type' => 'string'], $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code']);
+    }
+
+    public function testAFieldRebuiltWithItsDeclaredContractsKeepsItsTrim(): void
+    {
+        $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, trim: false);
+
+        self::assertFalse($field->withDeclared([], [], null)->trim);
+    }
+
+    public function testAKeyInsideAnEmbeddedFormOrACollectionEntryTakesNullWhereItsContractSaysSo(): void
+    {
+        // The form says what an embedded form's and an entry's fields are; the contract still says
+        // which of them an update may clear.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $address = new CollectedFormField(
+            name: 'address',
+            formTypeClass: 'App\\AddressType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\AddressData',
+            children: [$this->scalarField('line1', $text, required: true), $this->scalarField('line2', $text, required: false)],
+        );
+        $notes = $this->collectionField('notes', 'App\\NoteType', required: false, entryChildren: [$this->scalarField('note', $text, required: false)]);
+        $tags = $this->collectionField('tags', $text, required: false);
+        $contract = (new PhpDocShapeParser())->parse('array{address?: array{line1: string, line2: string|null}, notes?: list<array{note: string|null}>, tags?: list<string|null>}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $body = $this->toolWithBody('PUT', [$address, $notes, $tags], $contract)['inputSchema']['properties'];
+
+        self::assertSame(['type' => 'string'], $body['address']['properties']['line1']);
+        self::assertSame(['type' => ['string', 'null']], $body['address']['properties']['line2']);
+        self::assertSame(['type' => ['string', 'null']], $body['notes']['items']['properties']['note']);
+        self::assertSame(['type' => ['string', 'null']], $body['tags']['items']);
+
+        $query = $this->toolTaking([$address, $notes, $tags], $contract)['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $query['address']['properties']['line2']);
+        self::assertSame(['type' => 'string'], $query['notes']['items']['properties']['note']);
+        self::assertSame(['type' => 'string'], $query['tags']['items']);
+    }
+
+    public function testAnEmbeddedFormTakesNoNullWhateverItsContractSays(): void
+    {
+        // Symfony submits a compound form's children, never the form as a whole: a null sent for it
+        // is an empty array, so its fields are cleared one by one — a 422 from a NotBlank, or a
+        // record of nulls — and never the null an update's "clear this" means. A list's null is an
+        // empty list, which is a clear.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $address = new CollectedFormField(
+            name: 'address',
+            formTypeClass: 'App\\AddressType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\AddressData',
+            children: [$this->scalarField('street', $text, required: true)],
+        );
+        $billing = new CollectedFormField(
+            name: 'billing',
+            formTypeClass: 'App\\BillingType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\BillingData',
+            children: [$address],
+        );
+        $tags = $this->collectionField('tags', $text, required: false);
+        $contract = (new PhpDocShapeParser())->parse('array{address?: array{street: string}|null, billing?: array{address: array{street: string}|null}, tags?: list<string>|null}');
+        self::assertInstanceOf(ShapeType::class, $contract);
+
+        $body = $this->toolWithBody('PUT', [$address, $billing, $tags], $contract)['inputSchema']['properties'];
+
+        self::assertSame('object', $body['address']['type']);
+        self::assertSame('object', $body['billing']['properties']['address']['type']);
+        self::assertSame(['array', 'null'], $body['tags']['type']);
+    }
+
+    public function testAKeyThatMayBeNullInsideAQueryShapeMayBeLeftOut(): void
+    {
+        // A query string carries no null, nested or not: `from: string|null` is sent by leaving it out.
+        $range = new CollectedFormField(
+            name: 'range',
+            formTypeClass: 'App\\RangeType',
+            required: false,
+            mapped: true,
+            compound: true,
+            dataClass: 'App\\RangeData',
+            contract: $this->shape('array{from: string|null, to?: string, until: string}'),
+        );
+        $contract = $this->shape('array{range?: array{from: string|null, to?: string, until: string}}');
+
+        $query = $this->toolTaking([$range], $contract)['inputSchema']['properties']['range'];
+        self::assertSame(['until'], $query['required']);
+        self::assertSame(['type' => 'string'], $query['properties']['from']);
+
+        $body = $this->toolWithBody('PUT', [$range], $contract)['inputSchema']['properties']['range'];
+        self::assertSame(['from', 'until'], $body['required']);
+        self::assertSame(['type' => ['string', 'null']], $body['properties']['from']);
+    }
+
+    private function shape(string $type): ShapeType
+    {
+        $shape = (new PhpDocShapeParser())->parse($type);
+        self::assertInstanceOf(ShapeType::class, $shape);
+
+        return $shape;
+    }
+
+    /**
+     * @param list<CollectedPathParam> $params
+     *
+     * @return array<string, mixed> the tool's input properties
+     */
+    private function pathTool(array $params): array
+    {
+        $endpoint = new CollectedEndpointContract(
+            name: 'showThing',
+            domain: 'things',
+            controllerClass: 'App\\ThingController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(pathParams: $params),
+            mcp: new CollectedMcpTool(name: 'showThing', description: 'A thing.', httpMethod: 'GET', httpPath: '/things/' . implode('/', array_map(static fn (CollectedPathParam $param): string => '{' . $param->name . '}', $params)), destructive: false),
+        );
+
+        return (new McpManifestBuilder())->build(['things' => [$endpoint]])['tools'][0]['inputSchema']['properties'];
     }
 
     public function testACollectedFilterFormPublishesWhatItsDataClassDeclares(): void

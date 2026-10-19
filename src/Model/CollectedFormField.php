@@ -31,6 +31,22 @@ final readonly class CollectedFormField
      *                                                field with no children: one whose type reads the submitted
      *                                                value whole, so the form shows nothing of what it takes.
      *                                                Null for any other field, and where `_self` is not a shape
+     * @param bool                     $trim          the field's `trim` option: whether the form trims what it is
+     *                                                 sent (Symfony's StringUtil::trim) before it is validated
+     * @param mixed                    $blankValue    what the field reaches validation as when it is left out of a
+     *                                                 request, sent as null or sent blank — it is submitted null, and
+     *                                                 this is what its form makes of that: null for most; '' for a
+     *                                                 text field whose `empty_data` is '', which TextType keeps a
+     *                                                 string; [] for a collection or a multiple choice; false for a
+     *                                                 checkbox
+     * @param list<Constraint>         $entryConstraints what each entry of a collection is validated against: its
+     *                                                 `entry_options` constraints and an All on its property
+     * @param mixed                    $entryBlankValue what a collection entry reaches validation as when it is
+     *                                                 sent as null or blank, as `$blankValue` says of a field
+     * @param bool                     $transformsValue whether the form transforms a submitted value before it is
+     *                                                 validated: a model transformer, or a view transformer but
+     *                                                 TextType's own (which only turns a null into ''). What a
+     *                                                 constraint then sees is not what was sent
      */
     public function __construct(
         public string $name,
@@ -53,6 +69,11 @@ final readonly class CollectedFormField
         public array $constraints = [],
         public ?string $ownerClass = null,
         public ?ShapeType $contract = null,
+        public bool $trim = true,
+        public mixed $blankValue = null,
+        public array $entryConstraints = [],
+        public mixed $entryBlankValue = null,
+        public bool $transformsValue = false,
     ) {}
 
     /**
@@ -85,6 +106,11 @@ final readonly class CollectedFormField
             constraints: $this->constraints,
             ownerClass: $this->ownerClass,
             contract: $contract,
+            trim: $this->trim,
+            blankValue: $this->blankValue,
+            entryConstraints: $this->entryConstraints,
+            entryBlankValue: $this->entryBlankValue,
+            transformsValue: $this->transformsValue,
         );
     }
 }

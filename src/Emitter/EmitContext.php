@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedType;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 
@@ -54,19 +55,25 @@ final readonly class EmitContext
     }
 
     /**
-     * Builds the conversion scope for a declaration, mapping each of its imported
-     * type names to the local symbol (alias-aware) it resolves to in this file.
+     * Builds the conversion scope for a declaration, mapping the name each type it uses is imported
+     * as to the local symbol (alias-aware) it resolves to in this file. One it uses that no module
+     * emits fails here, rather than leaving its name to whatever the emitting module calls by it;
+     * one it doesn't use — a file imports for its own code too — is none of its scope.
      *
-     * @param list<\PTGS\TypeBridge\Model\ImportedType> $imports
+     * @param list<ImportedType> $imports the file's
+     * @param ParsedType|null    $for     the type converted in the scope; without one, every import
+     *        is in it
+     * @param string|null        $aliasDomain the module a bare name is an alias of, where it is not
+     *        this one ({@see ConversionScope::$aliasDomain})
      */
-    public function scopeFor(array $imports): ConversionScope
+    public function scopeFor(array $imports, ?ParsedType $for = null, ?string $aliasDomain = null): ConversionScope
     {
         $symbols = [];
-        foreach ($imports as $importedType) {
-            $symbols[$importedType->targetTypeName] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
+        foreach (null === $for ? $imports : ImportedType::usedIn($imports, $for) as $importedType) {
+            $symbols[$importedType->localAlias] = $this->localReferenceFor($importedType->targetDomain, $importedType->targetTypeName);
         }
 
-        return new ConversionScope($this->domain, $symbols, $this->foreignAliases);
+        return new ConversionScope($this->domain, $symbols, $this->foreignAliases, $aliasDomain === $this->domain ? null : $aliasDomain);
     }
 
     public function localReferenceFor(string $foreignDomain, string $name): string

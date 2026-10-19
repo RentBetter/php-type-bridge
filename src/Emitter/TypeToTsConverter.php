@@ -47,6 +47,21 @@ final readonly class TypeToTsConverter
     private const string BARE_PROPERTY_NAME = '/^(?:[A-Za-z_$][A-Za-z0-9_$]*|0|[1-9][0-9]*)$/';
 
     /**
+     * The type of the class a name carries, where it is the class that the name means: where no
+     * alias of the module it is written in has that name. Null where the name is that module's alias.
+     *
+     * @param string $aliasDomain the module the name is written in ({@see ConversionScope::$aliasDomain})
+     */
+    public function classSymbol(NameRefType $type, string $aliasDomain): ?EmitImport
+    {
+        if (null === $type->class || null === $this->classTypes || $this->symbols->has($aliasDomain, $type->name)) {
+            return null;
+        }
+
+        return $this->classTypes->resolve($type->class);
+    }
+
+    /**
      * A shape key as a TypeScript property name: as written when it can be (`id`, `$type`), and
      * quoted when it cannot (`'my-key'`). The parser hands keys over unquoted, whatever the
      * PHPDoc spelling, so this is the only place that decides.
@@ -54,6 +69,15 @@ final readonly class TypeToTsConverter
     public static function propertyName(string $name): string
     {
         return 1 === preg_match(self::BARE_PROPERTY_NAME, $name) ? $name : self::stringLiteral($name);
+    }
+
+    /**
+     * What a symbol of a module is called where the scope is emitted: its own name in the same
+     * module, else the name it is imported under.
+     */
+    private static function localName(string $domain, string $symbol, ConversionScope $scope): string
+    {
+        return $domain === $scope->domain ? $symbol : $scope->foreignAliases[$domain][$symbol] ?? $symbol;
     }
 
     public static function stringLiteral(string $value): string
@@ -156,16 +180,16 @@ final readonly class TypeToTsConverter
             }
 
             // A name no alias answers to, written where it means a class: the JSON the class
-            // serialises to. An alias of the same name always wins.
-            if (null !== $type->class && null !== $this->classTypes && !$this->symbols->has($scope->domain, $type->name)) {
-                $symbol = $this->classTypes->resolve($type->class);
-
-                return $symbol->targetDomain === $scope->domain
-                    ? $symbol->canonicalName
-                    : $scope->foreignAliases[$symbol->targetDomain][$symbol->canonicalName] ?? $symbol->canonicalName;
+            // serialises to. An alias of the same name in the module it is written in always wins —
+            // the module's, or for an inherited property its base's, whichever module emits it. A
+            // config alias is every module's, declared by each that uses it: this one's.
+            $aliasDomain = $this->symbols->isShared($type->name) ? $scope->domain : $scope->aliasDomain ?? $scope->domain;
+            $symbol = $this->classSymbol($type, $aliasDomain);
+            if (null !== $symbol) {
+                return self::localName($symbol->targetDomain, $symbol->canonicalName, $scope);
             }
 
-            return $this->symbols->resolve($scope->domain, $type->name);
+            return self::localName($aliasDomain, $this->symbols->resolve($aliasDomain, $type->name), $scope);
         }
 
         if ($type instanceof TupleType) {
@@ -183,12 +207,9 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof ShapeType) {
             $fields = array_map(function (ShapeField $field) use ($scope): string {
-                $optional = $field->optional || $this->isIncluded($field->type);
-                $fieldType = $field->type;
-                if ($fieldType instanceof NullableType && $fieldType->optional) {
-                    $optional = true;
-                    $fieldType = $fieldType->inner;
-                }
+                $optional = $field->mayBeLeftOut() || $this->isIncluded($field->type);
+                // `key: ?T` is emitted `key?: T`: left out, not sent as null.
+                $fieldType = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
 
                 return \sprintf('%s%s: %s', self::propertyName($field->name), $optional ? '?' : '', $this->convert($fieldType, $scope));
             }, $type->fields);

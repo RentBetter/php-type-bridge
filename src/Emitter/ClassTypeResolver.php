@@ -87,7 +87,7 @@ final class ClassTypeResolver
 
         throw new RuntimeException(\sprintf(
             'A shape names %s as a type, meaning the JSON it serialises to, but neither it nor a parent or '
-            . 'interface declares a `_self` shape, and no emitter publishes a type for it. Give it a '
+            . 'interface declares a `_self` shape in the source tree, and no emitter publishes a type for it. Give it a '
             . '`@phpstan-type _self` describing what jsonSerialize() returns — or, if the shape naming it is '
             . 'never serialised, mark that shape\'s class #[PhpStanOnly].',
             $class,

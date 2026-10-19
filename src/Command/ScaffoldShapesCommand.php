@@ -142,7 +142,7 @@ final class ScaffoldShapesCommand extends Command
         $found = [];
 
         foreach (array_keys($classFiles) as $className) {
-            if (!$this->classLocator->isLoadable($className)) {
+            if (!$this->classLocator->isLoadable($className) || (new ReflectionClass($className))->isTrait()) {
                 continue;
             }
 

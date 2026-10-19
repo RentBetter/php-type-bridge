@@ -40,10 +40,19 @@ final class ResponseClassEmitter implements TypeEmitter
 
     private function render(CollectedApiResponseClass $response, EmitContext $context): string
     {
-        $scope = $context->scopeFor($response->imports);
-
+        // A 204 is sent with no body at all; the collector gives it no properties.
         if (204 === $response->status && [] === $response->properties) {
-            return \sprintf('export type %s = null;', $context->names->responseDeclarationName($response));
+            $name = $context->names->responseDeclarationName($response);
+            $lines = [\sprintf('export type %s = null;', $name)];
+            // One that declares properties of its own was an interface of them, under the interface
+            // prefix: the name stays a while, deprecated, so code that imports it still compiles.
+            $was = $context->naming->interfaceName($response->name);
+            if ($was !== $name && $response->declaresProperties) {
+                $lines[] = \sprintf('/** @deprecated A 204 is sent with no body; use %s. */', $name);
+                $lines[] = \sprintf('export type %s = %s;', $was, $name);
+            }
+
+            return implode("\n", $lines);
         }
 
         $name = $context->names->responseDeclarationName($response);
@@ -55,7 +64,8 @@ final class ResponseClassEmitter implements TypeEmitter
                 '  %s%s: %s;',
                 $property->name,
                 $property->optional || $isIncluded ? '?' : '',
-                $context->convert($property->parsed, $scope),
+                // Converted in the scope of the file it is written in: the imports of that file it uses.
+                $context->convert($property->parsed, $context->scopeFor($property->imports, $property->parsed, $property->writtenInDomain)),
             );
 
             // Present whenever it is asked for: a side-load (an empty list when nothing is
