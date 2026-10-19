@@ -25,25 +25,61 @@ final readonly class ShapeField
     }
 
     /**
-     * Whether a type admits null as a value sent: `T|null`, or a union with a null among several
-     * members (`'open'|'closed'|null`, which parses as a union, not a nullable). `?T` does not: it
-     * is a key left out when null, and a project's preserveNull rule holds every nullable key to
-     * `?T` but the ones whose null means something.
+     * Whether a type admits null as a value sent: `T|null`, a union with a null among several
+     * members (`'open'|'closed'|null`, which parses as a union, not a nullable), or `mixed`, which
+     * admits anything — its TypeScript `unknown` too. `?T` does not: it is a key left out when null,
+     * and a project's preserveNull rule holds every nullable key to `?T` but the ones whose null
+     * means something.
      */
     public static function admitsNull(ParsedType $type): bool
     {
         if ($type instanceof NullableType) {
             return !$type->optional;
         }
+        if ($type instanceof ScalarType) {
+            return 'mixed' === $type->base();
+        }
         if (!$type instanceof UnionType) {
             return false;
         }
         foreach ($type->types as $member) {
-            if ($member instanceof ScalarType && 'null' === $member->base()) {
+            if ($member instanceof ScalarType && \in_array($member->base(), ['null', 'mixed'], true)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * The key `Base & Own` has where both declare it, as TypeScript reads the intersection: required
+     * where either requires it, admitting null only where both do — otherwise the own key's type
+     * without its null — its type otherwise the own one's, which narrows the base's.
+     */
+    public static function intersected(self $base, self $own): self
+    {
+        $type = self::admitsNull($base->type) ? $own->type : self::withoutNull($own->type);
+        if ($base->mayBeLeftOut() && $own->mayBeLeftOut()) {
+            return new self($own->name, $type, $own->optional);
+        }
+
+        // Required: a `?T` either side wrote is a key left out when null, which it no longer may be.
+        return new self($own->name, $type instanceof NullableType && $type->optional ? $type->inner : $type, false);
+    }
+
+    /**
+     * The type without the null it admits: `T|null`'s `T`, a union's other members.
+     */
+    private static function withoutNull(ParsedType $type): ParsedType
+    {
+        if ($type instanceof NullableType && !$type->optional) {
+            return $type->inner;
+        }
+        if (!$type instanceof UnionType) {
+            return $type;
+        }
+        $members = array_values(array_filter($type->types, static fn (ParsedType $member): bool => !$member instanceof ScalarType || 'null' !== $member->base()));
+
+        return 1 === \count($members) ? $members[0] : new UnionType($members);
     }
 }

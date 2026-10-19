@@ -29,4 +29,18 @@ final readonly class CollectedInputReference
         public ?ShapeType $contract = null,
         public ?ShapeType $inheritedContract = null,
     ) {}
+
+    /**
+     * Every key the input class declares, those it inherits included, as the intersection reads them
+     * ({@see ShapeType::intersected()}): what the Endpoint and the tool both read. Its own alone where
+     * what it inherits can't be read; null where `_self` is not a shape.
+     */
+    public function keys(): ?ShapeType
+    {
+        if (null === $this->contract || null === $this->inheritedContract) {
+            return $this->contract;
+        }
+
+        return ShapeType::intersected($this->inheritedContract, $this->contract);
+    }
 }

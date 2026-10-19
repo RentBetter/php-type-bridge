@@ -61,21 +61,14 @@ final class ClassFileTypes
     }
 
     /**
-     * Whether the class, interface, trait or enum can be loaded in this install. One kept under src/
-     * for tooling, whose declaration needs a require-dev package, can't be without it: it is no part
-     * of the application, and nothing it declares is emitted.
+     * Whether the class, interface or trait can be loaded in this install
+     * ({@see PhpFileClassLocator::isLoadable()}), asked once. One kept under src/ for tooling, whose
+     * declaration needs a require-dev package, can't be without it: it is no part of the
+     * application, and nothing it declares is emitted.
      */
     public function loadable(string $class): bool
     {
-        if (!isset($this->loadable[$class])) {
-            try {
-                $this->loadable[$class] = class_exists($class) || interface_exists($class) || trait_exists($class);
-            } catch (\Error) {
-                $this->loadable[$class] = false;
-            }
-        }
-
-        return $this->loadable[$class];
+        return $this->loadable[$class] ??= $this->classLocator->isLoadable($class);
     }
 
     /**

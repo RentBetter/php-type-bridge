@@ -20,6 +20,7 @@ use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
 use ReflectionUnionType;
+use RuntimeException;
 
 final class ResponseClassCollector
 {
@@ -107,9 +108,9 @@ final class ResponseClassCollector
                 // library's — and converted in that file's scope, whatever another file imports
                 // under the same names, and whichever module the response is in.
                 $declaringClass = self::writtenIn($property);
-                $declared = $this->typeContext($declaringClass, $classFiles[$declaringClass] ?? self::fileOf($declaringClass), $srcDir, $classFiles);
+                $declared = $this->typeContext($declaringClass, $classFiles[$declaringClass] ?? $this->fileOf($declaringClass), $srcDir, $classFiles);
                 if (null === $declared) {
-                    continue;
+                    throw new RuntimeException(\sprintf('The %s property %s::$%s is sent, but the file %s declares it in could not be read.', $className, $declaringClass, $property->getName(), $classFiles[$declaringClass] ?? $declaringClass));
                 }
 
                 $rawType = $this->resolvePropertyType($property);
@@ -165,7 +166,8 @@ final class ResponseClassCollector
      * aside: they fail only a published property typed with them. Read once per class.
      *
      * A library's file, outside the source tree, is in no module and emits nothing: every alias it
-     * imports or declares is set aside, and its module is null.
+     * imports or declares is set aside, and its module is null. A class outside it with no file to
+     * read has no names of its own, and is in no module either.
      *
      * @param array<string, string> $classFiles
      *
@@ -225,12 +227,14 @@ final class ResponseClassCollector
     /**
      * @param array<string, string> $classFiles
      *
-     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>, classImports: array<string, string>, domain: null}|null
+     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>, classImports: array<string, string>, domain: null}
      */
-    private function readLibraryTypeContext(string $className, string $file, string $srcDir, array $classFiles): ?array
+    private function readLibraryTypeContext(string $className, string $file, string $srcDir, array $classFiles): array
     {
-        if (!$this->files->readable($file)) {
-            return null;
+        // A class with no file — declared by PHP or an extension, or at run time — has no names of
+        // its own to read; its properties are as their declarations spell them.
+        if ('' === $file || !$this->files->readable($file)) {
+            return ['imports' => [], 'unresolved' => [], 'classImports' => [], 'domain' => null];
         }
 
         $read = $this->files->imports($className, $file, $srcDir, $classFiles);
@@ -288,11 +292,12 @@ final class ResponseClassCollector
     }
 
     /**
-     * The file a class outside the source tree is declared in; '' for one PHP declares itself.
+     * The file a class outside the source tree is declared in; '' for one with none — declared by
+     * PHP or an extension, or at run time.
      */
-    private static function fileOf(string $class): string
+    private function fileOf(string $class): string
     {
-        if (!class_exists($class) && !trait_exists($class)) {
+        if (!$this->classLocator->isLoadable($class)) {
             return '';
         }
 

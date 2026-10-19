@@ -205,8 +205,7 @@ final class EndpointContractEmitter implements TypeEmitter
      */
     private static function requiresQuery(CollectedEndpointContract $contract): bool
     {
-        $query = $contract->request?->query;
-        foreach ([...$query?->contract->fields ?? [], ...$query?->inheritedContract->fields ?? []] as $key) {
+        foreach ($contract->request?->query?->keys()->fields ?? [] as $key) {
             if (!$key->mayBeLeftOut(inQuery: true)) {
                 return true;
             }

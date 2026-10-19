@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Support;
 
+use Closure;
 use PTGS\TypeBridge\Contract\ContractFormType;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use ReflectionAttribute;
@@ -12,11 +13,11 @@ use RuntimeException;
 use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
 use Symfony\Component\Form\Extension\Core\EventListener\TrimListener;
-use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\CollectionType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
+use Symfony\Component\Form\Form;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
 use Symfony\Component\Form\FormEvents;
@@ -136,35 +137,51 @@ final class FormTypeInspector
 
     /**
      * What a field reaches validation as when it is left out of a request, sent as null or sent
-     * blank: Symfony submits it null, and its form makes of that what its type does. A collection is
-     * emptied and a multiple choice chooses none, []; a checkbox is left unticked, false. A text
-     * field given `empty_data: ''` keeps it a string — TextType adds itself as a view transformer
-     * then — and anything else is null: a field with no view transformer turns '' into null, and
-     * another type's transformer, a number's or a single choice's, makes a blank none all the same.
+     * blank: Symfony submits it null, and its form makes of that what Form::submit() does — its
+     * `empty_data`, through its view transformers and then its model ones, '' read as null where it
+     * has no view transformer. So a text field is null, or '' where TextType keeps an `empty_data` of
+     * '' a string, or `'n/a'` where that is its `empty_data`; a number is null, or 0 from an
+     * `empty_data` of '0'; a checkbox is left unticked, false; a choice is none, a multiple one [].
+     * Listeners, which see only what was sent, are not run.
+     *
+     * A compound field is what its type makes it: a collection is emptied, []; an expanded choice
+     * chooses none; an embedded form is null as far as its own constraints go. A choice a loader
+     * fills is never loaded here, and one whose transformers refuse a blank is taken as null.
      *
      * @param FormConfigInterface<mixed> $config
      */
     private function blankValue(FormConfigInterface $config): mixed
     {
-        for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
-            $inner = $type->getInnerType();
-            if ($inner instanceof CheckboxType) {
-                return false;
+        if ($config->getCompound()) {
+            for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
+                if ($type->getInnerType() instanceof CollectionType) {
+                    return [];
+                }
             }
-            if ($inner instanceof CollectionType) {
-                return [];
-            }
+
+            return $this->isMultipleChoice($config) ? [] : null;
         }
-        if ($this->isMultipleChoice($config)) {
-            return [];
-        }
-        foreach ($config->getViewTransformers() as $transformer) {
-            if ($transformer instanceof TextType) {
-                return '';
-            }
+        if (null !== $this->resolveOption($config, 'choice_loader')) {
+            return $this->isMultipleChoice($config) ? [] : null;
         }
 
-        return null;
+        try {
+            $value = $config->getEmptyData();
+            if ($value instanceof Closure) {
+                $value = $value(new Form($config), null);
+            }
+            $viewTransformers = $config->getViewTransformers();
+            if ([] === $viewTransformers && '' === $value) {
+                $value = null;
+            }
+            foreach ([...array_reverse($viewTransformers), ...array_reverse($config->getModelTransformers())] as $transformer) {
+                $value = $transformer->reverseTransform($value);
+            }
+
+            return $value;
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

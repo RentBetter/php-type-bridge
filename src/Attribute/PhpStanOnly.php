@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Attribute;
 
 use Attribute;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 
 /**
  * `@phpstan-type` aliases that type PHP arrays which are never serialised — working data holding
@@ -37,11 +38,7 @@ final readonly class PhpStanOnly
      */
     public static function of(string $class): ?self
     {
-        try {
-            if (!class_exists($class) && !interface_exists($class) && !trait_exists($class) && !enum_exists($class)) {
-                return null;
-            }
-        } catch (\Error) {
+        if (!(new PhpFileClassLocator())->isLoadable($class)) {
             return null;
         }
 

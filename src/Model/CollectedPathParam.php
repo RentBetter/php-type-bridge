@@ -6,7 +6,8 @@ namespace PTGS\TypeBridge\Model;
 
 /**
  * A single route-derived path parameter: the placeholder name and its resolved TS type.
- * The raw route requirement is retained so later versions can attach a Zod schema or a
+ * The route requirement is retained as the router holds it — Symfony's Route takes a leading `^`
+ * or `\A` and a trailing `$` or `\z` off — so later versions can attach a Zod schema or a
  * value-resolver target keyed off the same {@see \PTGS\TypeBridge\Routing\PathParam} pattern,
  * without changing this object's consumers.
  *

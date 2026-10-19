@@ -49,6 +49,12 @@ final class EndpointContractCollector
 
     private readonly ?AttributeText $toolDescriptions;
 
+    /** @var array<string, ParsedType|null> each type written, parsed once however many inputs name it */
+    private array $parsedTypes = [];
+
+    /** @var array<string, bool> by file and alias, whether the alias admits null */
+    private array $aliasNulls = [];
+
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
      *        merged over {@see RequirementType::defaults()}
@@ -116,7 +122,7 @@ final class EndpointContractCollector
             }
 
             $reflection = new ReflectionClass($className);
-            if ($reflection->isAbstract() || $reflection->isInterface()) {
+            if ($reflection->isAbstract() || $reflection->isInterface() || $reflection->isTrait()) {
                 continue;
             }
 
@@ -670,7 +676,7 @@ final class EndpointContractCollector
             return null;
         }
 
-        return new ShapeType([...$further->fields ?? [], ...$own->fields]);
+        return null === $further ? $own : ShapeType::intersected($further, $own);
     }
 
     /**
@@ -749,6 +755,14 @@ final class EndpointContractCollector
      */
     private function aliasAdmitsNull(string $alias, string $class, string $file, string $srcDir, array $classFiles, int $depth = 0): bool
     {
+        return $this->aliasNulls[$srcDir . "\0" . $file . "\0" . $alias] ??= $this->readAliasAdmitsNull($alias, $class, $file, $srcDir, $classFiles, $depth);
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     */
+    private function readAliasAdmitsNull(string $alias, string $class, string $file, string $srcDir, array $classFiles, int $depth): bool
+    {
         $declared = $depth > 8 ? null : $this->aliasDefinition($alias, $class, $file, $srcDir, $classFiles);
         if (null === $declared) {
             return isset($this->typeAliases[$alias]) && TypeScriptTypes::admitsNull($this->typeAliases[$alias]);
@@ -771,7 +785,7 @@ final class EndpointContractCollector
         return match (true) {
             $type instanceof NullableType => !$type->optional || $this->declaredAdmitsNull($type->inner, $class, $file, $srcDir, $classFiles, $depth),
             $type instanceof UnionType => [] !== array_filter($type->types, fn (ParsedType $member): bool => $this->declaredAdmitsNull($member, $class, $file, $srcDir, $classFiles, $depth)),
-            $type instanceof ScalarType => 'null' === $type->base(),
+            $type instanceof ScalarType => ShapeField::admitsNull($type) || 'null' === $type->base(),
             $type instanceof NameRefType => null === $type->class && $this->aliasAdmitsNull($type->name, $class, $file, $srcDir, $classFiles, $depth),
             default => false,
         };
@@ -798,10 +812,14 @@ final class EndpointContractCollector
 
     private function parseType(string $type): ?ParsedType
     {
+        if (\array_key_exists($type, $this->parsedTypes)) {
+            return $this->parsedTypes[$type];
+        }
+
         try {
-            return $this->shapeParser->parse($type);
+            return $this->parsedTypes[$type] = $this->shapeParser->parse($type);
         } catch (Throwable) {
-            return null;
+            return $this->parsedTypes[$type] = null;
         }
     }
 }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Mcp;
 
-use InvalidArgumentException;
 use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
@@ -22,7 +21,6 @@ use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\AttributeText;
 use PTGS\TypeBridge\Support\HeldConstraints;
 use ReflectionProperty;
-use Symfony\Component\Routing\Route;
 use Throwable;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\Choice;
@@ -198,8 +196,8 @@ final class McpManifestBuilder
 
     /**
      * The fields as arguments, each with the key its contract declares: its own, or for an input
-     * extending a shape (`Base & array{…}`), one it inherits, read where that shape is declared. An
-     * intersection holds both sides, so a key one side requires is required whatever the other says.
+     * extending a shape (`Base & array{…}`), one it inherits, read where that shape is declared, the
+     * two read as the intersection reads them ({@see CollectedInputReference::keys()}).
      *
      * @param array<string, mixed> $properties
      * @param list<string>         $required
@@ -214,16 +212,10 @@ final class McpManifestBuilder
             return;
         }
 
-        $declared = self::shapeKeys($reference->contract);
-        foreach (self::shapeKeys($reference->inheritedContract) as $name => $inherited) {
-            $own = $declared[$name] ?? null;
-            if (null === $own || ($own->mayBeLeftOut(inQuery: !$json) && !$inherited->mayBeLeftOut(inQuery: !$json))) {
-                $declared[$name] = $inherited;
-            }
-        }
+        $declared = self::shapeKeys($reference->keys());
         foreach ($reference->fields as $field) {
             $key = $declared[$field->name] ?? null;
-            $properties[$field->name] = $this->fieldSchema($field, $key?->type, $json);
+            $properties[$field->name] = $this->fieldSchema($field, $key?->type, $json, $makes);
             if ($json && $this->takesNull($key, $field)) {
                 $properties[$field->name] = self::withNull($properties[$field->name]);
             }
@@ -337,12 +329,14 @@ final class McpManifestBuilder
      *
      * @param ParsedType|null $declared the type the request contract gives this field, if it names it
      * @param bool            $json     whether it is sent as JSON, which can carry a null
+     * @param bool            $makes    whether the request makes something, so a field nested in it that
+     *                                  its constraints refuse blank is one it can't go without
      *
      * @return array<string, mixed>
      */
-    private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null, bool $json = false): array
+    private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null, bool $json = false, bool $makes = false): array
     {
-        $schema = $this->valueSchema($field, $declared, $json);
+        $schema = $this->valueSchema($field, $declared, $json, $makes);
         $schema = [...$schema, ...$this->bounds(HeldConstraints::always($field->constraints), $schema['type']), ...$this->patternOf($field, $schema['type'])];
 
         // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
@@ -365,11 +359,11 @@ final class McpManifestBuilder
      *
      * @return array{type: string, ...<string, mixed>}
      */
-    private function valueSchema(CollectedFormField $field, ?ParsedType $declared, bool $json = false): array
+    private function valueSchema(CollectedFormField $field, ?ParsedType $declared, bool $json = false, bool $makes = false): array
     {
         // A collection is compound too, but its shape is its entry's, repeated.
         if (null !== $field->entryTypeClass) {
-            return ['type' => 'array', 'items' => $this->entrySchema($field, self::listItem($declared), $json)];
+            return ['type' => 'array', 'items' => $this->entrySchema($field, self::listItem($declared), $json, $makes)];
         }
 
         // A choice field takes one of a known set, and a model has no other way to learn them: the
@@ -391,7 +385,7 @@ final class McpManifestBuilder
         }
 
         if ($field->compound && [] !== $field->children) {
-            return $this->objectSchema($field->children, self::shapeKeys($declared), $json);
+            return $this->objectSchema($field->children, self::shapeKeys($declared), $json, $makes);
         }
 
         return ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
@@ -564,7 +558,7 @@ final class McpManifestBuilder
      *
      * @return array<string, mixed>
      */
-    private function entrySchema(CollectedFormField $field, ?ParsedType $item = null, bool $json = false): array
+    private function entrySchema(CollectedFormField $field, ?ParsedType $item = null, bool $json = false, bool $makes = false): array
     {
         if ([] === $field->entryChildren) {
             \assert(null !== $field->entryTypeClass);
@@ -578,27 +572,28 @@ final class McpManifestBuilder
                 : $schema;
         }
 
-        return $this->objectSchema($field->entryChildren, self::shapeKeys($item), $json);
+        return $this->objectSchema($field->entryChildren, self::shapeKeys($item), $json, $makes);
     }
 
     /**
      * A compound form as an object: each field with the type its declared key gives it and, sent as
-     * JSON, null where that key takes one; required where the form requires it.
+     * JSON, null where that key takes one; required as at the top — where its key says so, or the
+     * form where it declares none, or where a request that makes something can't go without it.
      *
      * @param list<CollectedFormField> $children
      * @param array<string, ShapeField> $keys the keys the compound's declared shape names
      *
      * @return array{type: 'object', properties: array<string, array<string, mixed>>, required?: list<string>}
      */
-    private function objectSchema(array $children, array $keys, bool $json): array
+    private function objectSchema(array $children, array $keys, bool $json, bool $makes): array
     {
         $properties = [];
         $required = [];
         foreach ($children as $child) {
             $key = $keys[$child->name] ?? null;
-            $schema = $this->fieldSchema($child, $key?->type, $json);
+            $schema = $this->fieldSchema($child, $key?->type, $json, $makes);
             $properties[$child->name] = $json && $this->takesNull($key, $child) ? self::withNull($schema) : $schema;
-            if ($child->required) {
+            if ($this->isRequired($child, $key, inQuery: !$json) || ($makes && $this->refusesBlank($child))) {
                 $required[] = $child->name;
             }
         }
@@ -714,21 +709,15 @@ final class McpManifestBuilder
 
     /**
      * A route requirement as a `pattern`: the router matches it against the whole segment, so it is
-     * anchored (`^(?:…)$`), after the leading `^`/`\A` and trailing `$`/`\z` Symfony itself strips.
-     * Null for a requirement holding a `%…%` container placeholder, which the router resolves and the
-     * literal text is not, and for one that does not read the same in JSON Schema's dialect
-     * ({@see self::readsTheSameInEcma()}) under the route's `utf8` option — or under either, when
-     * the route leaves it to the router's default.
+     * anchored (`^(?:…)$`). The requirement is as the router holds it ({@see CollectedPathParam::$requirement}),
+     * the anchors Symfony strips already off — stripping them again would take an escaped `\$` at
+     * its end for one. Null for a requirement holding a `%…%` container placeholder, which the router
+     * resolves and the literal text is not, and for one that does not read the same in JSON Schema's
+     * dialect ({@see self::readsTheSameInEcma()}) under the route's `utf8` option — or under either,
+     * when the route leaves it to the router's default.
      */
     private static function routePattern(string $requirement, ?bool $utf8): ?string
     {
-        // As the router reads it: Symfony's own Route takes the anchors off.
-        try {
-            $requirement = new Route('/', requirements: ['value' => $requirement])->getRequirement('value') ?? '';
-        } catch (InvalidArgumentException) {
-            return null;
-        }
-
         if ('' === $requirement || str_contains($requirement, '%') || !self::readsTheSameInEcma($requirement, alternationOutsideGroups: true, unicode: $utf8)) {
             return null;
         }
@@ -1009,7 +998,9 @@ final class McpManifestBuilder
 
         $count = \count($atoms);
         for ($k = 0; $k < $count; ++$k) {
-            if ($k + 2 < $count && 'dash' === $atoms[$k + 1]['kind'] && 'dash' !== $atoms[$k]['kind']) {
+            // A range may start at a dash (`[--0]`), which is a literal there; one out of order is
+            // refused by both dialects.
+            if ($k + 2 < $count && 'dash' === $atoms[$k + 1]['kind']) {
                 [$from, $to] = [$atoms[$k], $atoms[$k + 2]];
                 if ('set' === $from['kind'] || 'set' === $to['kind'] || \ord($from['char']) > \ord($to['char'])) {
                     return null;
