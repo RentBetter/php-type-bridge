@@ -99,6 +99,59 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertMatchesRegularExpression('/import type \\{[^}]*\\bErrorBody\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
     }
 
+    public function test_an_alias_of_its_own_and_an_import_named_alike_are_each_the_type_the_file_means(): void
+    {
+        // The response declares a `Meta` and imports Common's as `CommonMeta`: two types. Each is
+        // named as the file names it — in a property and in an alias it declares alike — though
+        // both are emitted `Meta`, one in each module.
+        $notes = self::emit(self::fixtures('SameNamedAliasFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface NoteResponse {\n  meta: Meta;\n  common: CommonMeta;\n  pair: Pair;\n}", $notes);
+        self::assertStringContainsString("export interface Pair {\n  own: Meta;\n  common: CommonMeta;\n}", $notes);
+        self::assertStringContainsString("export interface Meta {\n  page: number;\n}", $notes);
+        self::assertMatchesRegularExpression("/import type \\{[^}]*\\bMeta as CommonMeta\\b[^}]*\\} from '[^']*Common[^']*';/", $notes);
+    }
+
+    public function test_a_204_says_whether_it_declares_properties_of_its_own(): void
+    {
+        // What it was emitted as before it was null is the collected model's to say, not a question
+        // for reflection at emit time.
+        $index = (new ResponseClassCollector())->collectIndex(self::fixtures('Inherited204Fixtures'));
+
+        self::assertTrue($index['PTGS\\TypeBridge\\Tests\\Fixture\\Inherited204Fixtures\\Notes\\Response\\RestoreNoteResponse']->declaresProperties);
+        self::assertFalse($index['PTGS\\TypeBridge\\Tests\\Fixture\\Inherited204Fixtures\\Notes\\Response\\DeleteNoteResponse']->declaresProperties, 'It only inherits them');
+    }
+
+    public function test_the_name_a_204_keeps_is_what_its_collected_model_says(): void
+    {
+        // A model built as a project's own collector builds it, saying it declared properties: the
+        // deprecated name is kept, whatever the class looks like when it is emitted.
+        $src = self::fixtures('Inherited204Fixtures');
+        $responseCollector = new ResponseClassCollector();
+        $responses = $responseCollector->collect($src);
+        $responses['Notes'] = array_map(static fn(CollectedApiResponseClass $response): CollectedApiResponseClass => 'DeleteNoteResponse' !== $response->name ? $response : new CollectedApiResponseClass(
+            className: $response->className,
+            name: $response->name,
+            domain: $response->domain,
+            sourceFile: $response->sourceFile,
+            status: $response->status,
+            error: $response->error,
+            properties: [],
+            imports: $response->imports,
+            declaresProperties: true,
+        ), $responses['Notes']);
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($src);
+
+        $notes = (new TypeScriptEmitter(enumResolver: $enumResolver, domainMapper: new DomainMapper('/tmp/type-bridge-output'), naming: new TypeScriptNaming(interfacePrefix: 'I')))->emit(
+            (new PhpDocTypeCollector())->collect($src),
+            $responses,
+            (new EndpointContractCollector())->collect($src, $responseCollector->collectIndex($src)),
+        )['Notes'];
+
+        self::assertMatchesRegularExpression('/\\/\\*\\* @deprecated [^*]*DeleteNoteResponse[^*]*\\*\\/\\nexport type IDeleteNoteResponse = DeleteNoteResponse;/', $notes);
+    }
+
     public function test_a_base_classs_import_from_outside_the_source_tree_is_no_matter_when_no_published_property_uses_it(): void
     {
         $output = self::emit(self::fixtures('InheritedOutOfTreeImportFixtures'));

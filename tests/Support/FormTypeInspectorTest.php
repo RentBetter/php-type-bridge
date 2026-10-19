@@ -78,13 +78,19 @@ final class FormTypeInspectorTest extends TestCase
         (new FormTypeInspector())->inspect(NestedBrokenRequestType::class);
     }
 
-    public function test_it_records_whether_a_blank_value_stays_an_empty_string(): void
+    public function test_it_records_what_a_blank_value_reaches_validation_as(): void
     {
+        // Left out of a request, sent as null or sent blank, a field is submitted null; what its
+        // constraints are then asked about is what its form makes of that.
         $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
 
-        self::assertFalse($fields['title']->blankStaysString, 'A blank text field reaches validation as null');
-        self::assertTrue($fields['code']->blankStaysString, "With empty_data '', TextType keeps it ''");
-        self::assertFalse($fields['count']->blankStaysString, "A number's transformer still makes it null");
+        self::assertNull($fields['title']->blankValue, 'A blank text field reaches validation as null');
+        self::assertSame('', $fields['code']->blankValue, "With empty_data '', TextType keeps it ''");
+        self::assertNull($fields['count']->blankValue, "A number's transformer still makes it null");
+        self::assertSame([], $fields['tags']->blankValue, 'A collection is emptied');
+        self::assertSame([], $fields['kinds']->blankValue, 'A multiple choice chooses none');
+        self::assertNull($fields['status']->blankValue, 'A single choice is none');
+        self::assertFalse($fields['pinned']->blankValue, 'A checkbox is left unticked');
     }
 
     public function test_it_records_what_each_collection_entry_is_held_to(): void
@@ -111,18 +117,20 @@ final class FormTypeInspectorTest extends TestCase
     {
         $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
 
-        self::assertTrue($fields['code']->withDeclared([], [], null)->blankStaysString);
+        self::assertSame('', $fields['code']->withDeclared([], [], null)->blankValue);
+        self::assertFalse($fields['pinned']->withDeclared([], [], null)->blankValue);
         self::assertCount(2, $fields['tags']->withDeclared([], [], null)->entryConstraints);
     }
 
-    public function test_it_records_whether_a_blank_entry_stays_an_empty_string(): void
+    public function test_it_records_what_a_blank_entry_reaches_validation_as(): void
     {
         $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
 
-        self::assertTrue($fields['codes']->entryBlankStaysString, "Its entry_options give each entry empty_data ''");
-        self::assertFalse($fields['tags']->entryBlankStaysString);
-        self::assertFalse($fields['title']->entryBlankStaysString, 'No entries at all');
-        self::assertTrue($fields['codes']->withDeclared([], [], null)->entryBlankStaysString);
+        self::assertSame('', $fields['codes']->entryBlankValue, "Its entry_options give each entry empty_data ''");
+        self::assertNull($fields['tags']->entryBlankValue);
+        self::assertFalse($fields['flags']->entryBlankValue, 'An entry that is a checkbox is left unticked');
+        self::assertNull($fields['title']->entryBlankValue, 'No entries at all');
+        self::assertSame('', $fields['codes']->withDeclared([], [], null)->entryBlankValue);
     }
 
     public function test_it_records_whether_the_form_transforms_a_value_before_it_is_validated(): void
@@ -134,6 +142,18 @@ final class FormTypeInspectorTest extends TestCase
         self::assertTrue($fields['count']->transformsValue, 'A number is read from what was sent');
         self::assertTrue($fields['ref']->transformsValue, 'A model transformer');
         self::assertTrue($fields['ref']->withDeclared([], [], null)->transformsValue);
+    }
+
+    public function test_a_listener_that_rewrites_what_is_sent_transforms_it_too(): void
+    {
+        // Before it is validated, as a transformer would: UrlType given a default protocol adds it
+        // to `example.com`, which the Regex then checks; a project's listener lowercases a slug.
+        // Trimming is the `trim` option's to say, not this.
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+
+        self::assertTrue($fields['site']->transformsValue, "UrlType's default protocol");
+        self::assertTrue($fields['slug']->transformsValue, 'A PRE_SUBMIT listener of its own');
+        self::assertFalse($fields['title']->transformsValue, 'Symfony\'s trim is no rewrite');
     }
 
     public function test_it_records_whether_the_form_trims_a_fields_value(): void

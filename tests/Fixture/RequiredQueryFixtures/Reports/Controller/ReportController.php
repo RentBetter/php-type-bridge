@@ -6,8 +6,12 @@ namespace PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Controller
 
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedProductFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyRegionFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ConfigProductFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ImportedProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LayeredRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\MonthlyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\NorthRegionFilterType;
@@ -16,6 +20,7 @@ use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\OpenRegionF
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\QuarterlyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportListFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportNoteType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\WeeklyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Response\ReportResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -110,6 +115,46 @@ final class ReportController
     #[ApiRequest(query: NullableProductFilterType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function listProductReports(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/aliasedProduct', methods: ['GET'])]
+    #[ApiRequest(query: AliasedProductFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listAliasedProductReports(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/importedProduct', methods: ['GET'])]
+    #[ApiRequest(query: ImportedProductFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listImportedProductReports(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/configProduct', methods: ['GET'])]
+    #[ApiRequest(query: ConfigProductFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listConfigProductReports(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/aliasedRegion', methods: ['GET'])]
+    #[ApiRequest(query: AliasedRegionFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function showAliasedRegionReport(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/{id}/note', methods: ['PUT'])]
+    #[ApiRequest(body: ReportNoteType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function updateReportNote(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

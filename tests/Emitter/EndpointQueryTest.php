@@ -9,6 +9,9 @@ use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
+use PTGS\TypeBridge\Mcp\McpManifestBuilder;
+use PTGS\TypeBridge\Model\CollectedEndpointContract;
+use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
@@ -155,6 +158,72 @@ final class EndpointQueryTest extends TestCase
         self::assertNull($contract->request?->query?->inheritedContract);
     }
 
+    public function test_a_key_typed_with_an_alias_that_admits_null_may_be_left_out(): void
+    {
+        // What the alias admits, the key does — the alias its file declares, one it names that it
+        // imports, a project-wide one — so the query a caller may leave out is the one AsQuery<T>
+        // makes every key of optional.
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString('export const ListAliasedProductReports: Endpoint<ListAliasedProductReportsEndpointMap, { query?: ListAliasedProductReportsQuery }> = {', $reports);
+        self::assertStringContainsString('export const ListImportedProductReports: Endpoint<ListImportedProductReportsEndpointMap, { query?: ListImportedProductReportsQuery }> = {', $reports);
+        self::assertStringContainsString('export const ListConfigProductReports: Endpoint<ListConfigProductReportsEndpointMap, { query?: ListConfigProductReportsQuery }> = {', $reports);
+        // One that admits none is still a key a caller must send.
+        self::assertStringContainsString('export const ShowAliasedRegionReport: Endpoint<ShowAliasedRegionReportEndpointMap, { query: ShowAliasedRegionReportQuery }> = {', $reports);
+    }
+
+    public function test_a_query_key_typed_with_an_alias_that_admits_null_is_no_required_tool_argument(): void
+    {
+        $contracts = (new EndpointContractCollector(typeAliases: ['MaybeText' => 'string | null']))->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+
+        foreach (['listAliasedProductReports' => [], 'listImportedProductReports' => [], 'listConfigProductReports' => [], 'showAliasedRegionReport' => ['region']] as $method => $required) {
+            $query = self::contract($contracts, $method)->request?->query;
+            self::assertNotNull($query);
+            $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, $method), 'GET')]])['tools'][0];
+            self::assertSame($required, $tool['inputSchema']['required'] ?? [], $method);
+        }
+    }
+
+    public function test_a_body_key_typed_with_an_alias_that_admits_null_takes_null(): void
+    {
+        // An update may clear it, and a list of them may hold one: what the alias admits.
+        $contracts = (new EndpointContractCollector())->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'updateReportNote'), 'PUT')]])['tools'][0];
+
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['tags']['items']);
+    }
+
+    /**
+     * @param array<string, list<CollectedEndpointContract>> $contracts
+     */
+    private static function contract(array $contracts, string $method): CollectedEndpointContract
+    {
+        foreach ($contracts['Reports'] ?? [] as $contract) {
+            if ($method === $contract->methodName) {
+                return $contract;
+            }
+        }
+
+        self::fail(\sprintf('No contract for %s.', $method));
+    }
+
+    /**
+     * The contract as a tool, though its endpoint declares none.
+     */
+    private static function asTool(CollectedEndpointContract $contract, string $httpMethod): CollectedEndpointContract
+    {
+        return new CollectedEndpointContract(
+            name: $contract->name,
+            domain: $contract->domain,
+            controllerClass: $contract->controllerClass,
+            methodName: $contract->methodName,
+            responses: $contract->responses,
+            request: $contract->request,
+            mcp: new CollectedMcpTool(name: $contract->name, description: 'A report.', httpMethod: $httpMethod, httpPath: '/api/reports', destructive: false),
+        );
+    }
+
     /**
      * @return array<string, string>
      */
@@ -169,10 +238,11 @@ final class EndpointQueryTest extends TestCase
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             // A null that means something, so the contract says `T|null`: in a query, "any product".
             preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region'],
+            typeAliases: ['MaybeText' => 'string | null'],
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),
             $responseCollector->collect(self::SRC),
-            (new EndpointContractCollector())->collect(self::SRC, $responseCollector->collectIndex(self::SRC)),
+            (new EndpointContractCollector(typeAliases: ['MaybeText' => 'string | null']))->collect(self::SRC, $responseCollector->collectIndex(self::SRC)),
         );
     }
 }

@@ -94,6 +94,31 @@ final class McpManifestGeneratorTest extends TestCase
         self::assertSame(['type' => 'number'], $tool['inputSchema']['properties']['id'] ?? null);
     }
 
+    public function testItIsDescribedByItsFirstRouteWhateverTheRouterSortsFirst(): void
+    {
+        // A priority lists the second route first, and its path ends the way the first's does.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        $tools = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name');
+
+        self::assertSame('/api/notes/{id}', $tools['ShowNote']['path'] ?? null);
+        self::assertSame(['type' => 'number'], $tools['ShowNote']['inputSchema']['properties']['id'] ?? null);
+    }
+
+    public function testARequirementOrADefaultWrittenInlineIsReadAsTheRouterReadsIt(): void
+    {
+        // `{page<\d+>}` is the param `page`, holding to `\d+`; `{slug?intro}` is `slug`. Routed or
+        // not, the path a client is given names them as the router serves them.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        foreach (['/api/pages/{page}/{slug}' => TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir), '/pages/{page}/{slug}' => new TypeBridgeConfig()] as $path => $config) {
+            $page = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowPage'] ?? [];
+
+            self::assertSame($path, $page['path'] ?? null);
+            self::assertSame(['type' => 'string', 'pattern' => '^(?:\\d+)$'], $page['inputSchema']['properties']['page'] ?? null);
+            self::assertSame(['type' => 'string'], $page['inputSchema']['properties']['slug'] ?? null);
+            self::assertSame(['page', 'slug'], $page['inputSchema']['required'] ?? null);
+        }
+    }
+
     public function testWithoutRoutingTheAttributePathStands(): void
     {
         // Existing consumers configure no routing and put the full path on the attribute;

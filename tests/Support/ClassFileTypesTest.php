@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Support;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use PTGS\TypeBridge\Tests\Fixture\PhpStanOnlyImportedFixtures\Notes\Model\RowSource;
 use PTGS\TypeBridge\Tests\Fixture\PhpStanOnlyImportedFixtures\Notes\Response\ShowRowResponse;
+use PTGS\TypeBridge\Tests\Fixture\UnloadableFixtures\DevOnly\DevOnlyRule;
+use PTGS\TypeBridge\Tests\Fixture\UnloadableImportFixtures\DevOnly\DevOnlyCodes;
+use PTGS\TypeBridge\Tests\Fixture\UnloadableImportFixtures\Notes\Input\NoteData;
 
 /**
  * What a class's file says its types mean, as every collector reads it.
@@ -28,6 +32,27 @@ final class ClassFileTypesTest extends TestCase
         self::assertSame([], $read['unresolved']);
     }
 
+    public function test_an_import_from_a_class_this_install_cannot_load_is_read_all_the_same(): void
+    {
+        // Its declaration throws without a require-dev package, so it can't say which of its aliases
+        // are for PHPStan alone — and asking must not take generation down with it.
+        $src = __DIR__ . '/../Fixture/UnloadableImportFixtures';
+        $classFiles = (new PhpFileClassLocator())->classesIn($src);
+        $read = (new ClassFileTypes())->imports(NoteData::class, $classFiles[NoteData::class], $src, $classFiles);
+
+        self::assertSame(DevOnlyCodes::class, $read['imports']['Code']->targetClass);
+        self::assertSame([], $read['phpStanOnly']);
+        self::assertNull(PhpStanOnly::of(DevOnlyRule::class));
+    }
+
+    public function test_a_source_tree_is_scanned_once_however_many_collectors_ask(): void
+    {
+        $files = new ClassFileTypes();
+
+        self::assertSame((new PhpFileClassLocator())->classesIn(self::SRC), $files->classesIn(self::SRC));
+        self::assertSame($files->classesIn(self::SRC), $files->classesIn(self::SRC));
+    }
+
     public function test_a_file_is_read_once_however_often_it_is_asked_for(): void
     {
         $classFiles = (new PhpFileClassLocator())->classesIn(self::SRC);
@@ -36,6 +61,7 @@ final class ClassFileTypesTest extends TestCase
 
         self::assertSame(['Row'], array_keys($files->definitions($file)), 'A #[PhpStanOnly] alias is still the file\'s');
         self::assertSame($files->imports(ShowRowResponse::class, $classFiles[ShowRowResponse::class], self::SRC, $classFiles), $files->imports(ShowRowResponse::class, $classFiles[ShowRowResponse::class], self::SRC, $classFiles));
-        self::assertNull($files->content(self::SRC . '/missing.php'));
+        self::assertFalse($files->readable(self::SRC . '/missing.php'));
+        self::assertTrue($files->readable($file));
     }
 }

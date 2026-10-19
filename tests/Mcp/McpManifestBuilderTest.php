@@ -32,11 +32,18 @@ use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Authorize;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
+use PTGS\TypeBridge\Tests\Fixture\ConstraintFixtures\NoteCode;
 use Symfony\Component\Validator\Constraint;
+use Symfony\Component\Validator\Constraints\AtLeastOneOf;
+use Symfony\Component\Validator\Constraints\Choice;
+use Symfony\Component\Validator\Constraints\Count;
+use Symfony\Component\Validator\Constraints\IsTrue;
+use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\NotNull;
 use Symfony\Component\Validator\Constraints\Range;
 use Symfony\Component\Validator\Constraints\Regex;
+use Symfony\Component\Validator\Constraints\Sequentially;
 
 final class McpManifestBuilderTest extends TestCase
 {
@@ -1137,6 +1144,13 @@ final class McpManifestBuilderTest extends TestCase
         yield 'must not match' => [[new Regex(pattern: '/^[0-9]+$/', match: false)], null];
         // Both must hold, which one `pattern` cannot say.
         yield 'two' => [[new Regex('/^[A-Z]+$/'), new Regex('/^.{2,5}$/')], null];
+        // A rule nested where it always holds — in a sequence, in a project's compound rule — is the
+        // field's as much as one written beside the others; one among alternatives may not hold.
+        yield 'one, in a sequence' => [[new Sequentially([new Regex('/^[A-Z]{1,5}$/D')])], '^(?:[A-Z]{1,5})$'];
+        yield 'one, in a compound rule' => [[new NoteCode()], '^(?:[A-Z]+)$'];
+        yield 'two, one of them in a sequence' => [[new Regex('/^[A-Z]+$/D'), new Sequentially([new Regex('/^[A-Z]{2,5}$/D')])], null];
+        yield 'two, one of them among alternatives' => [[new Regex('/^[A-Z]+$/D'), new AtLeastOneOf([new Regex('/^[0-9]+$/D'), new Length(max: 3)])], null];
+        yield 'one, among alternatives' => [[new AtLeastOneOf([new Regex('/^[A-Z]+$/D'), new Length(max: 3)])], null];
         yield 'a letter for a delimiter' => [[new Regex('a^b$a')], null];
         yield 'an extended flag' => [[new Regex('/^[a-z]+$/x')], null];
     }
@@ -1235,7 +1249,7 @@ final class McpManifestBuilderTest extends TestCase
     #[DataProvider('emptyStringValues')]
     public function testABlankValueKeptAnEmptyStringIsAllowedWhereItsConstraintsTakeOne(array $constraints, string $pattern): void
     {
-        $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Regex('/^[A-Z]+$/'), ...$constraints], blankStaysString: true);
+        $field = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Regex('/^[A-Z]+$/'), ...$constraints], blankValue: '');
 
         self::assertSame(['type' => 'string', 'pattern' => $pattern], $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code']);
     }
@@ -1245,8 +1259,8 @@ final class McpManifestBuilderTest extends TestCase
         // Left out or sent as null, it reaches validation as '' — which NotBlank(allowNull: true)
         // refuses, though it would let a null through.
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
-        $title = new CollectedFormField(name: 'title', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(allowNull: true)], blankStaysString: true);
-        $note = new CollectedFormField(name: 'note', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotNull()], blankStaysString: true);
+        $title = new CollectedFormField(name: 'title', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(allowNull: true)], blankValue: '');
+        $note = new CollectedFormField(name: 'note', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotNull()], blankValue: '');
         $contract = (new PhpDocShapeParser())->parse('array{title?: string|null, note?: string|null}');
         self::assertInstanceOf(ShapeType::class, $contract);
 
@@ -1255,6 +1269,62 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['title']);
         // A NotNull takes the '' a null becomes.
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
+    }
+
+    /**
+     * @return iterable<string, array{mixed, Constraint, bool}>
+     */
+    public static function blankValues(): iterable
+    {
+        // A field left out of a request or sent null reaches validation as its form makes it: a
+        // collection's or a multiple choice's an empty list, a checkbox's false, a text field's that
+        // keeps a blank a string ''. Each refused by more than a NotNull or a NotBlank.
+        yield 'an empty list, a NotBlank allowing null' => [[], new NotBlank(allowNull: true), true];
+        yield 'an empty list, a Count' => [[], new Count(min: 1), true];
+        yield 'an empty list, a NotNull' => [[], new NotNull(), false];
+        yield 'an unticked checkbox, a NotBlank allowing null' => [false, new NotBlank(allowNull: true), true];
+        yield 'an unticked checkbox, an IsTrue' => [false, new IsTrue(), true];
+        yield 'an unticked checkbox, a NotNull' => [false, new NotNull(), false];
+        yield "'', a Length" => ['', new Length(min: 1), true];
+        yield "'', a Choice" => ['', new Choice(choices: ['open', 'closed']), true];
+        yield 'null, a Length' => [null, new Length(min: 1), false];
+        yield 'null, a NotBlank allowing it' => [null, new NotBlank(allowNull: true), false];
+    }
+
+    #[DataProvider('blankValues')]
+    public function testWhatAFieldsConstraintsAreAskedAboutIsTheBlankItsFormMakes(mixed $blank, Constraint $constraint, bool $refused): void
+    {
+        $field = new CollectedFormField(name: 'value', formTypeClass: 'App\\ValueType', required: false, mapped: true, compound: false, dataClass: null, constraints: [$constraint], blankValue: $blank);
+
+        $tool = $this->toolWithBody('POST', [$field], $this->shape('array{value?: string|null}'));
+        // A request that makes something can't go without what its form refuses blank; and a null
+        // sent is that same blank, published only where it is taken.
+        self::assertSame($refused ? ['value'] : [], $tool['inputSchema']['required'] ?? []);
+        self::assertSame($refused ? 'string' : ['string', 'null'], $tool['inputSchema']['properties']['value']['type']);
+    }
+
+    public function testAnEntrysBlankIsTheOneItsFormMakesToo(): void
+    {
+        $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
+        $checkbox = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CheckboxType';
+        $flags = new CollectedFormField(name: 'flags', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $checkbox, entryConstraints: [new NotBlank(allowNull: true)], entryBlankValue: false);
+
+        $body = $this->toolWithBody('PUT', [$flags], $this->shape('array{flags?: list<bool|null>}'))['inputSchema']['properties'];
+        self::assertSame(['type' => 'boolean'], $body['flags']['items']);
+    }
+
+    public function testAConstraintNestedWhereItAlwaysHoldsIsHeldToo(): void
+    {
+        // A sequence's NotBlank refuses a blank as much as one written beside it; and its Length
+        // bounds the value as much.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $name = new CollectedFormField(name: 'name', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new Sequentially([new NotBlank(), new Length(max: 40)])]);
+        $code = new CollectedFormField(name: 'code', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NoteCode()], trim: false);
+
+        $tool = $this->toolWithBody('POST', [$name, $code], $this->shape('array{name?: string|null, code?: string|null}'));
+        self::assertSame(['name', 'code'], $tool['inputSchema']['required']);
+        self::assertSame(['type' => 'string', 'maxLength' => 40], $tool['inputSchema']['properties']['name']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['code']);
     }
 
     public function testAQueryKeyThatMayBeNullMayBeLeftOut(): void
@@ -1288,8 +1358,8 @@ final class McpManifestBuilderTest extends TestCase
         // as '', which NotBlank(allowNull: true) refuses and a NotNull lets through.
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
         $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
-        $codes = new CollectedFormField(name: 'codes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotBlank(allowNull: true)], entryBlankStaysString: true);
-        $notes = new CollectedFormField(name: 'notes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotNull()], entryBlankStaysString: true);
+        $codes = new CollectedFormField(name: 'codes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotBlank(allowNull: true)], entryBlankValue: '');
+        $notes = new CollectedFormField(name: 'notes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotNull()], entryBlankValue: '');
         $contract = (new PhpDocShapeParser())->parse('array{codes?: list<string|null>, notes?: list<string|null>}');
         self::assertInstanceOf(ShapeType::class, $contract);
 

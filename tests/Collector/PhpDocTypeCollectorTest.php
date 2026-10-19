@@ -112,6 +112,15 @@ final class PhpDocTypeCollectorTest extends TestCase
         self::assertSame(['Page'], array_keys($domains['Common']->types));
     }
 
+    public function test_an_import_of_an_alias_kept_for_php_stan_is_none_of_what_is_emitted(): void
+    {
+        // LineView imports RowSource's Row for its own code, and emits a Line that never names it:
+        // the import is no symbol of any module, so it is none of Line's.
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/PhpStanOnlyUnusedImportFixtures');
+
+        self::assertSame([], $domains['Notes']->types['Line']->imports);
+    }
+
     public function test_an_alias_typed_with_an_imported_php_stan_only_alias_says_so(): void
     {
         // RowSource keeps `Row` for PHPStan; RowView emits a `Row` of its own. LineView imports

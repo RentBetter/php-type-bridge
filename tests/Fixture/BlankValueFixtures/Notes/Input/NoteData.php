@@ -29,4 +29,20 @@ final class NoteData
 
     #[Assert\Regex('/^[A-Z]+-[0-9]+$/')]
     public ?string $ref = null;
+
+    public bool $pinned = false;
+
+    /** @var list<string> */
+    public array $kinds = [];
+
+    public ?string $status = null;
+
+    #[Assert\Regex('/^https?:\/\/[a-z.]+$/')]
+    public ?string $site = null;
+
+    #[Assert\Regex('/^[a-z-]+$/')]
+    public ?string $slug = null;
+
+    /** @var list<bool> */
+    public array $flags = [];
 }
