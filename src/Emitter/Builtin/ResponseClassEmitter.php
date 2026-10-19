@@ -55,9 +55,6 @@ final class ResponseClassEmitter implements TypeEmitter
             return implode("\n", $lines);
         }
 
-        // One scope per file a property is written in, not one per property.
-        $scopes = [];
-
         $name = $context->names->responseDeclarationName($response);
         $lines = [\sprintf('export interface %s {', $name)];
         $included = [];
@@ -67,8 +64,8 @@ final class ResponseClassEmitter implements TypeEmitter
                 '  %s%s: %s;',
                 $property->name,
                 $property->optional || $isIncluded ? '?' : '',
-                // Converted in the scope of the file it is written in.
-                $context->convert($property->parsed, $scopes[$property->writtenIn ?? $response->className] ??= $context->scopeFor($property->imports, aliasDomain: $property->writtenInDomain)),
+                // Converted in the scope of the file it is written in: the imports of that file it uses.
+                $context->convert($property->parsed, $context->scopeFor($property->imports, $property->parsed, $property->writtenInDomain)),
             );
 
             // Present whenever it is asked for: a side-load (an empty list when nothing is

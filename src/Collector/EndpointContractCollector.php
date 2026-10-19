@@ -33,6 +33,7 @@ use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
+use PTGS\TypeBridge\Support\TypeScriptTypes;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
@@ -40,7 +41,7 @@ use Throwable;
 
 final class EndpointContractCollector
 {
-    /** @var array<string, string> requirement regex => TS type */
+    /** @var array<string, string> requirement regex, as the router holds it => TS type */
     private readonly array $requirementTypes;
 
     /** A base's file, read once however many queries inherit from it. */
@@ -86,7 +87,13 @@ final class EndpointContractCollector
         private readonly array $typeAliases = [],
     ) {
         $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
-        $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
+        // Keyed as the router holds a requirement, anchors off, so a project keying one `^\\d+$` as
+        // its attribute writes it finds the `\\d+` the router serves.
+        $types = [];
+        foreach ([...RequirementType::defaults(), ...$requirementTypes] as $requirement => $type) {
+            $types[RoutePathResolver::servedRequirement($requirement) ?? $requirement] = $type;
+        }
+        $this->requirementTypes = $types;
         $this->toolDescriptions = null === $mcpDescriptionAttribute
             ? null
             : new AttributeText($mcpDescriptionAttribute, $mcpDescriptionProperty, 'mcpDescriptionProperty');
@@ -458,7 +465,7 @@ final class EndpointContractCollector
             : null;
 
         $collected = new CollectedEndpointRequest(
-            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles, query: true) : null,
+            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles) : null,
             body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles) : null,
             path: $path,
             pathParams: null === $path ? $this->derivePathParamsFromRoute($method) : null,
@@ -521,7 +528,7 @@ final class EndpointContractCollector
      * @param array<string, string> $classFiles
      * @param class-string $formClass
      */
-    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles, bool $query = false): CollectedInputReference
+    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles): CollectedInputReference
     {
         if (!isset($classFiles[$formClass])) {
             throw new RuntimeException(\sprintf(
@@ -545,7 +552,6 @@ final class EndpointContractCollector
             srcDir: $srcDir,
             classFiles: $classFiles,
             fields: $this->withDeclaredContracts($resolvedForm['fields'], $classFiles),
-            query: $query,
         );
     }
 
@@ -593,10 +599,8 @@ final class EndpointContractCollector
      * @param class-string|null $formClass
      * @param class-string $ownerClass
      * @param list<\PTGS\TypeBridge\Model\CollectedFormField> $fields
-     * @param bool $query whether it is a query, the one input whose inherited keys are read: whether a
-     *        call may leave a query out is the question they answer
      */
-    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = [], bool $query = false): CollectedInputReference
+    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = []): CollectedInputReference
     {
         $file = $classFiles[$ownerClass] ?? null;
         if (null === $file) {
@@ -632,7 +636,9 @@ final class EndpointContractCollector
             domain: $this->domainGuesser->guess($srcDir, $file),
             fields: $fields,
             contract: $this->withAliasNulls(self::shapeOf($self), $ownerClass, $file, $srcDir, $classFiles),
-            inheritedContract: $query && $self instanceof IntersectionType
+            // The keys it inherits are as much its contract as its own: whether a query may be left
+            // out, and whether a body key is required or may be cleared, is theirs to say too.
+            inheritedContract: $self instanceof IntersectionType
                 ? $this->inheritedShape($self, $ownerClass, $file, $srcDir, $classFiles)
                 : null,
         );
@@ -688,7 +694,7 @@ final class EndpointContractCollector
             return null;
         }
 
-        return $this->aliasDefinition($import->sourceAlias ?? '_self', $import->targetClass, $target, $srcDir, $classFiles, $depth + 1);
+        return $this->aliasDefinition($import->sourceName(), $import->targetClass, $target, $srcDir, $classFiles, $depth + 1);
     }
 
     /**
@@ -745,60 +751,30 @@ final class EndpointContractCollector
     {
         $declared = $depth > 8 ? null : $this->aliasDefinition($alias, $class, $file, $srcDir, $classFiles);
         if (null === $declared) {
-            return isset($this->typeAliases[$alias]) && self::typeScriptAdmitsNull($this->typeAliases[$alias]);
+            return isset($this->typeAliases[$alias]) && TypeScriptTypes::admitsNull($this->typeAliases[$alias]);
         }
 
         $parsed = $this->parseType($declared['definition']);
-        $members = match (true) {
-            $parsed instanceof NullableType => [new ScalarType('null')],
-            $parsed instanceof UnionType => $parsed->types,
-            null === $parsed => [],
-            default => [$parsed],
-        };
-        foreach ($members as $member) {
-            $admits = match (true) {
-                $member instanceof ScalarType => 'null' === $member->base(),
-                $member instanceof NameRefType => null === $member->class && $this->aliasAdmitsNull($member->name, $declared['class'], $declared['file'], $srcDir, $classFiles, $depth + 1),
-                default => false,
-            };
-            if ($admits) {
-                return true;
-            }
-        }
 
-        return false;
+        return null !== $parsed && $this->declaredAdmitsNull($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, $depth + 1);
     }
 
     /**
-     * Whether a TypeScript type admits null: `null` among the members of its union, read outside
-     * any brackets or quotes (`string | null`, not `Array<string | null>`).
+     * Whether a type an alias is declared as admits a null sent, as its TypeScript does: `T|null`, a
+     * union with a null among its members, or the name of an alias that admits one. `?T` is a key
+     * left out when null, emitted `T`, so it admits one only where `T` does.
+     *
+     * @param array<string, string> $classFiles
      */
-    private static function typeScriptAdmitsNull(string $type): bool
+    private function declaredAdmitsNull(ParsedType $type, string $class, string $file, string $srcDir, array $classFiles, int $depth): bool
     {
-        $members = [];
-        $member = '';
-        $depth = 0;
-        $quote = null;
-        foreach (str_split($type) as $character) {
-            if (null !== $quote) {
-                $quote = $character === $quote ? null : $quote;
-            } elseif (str_contains('\'"`', $character)) {
-                $quote = $character;
-            } elseif (str_contains('<([{', $character)) {
-                ++$depth;
-            } elseif (str_contains('>)]}', $character)) {
-                --$depth;
-            } elseif ('|' === $character && 0 === $depth) {
-                $members[] = trim($member);
-                $member = '';
-
-                continue;
-            }
-            $member .= $character;
-        }
-        $members[] = trim($member);
-
-        return \in_array('null', $members, true);
+        return match (true) {
+            $type instanceof NullableType => !$type->optional || $this->declaredAdmitsNull($type->inner, $class, $file, $srcDir, $classFiles, $depth),
+            $type instanceof UnionType => [] !== array_filter($type->types, fn (ParsedType $member): bool => $this->declaredAdmitsNull($member, $class, $file, $srcDir, $classFiles, $depth)),
+            $type instanceof ScalarType => 'null' === $type->base(),
+            $type instanceof NameRefType => null === $type->class && $this->aliasAdmitsNull($type->name, $class, $file, $srcDir, $classFiles, $depth),
+            default => false,
+        };
     }
 
     /**

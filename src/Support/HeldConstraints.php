@@ -53,10 +53,12 @@ final class HeldConstraints
         $reached = [];
         foreach ($constraints as $constraint) {
             $reached[] = $constraint;
+            // A When is a Composite, and asked first: both its branches, whatever a Symfony version's
+            // Composite says it nests.
             $nested = match (true) {
                 $constraint instanceof All, $constraint instanceof Collection => [],
-                $constraint instanceof Composite => self::nested($constraint),
                 $constraint instanceof When => [...self::listOf($constraint->constraints), ...self::listOf($constraint->otherwise)],
+                $constraint instanceof Composite => self::nested($constraint),
                 default => [],
             };
             $reached = [...$reached, ...self::any($nested)];

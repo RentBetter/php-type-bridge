@@ -12,18 +12,10 @@ use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\ImportedType;
-use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
-use PTGS\TypeBridge\Parser\IntersectionType;
-use PTGS\TypeBridge\Parser\ListType;
-use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
-use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
-use PTGS\TypeBridge\Parser\ShapeField;
-use PTGS\TypeBridge\Parser\ShapeType;
-use PTGS\TypeBridge\Parser\TupleType;
-use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Parser\ParsedTypes;
 use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Sorting\AlphabeticalOrder;
@@ -615,7 +607,7 @@ final class TypeScriptEmitter
         $imports = [];
 
         foreach ($collected->types as $type) {
-            $this->appendImportedTypes($domain, $this->referenced($type->imports, [$type->parsed]), $imports);
+            $this->appendImportedTypes($domain, ImportedType::usedIn($type->imports, $type->parsed), $imports);
             $this->appendExternalEnums($domain, $type->parsed, $imports);
             $this->appendClassTypes($domain, $type->parsed, $imports);
         }
@@ -624,7 +616,7 @@ final class TypeScriptEmitter
             foreach ($response->properties as $property) {
                 // Each property imports what the file it is written in imports, and the aliases of
                 // that file's module it names bare.
-                $this->appendImportedTypes($domain, $this->referenced($property->imports, [$property->parsed]), $imports);
+                $this->appendImportedTypes($domain, ImportedType::usedIn($property->imports, $property->parsed), $imports);
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
                 $imported = array_fill_keys(array_map(static fn(ImportedType $import): string => $import->localAlias, $property->imports), true);
                 $this->appendClassTypes($domain, $property->parsed, $imports, $property->writtenInDomain ?? $domain, $imported);
@@ -679,36 +671,6 @@ final class TypeScriptEmitter
         sort($enumClasses);
 
         return array_values(array_unique($enumClasses));
-    }
-
-    /**
-     * The imports a type actually uses. A class's `@phpstan-import-type` tags serve every alias it
-     * declares and its own code, so one of them may be used by none of the shapes emitted here —
-     * and an import nothing references fails the consumer's unused-import check.
-     *
-     * @param list<ImportedType> $importedTypes
-     * @param list<ParsedType> $types
-     * @return list<ImportedType>
-     */
-    private function referenced(array $importedTypes, array $types): array
-    {
-        $names = [];
-        $collect = function (ParsedType $type) use (&$collect, &$names): void {
-            if ($type instanceof NameRefType) {
-                $names[$type->name] = true;
-            }
-            foreach ($this->childTypes($type) as $child) {
-                $collect($child);
-            }
-        };
-        foreach ($types as $type) {
-            $collect($type);
-        }
-
-        return array_values(array_filter(
-            $importedTypes,
-            static fn(ImportedType $imported): bool => isset($names[$imported->localAlias]),
-        ));
     }
 
     /**
@@ -769,7 +731,7 @@ final class TypeScriptEmitter
             return;
         }
 
-        foreach ($this->childTypes($type) as $child) {
+        foreach (ParsedTypes::children($type) as $child) {
             $this->appendExternalEnums($domain, $child, $imports);
         }
     }
@@ -804,7 +766,7 @@ final class TypeScriptEmitter
             return;
         }
 
-        foreach ($this->childTypes($type) as $child) {
+        foreach (ParsedTypes::children($type) as $child) {
             $this->appendClassTypes($domain, $child, $imports, $aliasDomain, $imported);
         }
     }
@@ -822,51 +784,9 @@ final class TypeScriptEmitter
             return;
         }
 
-        foreach ($this->childTypes($type) as $child) {
+        foreach (ParsedTypes::children($type) as $child) {
             $this->appendLocalEnums($domain, $child, $enumClasses);
         }
-    }
-
-    /**
-     * @return list<ParsedType>
-     */
-    private function childTypes(ParsedType $type): array
-    {
-        if ($type instanceof NullableType || $type instanceof ListType) {
-            return [$type->inner];
-        }
-
-        // Both sides: a nested shape or a value-of enum can sit in either
-        // position, and skipping the key side would drop its local type from
-        // the emitted file.
-        if ($type instanceof MapType) {
-            return [$type->key, $type->value];
-        }
-
-        if ($type instanceof TupleType) {
-            return $type->elements;
-        }
-
-        if ($type instanceof ShapeType) {
-            return array_map(
-                static fn(ShapeField $field): ParsedType => $field->type,
-                $type->fields,
-            );
-        }
-
-        if ($type instanceof UnionType) {
-            return $type->types;
-        }
-
-        if ($type instanceof IntersectionType) {
-            return [$type->base, $type->extra];
-        }
-
-        if ($type instanceof GenericType) {
-            return $type->arguments;
-        }
-
-        return [];
     }
 
     /**

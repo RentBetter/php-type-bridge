@@ -48,7 +48,7 @@ final class SelfShapeEmitter implements TypeEmitter
 
     private function renderType(CollectedType $type, EmitContext $context): string
     {
-        $scope = $context->scopeFor($type->imports);
+        $scope = $context->scopeFor($type->imports, $type->parsed);
         $name = $context->names->typeDeclarationName($type);
 
         if ($type->parsed instanceof IntersectionType) {

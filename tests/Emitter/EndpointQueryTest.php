@@ -219,7 +219,7 @@ final class EndpointQueryTest extends TestCase
         $contracts = (new EndpointContractCollector())->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
         $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'updateReportFields'), 'PUT')]])['tools'][0];
 
-        self::assertArrayNotHasKey('required', $tool['inputSchema']);
+        self::assertSame(['id'], $tool['inputSchema']['required'], 'Its path\'s id alone');
         self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['title']);
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['description']);
         self::assertSame(['type' => 'boolean'], $tool['inputSchema']['properties']['pinned']);

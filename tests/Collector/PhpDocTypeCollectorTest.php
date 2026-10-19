@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Collector;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
+use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
@@ -125,6 +126,13 @@ final class PhpDocTypeCollectorTest extends TestCase
         $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/PhpStanOnlyUnusedImportFixtures');
 
         self::assertSame([], $domains['Notes']->types['Line']->imports);
+    }
+
+    public function test_a_class_this_install_cannot_load_emits_nothing(): void
+    {
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnloadableFixtures');
+
+        self::assertSame([], array_merge(...array_map(static fn(CollectedDomain $domain): array => array_keys($domain->types), array_values($domains))));
     }
 
     public function test_a_class_this_install_cannot_load_emits_nothing_and_a_type_naming_its_alias_says_why(): void

@@ -37,7 +37,9 @@ final class PhpDocTypeCollector
         $domains = [];
 
         foreach ($classFiles as $className => $file) {
-            if (!$this->files->readable($file)) {
+            // A class this install can't load is no part of the application: it emits nothing, and
+            // a type naming one of its aliases is told why.
+            if (!$this->files->readable($file) || !$this->files->loadable($className)) {
                 continue;
             }
 
@@ -55,7 +57,7 @@ final class PhpDocTypeCollector
             }
             // A class may declare what it serialises to by importing a type as its `_self`
             // rather than writing the shape itself; it then has nothing of its own to emit.
-            $importsSelf = !isset($definitions['_self']) && 1 === preg_match('/@(?:phpstan|psalm)-import-type\s+\S+\s+from\s+\S+\s+as\s+_self\b/', $this->files->content($file) ?? '');
+            $importsSelf = !isset($definitions['_self']) && $this->files->importsSelf($file);
             if ([] === $definitions && !$importsSelf) {
                 continue;
             }

@@ -197,8 +197,9 @@ final class McpManifestBuilder
     }
 
     /**
-     * The fields as arguments, each with the key its contract declares: its own, or for a query
-     * extending a shape (`Base & array{…}`), one it inherits, read where that shape is declared.
+     * The fields as arguments, each with the key its contract declares: its own, or for an input
+     * extending a shape (`Base & array{…}`), one it inherits, read where that shape is declared. An
+     * intersection holds both sides, so a key one side requires is required whatever the other says.
      *
      * @param array<string, mixed> $properties
      * @param list<string>         $required
@@ -213,7 +214,13 @@ final class McpManifestBuilder
             return;
         }
 
-        $declared = [...self::shapeKeys($reference->inheritedContract), ...self::shapeKeys($reference->contract)];
+        $declared = self::shapeKeys($reference->contract);
+        foreach (self::shapeKeys($reference->inheritedContract) as $name => $inherited) {
+            $own = $declared[$name] ?? null;
+            if (null === $own || ($own->mayBeLeftOut(inQuery: !$json) && !$inherited->mayBeLeftOut(inQuery: !$json))) {
+                $declared[$name] = $inherited;
+            }
+        }
         foreach ($reference->fields as $field) {
             $key = $declared[$field->name] ?? null;
             $properties[$field->name] = $this->fieldSchema($field, $key?->type, $json);

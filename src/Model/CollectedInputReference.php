@@ -17,8 +17,8 @@ final readonly class CollectedInputReference
      *        can be read as one (an alias, a generic), and then only the form speaks for a field.
      *        For an intersection (`Base & array{…}`), the keys it adds
      * @param ShapeType|null $inheritedContract for an intersection, the keys it takes from the shape
-     *        it extends, read where that shape is declared; null when `_self` is not one, or its
-     *        base can't be read as a shape
+     *        it extends, read where that shape is declared — a query's and a body's alike; null when
+     *        `_self` is not one, or its base can't be read as a shape
      */
     public function __construct(
         public ?string $formClass,

@@ -96,8 +96,9 @@ final class RoutePathResolver
     /**
      * A #[Route] path as the router serves it, its requirements and defaults with it. One written
      * inline is the route's, not the path's: `{page<\\d+>}` is served as `{page}` holding to `\\d+`,
-     * and `{slug?intro}` as `{slug}` defaulting to `intro` — Symfony's own Route reads them off. Null
-     * for a path or a requirement Symfony refuses.
+     * `{slug?intro}` as `{slug}` defaulting to `intro`, and `{slug:note}` as `{slug}` mapped to the
+     * `note` argument — Symfony's own Route reads them off. Null for a path or a requirement Symfony
+     * refuses.
      *
      * @param array<array-key, mixed> $requirements the attribute's own, which win over inline ones
      */
@@ -112,11 +113,20 @@ final class RoutePathResolver
 
     /**
      * A #[Route] path as the router serves it ({@see self::declaredRoute()}); one with nothing
-     * written inline is as it is written.
+     * written inline — none of the characters Symfony itself looks for — is as it is written.
      */
     public static function declaredPath(string $path): string
     {
-        return false === strpbrk($path, '<?') ? $path : self::declaredRoute($path)?->getPath() ?? $path;
+        return false === strpbrk($path, '<?:') ? $path : self::declaredRoute($path)?->getPath() ?? $path;
+    }
+
+    /**
+     * A route requirement as the router holds it: Symfony's own Route takes off a leading `^` or
+     * `\\A` and a trailing `$` or `\\z`. Null for one it refuses.
+     */
+    public static function servedRequirement(string $requirement): ?string
+    {
+        return self::declaredRoute('/', ['value' => $requirement])?->getRequirement('value');
     }
 
     /**

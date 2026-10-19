@@ -163,9 +163,29 @@ final class PhpDocTypeHelper
         array $shortNameMap,
         DomainGuesser $domainGuesser,
     ): array {
+        return $this->importedTypes($this->importTags($content), $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
+    }
+
+    /**
+     * The types `@phpstan-import-type` tags already read off a file import, as
+     * {@see self::extractImportedTypesLeniently()} reads them.
+     *
+     * @param list<TypeAliasImportTagValueNode> $tags
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
+     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>} `unresolved` is local alias => why
+     */
+    public function importedTypes(
+        array $tags,
+        string $ownerClass,
+        string $srcDir,
+        array $classFiles,
+        array $shortNameMap,
+        DomainGuesser $domainGuesser,
+    ): array {
         $imports = [];
         $unresolved = [];
-        foreach ($this->importTags($content) as $tag) {
+        foreach ($tags as $tag) {
             try {
                 $import = $this->importedType($tag, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
                 $imports[$import->localAlias] = $import;
@@ -533,9 +553,11 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * A file's `@phpstan-import-type` (and `@psalm-import-type`) tags, as written.
+     *
      * @return list<TypeAliasImportTagValueNode>
      */
-    private function importTags(string $content): array
+    public function importTags(string $content): array
     {
         $tags = [];
 
