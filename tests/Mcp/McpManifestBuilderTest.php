@@ -1327,6 +1327,26 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['code']);
     }
 
+    public function testAKeyAnIntersectionRequiresOnEitherSideIsRequired(): void
+    {
+        // `Base & array{product?: string}` where Base says `product: string`: both hold, so the key
+        // can't be left out — as the Endpoint's `query:` says.
+        $product = $this->scalarField('product', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false);
+        $endpoint = new CollectedEndpointContract(
+            name: 'listTasks',
+            domain: 'tasks',
+            controllerClass: 'App\\ListController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                query: new CollectedInputReference(null, 'App\\TaskFilterData', 'TaskFilterData', 'tasks', [$product], $this->shape('array{product?: string}'), $this->shape('array{product: string}')),
+            ),
+            mcp: new CollectedMcpTool(name: 'listTasks', description: 'The tasks.', httpMethod: 'GET', httpPath: '/tasks', destructive: false),
+        );
+
+        self::assertSame(['product'], (new McpManifestBuilder())->build(['tasks' => [$endpoint]])['tools'][0]['inputSchema']['required'] ?? []);
+    }
+
     public function testAQueryKeyThatMayBeNullMayBeLeftOut(): void
     {
         // A query string carries no null: `product: string|null` is sent by leaving it out.

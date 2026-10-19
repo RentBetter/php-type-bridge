@@ -119,6 +119,30 @@ final class McpManifestGeneratorTest extends TestCase
         }
     }
 
+    public function testAParamMappedToAnArgumentIsReadAsTheRouterReadsIt(): void
+    {
+        // `{slug:note}` is served as `{slug}`, routed or not: a client substituting `slug` finds it.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        foreach (['/api/notes/by-slug/{slug}' => TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir), '/notes/by-slug/{slug}' => new TypeBridgeConfig()] as $path => $config) {
+            $note = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowNoteBySlug'] ?? [];
+
+            self::assertSame($path, $note['path'] ?? null);
+            self::assertSame(['slug'], $note['inputSchema']['required'] ?? null);
+        }
+    }
+
+    public function testARequirementWrittenAnchoredIsTypedAsTheProjectKeysIt(): void
+    {
+        // The project keys its requirement type `^\d+$`, as the attribute writes it; the router takes
+        // the anchors off. Routed or not, the type is the project's.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        foreach ([TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml', 'requirementTypes' => ['^\\d+$' => 'number']], $dir), TypeBridgeConfig::fromArray(['requirementTypes' => ['^\\d+$' => 'number']])] as $config) {
+            $anchored = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowAnchored'] ?? [];
+
+            self::assertSame(['type' => 'number'], $anchored['inputSchema']['properties']['id'] ?? null);
+        }
+    }
+
     public function testWithoutRoutingTheAttributePathStands(): void
     {
         // Existing consumers configure no routing and put the full path on the attribute;

@@ -170,8 +170,11 @@ final class EndpointQueryTest extends TestCase
         self::assertStringContainsString('export const ListConfigProductReports: Endpoint<ListConfigProductReportsEndpointMap, { query?: ListConfigProductReportsQuery }> = {', $reports);
         // Read where the shape it inherits the key from declares it.
         self::assertStringContainsString('export const ListAliasedScopeReports: Endpoint<ListAliasedScopeReportsEndpointMap, { query?: ListAliasedScopeReportsQuery }> = {', $reports);
-        // One that admits none is still a key a caller must send.
+        // One that admits none is still a key a caller must send — `?string` included, a key left out
+        // when null, which the alias's TypeScript says as `string`.
         self::assertStringContainsString('export const ShowAliasedRegionReport: Endpoint<ShowAliasedRegionReportEndpointMap, { query: ShowAliasedRegionReportQuery }> = {', $reports);
+        self::assertStringContainsString('export type SomeProduct = string;', $reports);
+        self::assertStringContainsString('export const ListLeftOutProductReports: Endpoint<ListLeftOutProductReportsEndpointMap, { query: ListLeftOutProductReportsQuery }> = {', $reports);
     }
 
     public function test_a_query_key_typed_with_an_alias_that_admits_null_is_no_required_tool_argument(): void
@@ -181,7 +184,7 @@ final class EndpointQueryTest extends TestCase
         // A key the query inherits through an intersection is read as its own is: `region: string|null`
         // from RegionScope, a key the server takes left out, is no required argument either; WeeklyReport's
         // inherited `product: string` still is.
-        foreach (['listAliasedProductReports' => [], 'listImportedProductReports' => [], 'listConfigProductReports' => [], 'listAliasedScopeReports' => [], 'listAnyRegionReports' => [], 'showAliasedRegionReport' => ['region'], 'showWeeklyReport' => ['product']] as $method => $required) {
+        foreach (['listAliasedProductReports' => [], 'listImportedProductReports' => [], 'listConfigProductReports' => [], 'listAliasedScopeReports' => [], 'listAnyRegionReports' => [], 'showAliasedRegionReport' => ['region'], 'listLeftOutProductReports' => ['product'], 'showWeeklyReport' => ['product']] as $method => $required) {
             $query = self::contract($contracts, $method)->request?->query;
             self::assertNotNull($query);
             $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, $method), 'GET')]])['tools'][0];
@@ -198,6 +201,28 @@ final class EndpointQueryTest extends TestCase
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['tags']['items']);
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['code']);
+    }
+
+    public function test_as_query_leaves_a_primitive_as_it_is(): void
+    {
+        // A branded string (`string & {readonly __brand: 'UuidStr'}`) extends object, so a helper that
+        // asked that first would map it into an object of every string method.
+        $reports = $this->emit()['Reports'];
+
+        self::assertStringContainsString('export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | null | undefined', $reports);
+    }
+
+    public function test_a_body_extending_a_shape_takes_the_keys_it_inherits_as_that_shape_declares_them(): void
+    {
+        // `ReportFields & array{pinned?: bool}`: an update that may send its title, clear its
+        // description, or neither — as its base declares, not as the form's `required` guesses.
+        $contracts = (new EndpointContractCollector())->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'updateReportFields'), 'PUT')]])['tools'][0];
+
+        self::assertArrayNotHasKey('required', $tool['inputSchema']);
+        self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['title']);
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['description']);
+        self::assertSame(['type' => 'boolean'], $tool['inputSchema']['properties']['pinned']);
     }
 
     /**
@@ -243,7 +268,7 @@ final class EndpointQueryTest extends TestCase
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             // A null that means something, so the contract says `T|null`: in a query, "any product".
-            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region'],
+            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region', 'ReportFields.description'],
             typeAliases: ['MaybeText' => 'string | null'],
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),

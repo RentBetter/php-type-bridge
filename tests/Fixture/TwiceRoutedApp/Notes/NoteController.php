@@ -36,4 +36,27 @@ final class NoteController
     {
         throw new \LogicException('Fixture only.');
     }
+
+    /**
+     * A param mapped to the argument it loads (`{slug:note}`): the router serves `{slug}`.
+     */
+    #[Route('/notes/by-slug/{slug:note}', methods: ['GET'])]
+    #[ApiResponses([NoteResponse::class])]
+    #[McpTool(description: 'A note, by its slug.')]
+    public function showNoteBySlugAction(): NoteResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    /**
+     * A requirement written anchored, as a project's `requirementTypes` may key it: the router
+     * takes the anchors off, and the type is the project's all the same.
+     */
+    #[Route('/anchored/{id}', requirements: ['id' => '^\d+$'], methods: ['GET'])]
+    #[ApiResponses([NoteResponse::class])]
+    #[McpTool(description: 'An anchored note.')]
+    public function showAnchoredAction(): NoteResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
 }

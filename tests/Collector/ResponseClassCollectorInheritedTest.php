@@ -112,6 +112,15 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertMatchesRegularExpression("/import type \\{[^}]*\\bMeta as CommonMeta\\b[^}]*\\} from '[^']*Common[^']*';/", $notes);
     }
 
+    public function test_an_import_no_published_property_names_is_no_matter_however_it_resolves(): void
+    {
+        // The base imports `Working` from Relay, which only imports it itself, for a property that is
+        // never sent. Each published property is converted against the imports it names.
+        $notes = self::emit(self::fixtures('UnusedBaseImportFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  title: string;\n}", $notes);
+    }
+
     public function test_a_204_says_whether_it_declares_properties_of_its_own(): void
     {
         // What it was emitted as before it was null is the collected model's to say, not a question

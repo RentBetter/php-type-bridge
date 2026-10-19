@@ -127,6 +127,16 @@ final class PhpDocTypeCollectorTest extends TestCase
         self::assertSame([], $domains['Notes']->types['Line']->imports);
     }
 
+    public function test_a_class_this_install_cannot_load_emits_nothing_and_a_type_naming_its_alias_says_why(): void
+    {
+        // DevOnlyCodes needs a require-dev package to load. NoteData's `_self` names its `Code`: an
+        // error that says so, not a crash at emit time over the class.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/DevOnlyCodes cannot be loaded.*_self on .*NoteData/s');
+
+        (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnloadableImportFixtures');
+    }
+
     public function test_an_alias_typed_with_an_imported_php_stan_only_alias_says_so(): void
     {
         // RowSource keeps `Row` for PHPStan; RowView emits a `Row` of its own. LineView imports

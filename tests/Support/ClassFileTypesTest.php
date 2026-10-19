@@ -32,16 +32,16 @@ final class ClassFileTypesTest extends TestCase
         self::assertSame([], $read['unresolved']);
     }
 
-    public function test_an_import_from_a_class_this_install_cannot_load_is_read_all_the_same(): void
+    public function test_an_import_from_a_class_this_install_cannot_load_is_set_aside_with_why(): void
     {
-        // Its declaration throws without a require-dev package, so it can't say which of its aliases
-        // are for PHPStan alone — and asking must not take generation down with it.
+        // Its declaration throws without a require-dev package: it is no part of the application, so
+        // nothing it declares is emitted, and asking about it must not take generation down.
         $src = __DIR__ . '/../Fixture/UnloadableImportFixtures';
         $classFiles = (new PhpFileClassLocator())->classesIn($src);
         $read = (new ClassFileTypes())->imports(NoteData::class, $classFiles[NoteData::class], $src, $classFiles);
 
-        self::assertSame(DevOnlyCodes::class, $read['imports']['Code']->targetClass);
-        self::assertSame([], $read['phpStanOnly']);
+        self::assertArrayNotHasKey('Code', $read['imports']);
+        self::assertStringContainsString(DevOnlyCodes::class . ' cannot be loaded', $read['unresolved']['Code'] ?? '');
         self::assertNull(PhpStanOnly::of(DevOnlyRule::class));
     }
 
