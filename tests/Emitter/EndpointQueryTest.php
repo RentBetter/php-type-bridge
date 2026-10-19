@@ -228,6 +228,11 @@ final class EndpointQueryTest extends TestCase
         self::assertArrayNotHasKey('required', $address);
         self::assertSame(['type' => ['string', 'null']], $address['properties']['street']);
         self::assertSame(['type' => 'string'], $address['properties']['city']);
+
+        // `ReportAddress & array{postcode: string}`: its base's keys and its own.
+        $billing = $tool['inputSchema']['properties']['billing'];
+        self::assertSame(['postcode'], $billing['required']);
+        self::assertSame(['type' => ['string', 'null']], $billing['properties']['street']);
     }
 
     public function test_as_query_keeps_a_tuple_a_tuple(): void

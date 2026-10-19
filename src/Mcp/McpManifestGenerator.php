@@ -37,7 +37,7 @@ final class McpManifestGenerator
             files: $files,
             typeAliases: $config->typeAliases,
         );
-        $contracts = $collector->collect($sourceDir, (new ResponseClassCollector(files: $files))->collectIndex($sourceDir));
+        $contracts = $collector->collect($sourceDir, (new ResponseClassCollector(files: $files, typeAliases: $config->typeAliases))->collectIndex($sourceDir));
 
         return (new McpManifestBuilder($config->includes, $config->mcpParamDescriptions()))->build($contracts);
     }

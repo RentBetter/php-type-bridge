@@ -16,7 +16,6 @@ use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Support\RootSources;
-use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -56,7 +55,10 @@ final class GenerateTypesCommand extends Command
 
         $domainGuesser = new DomainGuesser($config->output->domainDepth, $config->output->rootSources);
         $enumResolver = new EnumResolver(domainGuesser: $domainGuesser);
-        $candidateClasses = array_keys((new PhpFileClassLocator())->classesIn($sourceDir));
+        // One reader of the source files for every collector and scan: the tree is scanned, and each
+        // file read for what it declares and imports, once.
+        $classFiles = new ClassFileTypes(domainGuesser: $domainGuesser);
+        $candidateClasses = array_keys($classFiles->classesIn($sourceDir));
         $registry = EmitterRegistry::fromAttributeScan($candidateClasses);
 
         $mapper = new DomainMapper($outputDir, $config->output);
@@ -75,11 +77,8 @@ final class GenerateTypesCommand extends Command
 
         $files = [];
         if (!$discoveredOnly) {
-            $enumResolver->scanDirectory($sourceDir);
-            // One reader of the source files for every collector: the tree is scanned, and each file
-            // read for what it declares and imports, once.
-            $classFiles = new ClassFileTypes(domainGuesser: $domainGuesser);
-            $responseCollector = new ResponseClassCollector(domainGuesser: $domainGuesser, files: $classFiles);
+            $enumResolver->scanDirectory($sourceDir, $classFiles->classesIn($sourceDir));
+            $responseCollector = new ResponseClassCollector(domainGuesser: $domainGuesser, files: $classFiles, typeAliases: $config->typeAliases);
             $files = $emitter->emit(
                 (new PhpDocTypeCollector(domainGuesser: $domainGuesser, files: $classFiles))->collect($sourceDir),
                 $responseCollector->collect($sourceDir),

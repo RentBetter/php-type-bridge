@@ -25,6 +25,7 @@ use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Routing\ControllerAttributeClassLoader;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\AttributeText;
@@ -34,9 +35,11 @@ use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use PTGS\TypeBridge\Support\TypeScriptTypes;
+use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
+use Symfony\Component\Routing\Attribute\Route;
 use Throwable;
 
 final class EndpointContractCollector
@@ -52,8 +55,6 @@ final class EndpointContractCollector
     /** @var array<string, ParsedType|null> each type written, parsed once however many inputs name it */
     private array $parsedTypes = [];
 
-    /** @var array<string, bool> by file and alias, whether the alias admits null */
-    private array $aliasNulls = [];
 
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
@@ -78,7 +79,7 @@ final class EndpointContractCollector
      *        typed with one that admits null takes null, as one its file declares does
      */
     public function __construct(
-        private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
+        PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
         private readonly FormTypeInspector $formTypeInspector = new FormTypeInspector(),
@@ -117,7 +118,7 @@ final class EndpointContractCollector
         $seenNames = [];
 
         foreach ($classFiles as $className => $file) {
-            if (!$this->classLocator->isLoadable($className)) {
+            if (!$this->files->loadable($className)) {
                 continue;
             }
 
@@ -431,16 +432,31 @@ final class EndpointContractCollector
     }
 
     /**
+     * The #[Route] a method is described by: the one that declared the route the router serves it at
+     * ({@see ControllerAttributeClassLoader::ATTRIBUTE}) — its first, unless that one is not served,
+     * confined to an env the router is not loaded in — or, without routing, its first.
+     *
+     * @return ReflectionAttribute<Route>|null
+     */
+    private function routeAttribute(ReflectionMethod $method): ?ReflectionAttribute
+    {
+        $attributes = $method->getAttributes(Route::class, ReflectionAttribute::IS_INSTANCEOF);
+        $declaredBy = $this->routePathResolver?->routeFor($method->getDeclaringClass()->getName(), $method->getName())?->getOption(ControllerAttributeClassLoader::ATTRIBUTE);
+
+        return $attributes[\is_int($declaredBy) ? $declaredBy : 0] ?? $attributes[0] ?? null;
+    }
+
+    /**
      * @return array{0: string, 1: string} [HTTP method (uppercased, first listed), path template]
      */
     private function routeMethodAndPath(ReflectionMethod $method): array
     {
-        $routeAttributes = $method->getAttributes('Symfony\\Component\\Routing\\Attribute\\Route');
-        if ([] === $routeAttributes) {
+        $routeAttribute = $this->routeAttribute($method);
+        if (null === $routeAttribute) {
             return ['GET', ''];
         }
 
-        $arguments = $routeAttributes[0]->getArguments();
+        $arguments = $routeAttribute->getArguments();
         $path = $arguments['path'] ?? $arguments[0] ?? '';
         $methods = $arguments['methods'] ?? [];
 
@@ -489,12 +505,12 @@ final class EndpointContractCollector
      */
     private function derivePathParamsFromRoute(ReflectionMethod $method): ?array
     {
-        $routeAttributes = $method->getAttributes('Symfony\\Component\\Routing\\Attribute\\Route');
-        if ([] === $routeAttributes) {
+        $routeAttribute = $this->routeAttribute($method);
+        if (null === $routeAttribute) {
             return null;
         }
 
-        $arguments = $routeAttributes[0]->getArguments();
+        $arguments = $routeAttribute->getArguments();
         $pathTemplate = $arguments['path'] ?? $arguments[0] ?? null;
         $requirements = $arguments['requirements'] ?? [];
         if (!\is_array($requirements)) {
@@ -641,7 +657,7 @@ final class EndpointContractCollector
             typeName: $this->docHelper->emittedTypeName('_self', $ownerClass),
             domain: $this->domainGuesser->guess($srcDir, $file),
             fields: $fields,
-            contract: $this->withAliasNulls(self::shapeOf($self), $ownerClass, $file, $srcDir, $classFiles),
+            contract: $this->withAliasesRead(self::shapeOf($self), $ownerClass, $file, $srcDir, $classFiles),
             // The keys it inherits are as much its contract as its own: whether a query may be left
             // out, and whether a body key is required or may be cleared, is theirs to say too.
             inheritedContract: $self instanceof IntersectionType
@@ -663,7 +679,7 @@ final class EndpointContractCollector
     {
         $base = $depth > 8 ? null : $this->aliasDefinition($self->base->name, $class, $file, $srcDir, $classFiles);
         $parsed = null === $base ? null : $this->parseType($base['definition']);
-        $own = null === $base ? null : $this->withAliasNulls(self::shapeOf($parsed), $base['class'], $base['file'], $srcDir, $classFiles);
+        $own = null === $base ? null : $this->withAliasesRead(self::shapeOf($parsed), $base['class'], $base['file'], $srcDir, $classFiles);
         if (null === $base || null === $own) {
             return null;
         }
@@ -704,91 +720,103 @@ final class EndpointContractCollector
     }
 
     /**
-     * The shape with what an alias admits said where the shape is read: a key typed with one that
-     * admits null — `MaybeCode` where `MaybeCode = string|null` — is read as `MaybeCode|null`, the
-     * same type, so a reader of the shape alone (whether a key may be left out of a query, whether a
-     * body key takes null, an entry of a list) sees what the TypeScript does through the alias. An
-     * alias the file declares or imports is read where it is declared; a project-wide one from the
-     * config. A key's name and every other part of its type stay as written.
+     * The shape as a reader of it alone needs it: each alias it names read as what it is declared —
+     * in the file, or where it is imported from, another class's `_self` included — at any depth. So
+     * whether a key may be left out or takes null, holds a shape of what keys, a list of what, or which
+     * scalar, is said where the shape is read, as the TypeScript says it through the alias. An alias's
+     * `?T` is `T`, as its TypeScript is. A project-wide alias, which the config declares in TypeScript,
+     * stays named, read as `Alias|null` where that TypeScript admits null; a class's name stays too.
      *
      * @param string                $class the class whose file the shape is written in
      * @param array<string, string> $classFiles
      */
-    private function withAliasNulls(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles): ?ShapeType
+    private function withAliasesRead(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles): ?ShapeType
     {
-        $read = null === $shape ? null : $this->aliasNulls($shape, $class, $file, $srcDir, $classFiles);
+        $read = null === $shape ? null : $this->readAliases($shape, $class, $file, $srcDir, $classFiles, []);
 
         return $read instanceof ShapeType ? $read : $shape;
     }
 
     /**
      * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading the aliases being read, by file and name: one that names
+     *        itself, at any remove, stays named there
      */
-    private function aliasNulls(ParsedType $type, string $class, string $file, string $srcDir, array $classFiles): ParsedType
+    private function readAliases(ParsedType $type, string $class, string $file, string $srcDir, array $classFiles, array $reading): ParsedType
     {
-        $admitsNull = fn (ParsedType $member): bool => $member instanceof NameRefType && null === $member->class && $this->aliasAdmitsNull($member->name, $class, $file, $srcDir, $classFiles);
+        $read = fn (ParsedType $part): ParsedType => $this->readAliases($part, $class, $file, $srcDir, $classFiles, $reading);
 
         return match (true) {
-            $admitsNull($type) => new NullableType($type, optional: false),
-            // `?MaybeCode` is a key left out when null whatever the alias says.
-            $type instanceof NullableType => $type->inner instanceof NameRefType ? $type : new NullableType($this->aliasNulls($type->inner, $class, $file, $srcDir, $classFiles), $type->optional),
-            $type instanceof UnionType => new UnionType([
-                ...array_map(fn (ParsedType $member): ParsedType => $member instanceof NameRefType ? $member : $this->aliasNulls($member, $class, $file, $srcDir, $classFiles), $type->types),
-                ...[] !== array_filter($type->types, $admitsNull) && !ShapeField::admitsNull($type) ? [new ScalarType('null')] : [],
-            ]),
-            $type instanceof ListType => new ListType($this->aliasNulls($type->inner, $class, $file, $srcDir, $classFiles)),
-            $type instanceof MapType => new MapType($type->key, $this->aliasNulls($type->value, $class, $file, $srcDir, $classFiles)),
+            $type instanceof NameRefType => null === $type->class ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading) : $type,
+            $type instanceof NullableType => new NullableType($read($type->inner), $type->optional),
+            $type instanceof UnionType => self::union(array_map($read, $type->types)),
+            $type instanceof ListType => new ListType($read($type->inner)),
+            $type instanceof MapType => new MapType($type->key, $read($type->value)),
             $type instanceof ShapeType => new ShapeType(array_map(
-                fn (ShapeField $key): ShapeField => new ShapeField($key->name, $this->aliasNulls($key->type, $class, $file, $srcDir, $classFiles), $key->optional),
+                fn (ShapeField $key): ShapeField => new ShapeField($key->name, $read($key->type), $key->optional),
                 $type->fields,
             ), $type->unsealed),
+            $type instanceof IntersectionType => self::intersection($type, $read($type->base), $read($type->extra)),
             default => $type,
         };
     }
 
     /**
-     * Whether the alias a file names admits null: as it is declared — in the file, or where it is
-     * imported from, through any alias that names another — or, for one no file declares, as the
-     * config's TypeScript type for it does.
+     * An alias as it is declared, read in the file that declares it.
      *
      * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading
      */
-    private function aliasAdmitsNull(string $alias, string $class, string $file, string $srcDir, array $classFiles, int $depth = 0): bool
+    private function readAlias(NameRefType $alias, string $class, string $file, string $srcDir, array $classFiles, array $reading): ParsedType
     {
-        return $this->aliasNulls[$srcDir . "\0" . $file . "\0" . $alias] ??= $this->readAliasAdmitsNull($alias, $class, $file, $srcDir, $classFiles, $depth);
-    }
-
-    /**
-     * @param array<string, string> $classFiles
-     */
-    private function readAliasAdmitsNull(string $alias, string $class, string $file, string $srcDir, array $classFiles, int $depth): bool
-    {
-        $declared = $depth > 8 ? null : $this->aliasDefinition($alias, $class, $file, $srcDir, $classFiles);
+        $declared = $this->aliasDefinition($alias->name, $class, $file, $srcDir, $classFiles);
         if (null === $declared) {
-            return isset($this->typeAliases[$alias]) && TypeScriptTypes::admitsNull($this->typeAliases[$alias]);
+            return isset($this->typeAliases[$alias->name]) && TypeScriptTypes::admitsNull($this->typeAliases[$alias->name])
+                ? new NullableType($alias, optional: false)
+                : $alias;
         }
 
-        $parsed = $this->parseType($declared['definition']);
+        $key = $declared['file'] . "\0" . $alias->name;
+        $parsed = isset($reading[$key]) ? null : $this->parseType($declared['definition']);
+        if (null === $parsed) {
+            return $alias;
+        }
 
-        return null !== $parsed && $this->declaredAdmitsNull($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, $depth + 1);
+        // An alias of `?T` is emitted `T`: a key typed with it is no key left out when null.
+        $parsed = $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
+
+        return $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true]);
     }
 
     /**
-     * Whether a type an alias is declared as admits a null sent, as its TypeScript does: `T|null`, a
-     * union with a null among its members, or the name of an alias that admits one. `?T` is a key
-     * left out when null, emitted `T`, so it admits one only where `T` does.
+     * A union of the members read, a member that is itself a union or admits null spread into it —
+     * so a reader of the union sees its null.
      *
-     * @param array<string, string> $classFiles
+     * @param list<ParsedType> $members
      */
-    private function declaredAdmitsNull(ParsedType $type, string $class, string $file, string $srcDir, array $classFiles, int $depth): bool
+    private static function union(array $members): UnionType
     {
-        return match (true) {
-            $type instanceof NullableType => !$type->optional || $this->declaredAdmitsNull($type->inner, $class, $file, $srcDir, $classFiles, $depth),
-            $type instanceof UnionType => [] !== array_filter($type->types, fn (ParsedType $member): bool => $this->declaredAdmitsNull($member, $class, $file, $srcDir, $classFiles, $depth)),
-            $type instanceof ScalarType => ShapeField::admitsNull($type) || 'null' === $type->base(),
-            $type instanceof NameRefType => null === $type->class && $this->aliasAdmitsNull($type->name, $class, $file, $srcDir, $classFiles, $depth),
-            default => false,
-        };
+        $spread = [];
+        foreach ($members as $member) {
+            if ($member instanceof UnionType) {
+                $spread = [...$spread, ...$member->types];
+            } elseif ($member instanceof NullableType && !$member->optional) {
+                $spread = [...$spread, $member->inner, new ScalarType('null')];
+            } else {
+                $spread[] = $member;
+            }
+        }
+
+        return new UnionType($spread);
+    }
+
+    /**
+     * An intersection read: the shape its base and its own keys make, where its base reads as one
+     * ({@see ShapeType::intersected()}); as written otherwise.
+     */
+    private static function intersection(IntersectionType $written, ParsedType $base, ParsedType $extra): ParsedType
+    {
+        return $base instanceof ShapeType && $extra instanceof ShapeType ? ShapeType::intersected($base, $extra) : $written;
     }
 
     /**

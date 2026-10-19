@@ -27,6 +27,9 @@ final class ClassFileTypes
     /** @var array<string, bool> by class */
     private array $loadable = [];
 
+    /** @var array<string, PhpStanOnly|null> by class */
+    private array $phpStanOnly = [];
+
     /** @var array<string, array<string, string>> by source directory: class => file */
     private array $classes = [];
 
@@ -65,10 +68,25 @@ final class ClassFileTypes
      * ({@see PhpFileClassLocator::isLoadable()}), asked once. One kept under src/ for tooling, whose
      * declaration needs a require-dev package, can't be without it: it is no part of the
      * application, and nothing it declares is emitted.
+     *
+     * @phpstan-assert-if-true class-string $class
      */
     public function loadable(string $class): bool
     {
         return $this->loadable[$class] ??= $this->classLocator->isLoadable($class);
+    }
+
+    /**
+     * The class's say on which of its aliases are for PHPStan alone ({@see PhpStanOnly::of()}),
+     * asked once.
+     */
+    public function phpStanOnly(string $class): ?PhpStanOnly
+    {
+        if (!\array_key_exists($class, $this->phpStanOnly)) {
+            $this->phpStanOnly[$class] = $this->loadable($class) ? PhpStanOnly::of($class) : null;
+        }
+
+        return $this->phpStanOnly[$class];
     }
 
     /**
@@ -162,7 +180,7 @@ final class ClassFileTypes
                 continue;
             }
             $imports[$alias] = $import;
-            if (PhpStanOnly::of($import->targetClass)?->covers($import->sourceName()) ?? false) {
+            if ($this->phpStanOnly($import->targetClass)?->covers($import->sourceName()) ?? false) {
                 $phpStanOnly[$alias] = self::phpStanOnlyReason($import->sourceName(), $import->targetClass);
             }
         }

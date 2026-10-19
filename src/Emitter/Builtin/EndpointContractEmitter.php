@@ -61,11 +61,11 @@ final class EndpointContractEmitter implements TypeEmitter
      * the key is always there.
      */
     public const string AS_QUERY_HELPER = <<<'TS'
-        /** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out. A primitive, a branded one included, is as it is. */
+        /** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out. A primitive, a branded one included, is as it is, and a list or a tuple stays one. */
         export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | null | undefined
           ? T
-          : T extends readonly (infer Item)[]
-            ? AsQuery<Item>[]
+          : T extends readonly unknown[]
+            ? { [K in keyof T]: AsQuery<T[K]> }
             : T extends object
               ? { [K in keyof T as null extends T[K] ? K : never]?: AsQuery<T[K]> } & { [K in keyof T as null extends T[K] ? never : K]: AsQuery<T[K]> }
               : T;

@@ -173,6 +173,9 @@ final class TypeScriptEmitter
     /** @var array<string, true> indexed by "ShapeName.fieldName" for O(1) lookup */
     private array $preserveNullIndex;
 
+    /** @var array<string, list<string>> by module, the enums of its own anything emitted names */
+    private array $enumsByDomain = [];
+
     /**
      * @param list<string> $preserveNull entries of the form "ShapeName.fieldName".
      *   Fields listed here must use `T|null` in their @phpstan-type annotation
@@ -222,11 +225,13 @@ final class TypeScriptEmitter
     public function emit(array $domains, array $responses = [], array $contracts = []): array
     {
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
+        $this->enumsByDomain = $this->referencedEnums($domains, $responses);
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses), array_keys($this->typeAliases));
         $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
 
-        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts)));
+        // A module whose enum something emitted elsewhere names is written, if only for the enum.
+        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts), array_keys($this->enumsByDomain)));
         sort($allDomains);
 
         $rootBlocks = [];
@@ -430,7 +435,7 @@ final class TypeScriptEmitter
 
         $blocks = [];
 
-        foreach ($this->collectLocalEnums($domain, $collected, $responses) as $enumClass) {
+        foreach ($this->collectLocalEnums($domain) as $enumClass) {
             $reflection = $this->reflect($enumClass);
             if (null !== $reflection) {
                 $blocks = array_merge($blocks, $this->registry->byConvention('value-of')->emit($reflection, $context)->blocks);
@@ -651,26 +656,59 @@ final class TypeScriptEmitter
     }
 
     /**
-     * @param list<CollectedApiResponseClass> $responses
+     * The enums a module emits: those of its own that anything emitted names, in any module — a
+     * response in another module inheriting a property typed with one included.
+     *
      * @return list<string>
      */
-    private function collectLocalEnums(string $domain, CollectedDomain $collected, array $responses): array
+    private function collectLocalEnums(string $domain): array
     {
-        $enumClasses = [];
+        return $this->enumsByDomain[$domain] ?? [];
+    }
 
-        foreach ($collected->types as $type) {
-            $this->appendLocalEnums($domain, $type->parsed, $enumClasses);
+    /**
+     * Every enum the types and responses name, each under the module it is declared in.
+     *
+     * @param array<string, CollectedDomain>                 $domains
+     * @param array<string, list<CollectedApiResponseClass>> $responses
+     *
+     * @return array<string, list<string>>
+     */
+    private function referencedEnums(array $domains, array $responses): array
+    {
+        $types = [];
+        foreach ($domains as $collected) {
+            foreach ($collected->types as $type) {
+                $types[] = $type->parsed;
+            }
         }
-
-        foreach ($responses as $response) {
-            foreach ($response->properties as $property) {
-                $this->appendLocalEnums($domain, $property->parsed, $enumClasses);
+        foreach ($responses as $domainResponses) {
+            foreach ($domainResponses as $response) {
+                foreach ($response->properties as $property) {
+                    $types[] = $property->parsed;
+                }
             }
         }
 
-        sort($enumClasses);
+        $enums = [];
+        while ([] !== $types) {
+            $type = array_pop($types);
+            if ($type instanceof ValueOfType) {
+                $enum = $this->enumResolver->resolveFqcn($type->enumClass);
+                $enums[$this->enumResolver->getDomain($enum)][$enum] = $enum;
 
-        return array_values(array_unique($enumClasses));
+                continue;
+            }
+            $types = [...$types, ...ParsedTypes::children($type)];
+        }
+
+        $byDomain = [];
+        foreach ($enums as $domain => $classes) {
+            sort($classes);
+            $byDomain[$domain] = $classes;
+        }
+
+        return $byDomain;
     }
 
     /**
@@ -772,24 +810,6 @@ final class TypeScriptEmitter
     }
 
     /**
-     * @param list<string> $enumClasses
-     */
-    private function appendLocalEnums(string $domain, ParsedType $type, array &$enumClasses): void
-    {
-        if ($type instanceof ValueOfType) {
-            if ($this->enumResolver->getDomain($type->enumClass) === $domain) {
-                $enumClasses[] = $this->enumResolver->resolveFqcn($type->enumClass);
-            }
-
-            return;
-        }
-
-        foreach (ParsedTypes::children($type) as $child) {
-            $this->appendLocalEnums($domain, $child, $enumClasses);
-        }
-    }
-
-    /**
      * @param array<string, CollectedDomain> $domains
      * @param array<string, list<CollectedApiResponseClass>> $responses
      * @return array<string, array<string, string>>
@@ -837,7 +857,7 @@ final class TypeScriptEmitter
                 );
             }
 
-            foreach ($this->collectLocalEnums($domain, $domains[$domain] ?? new CollectedDomain($domain), $responses[$domain] ?? []) as $enumClass) {
+            foreach ($this->collectLocalEnums($domain) as $enumClass) {
                 $emittedName = $this->names->enumName($enumClass);
                 if (isset($registrations[$domain][$emittedName])) {
                     throw new RuntimeException(\sprintf(
@@ -956,7 +976,7 @@ final class TypeScriptEmitter
         foreach ($responses as $response) {
             $names[$this->names->responseDeclarationName($response)] = true;
         }
-        foreach ($this->collectLocalEnums($domain, $collected, $responses) as $enumClass) {
+        foreach ($this->collectLocalEnums($domain) as $enumClass) {
             $names[$this->names->enumName($enumClass)] = true;
         }
         foreach ($contracts as $contract) {

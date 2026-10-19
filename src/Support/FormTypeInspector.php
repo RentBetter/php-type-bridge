@@ -12,6 +12,7 @@ use ReflectionProperty;
 use RuntimeException;
 use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
+use Symfony\Component\Form\Extension\Core\CoreExtension;
 use Symfony\Component\Form\Extension\Core\EventListener\TrimListener;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\CollectionType;
@@ -21,9 +22,12 @@ use Symfony\Component\Form\Form;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
 use Symfony\Component\Form\FormEvents;
+use Symfony\Component\Form\FormFactory;
 use Symfony\Component\Form\FormFactoryInterface;
+use Symfony\Component\Form\FormRegistry;
+use Symfony\Component\Form\FormRegistryInterface;
 use Symfony\Component\Form\FormTypeInterface;
-use Symfony\Component\Form\Forms;
+use Symfony\Component\Form\ResolvedFormTypeFactory;
 use Symfony\Component\OptionsResolver\Exception\ExceptionInterface as OptionsException;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\All;
@@ -35,15 +39,20 @@ final class FormTypeInspector
 {
     private FormFactoryInterface $formFactory;
 
+    /** The types the inspection factory knows, where it built that factory itself; null for one given it. */
+    private ?FormRegistryInterface $registry = null;
+
     public function __construct(?FormFactoryInterface $formFactory = null)
     {
         // The validator extension makes form-level validation options (constraints,
         // validation_groups, …) valid when a form is built for inspection — consuming apps
         // routinely attach field constraints. No validation is ever run here; the form is
         // built only to read its field structure.
-        $this->formFactory = $formFactory ?? Forms::createFormFactoryBuilder()
-            ->addExtension(new ValidatorExtension(Validation::createValidator()))
-            ->getFormFactory();
+        if (null === $formFactory) {
+            $this->registry = new FormRegistry([new CoreExtension(), new ValidatorExtension(Validation::createValidator())], new ResolvedFormTypeFactory());
+            $formFactory = new FormFactory($this->registry);
+        }
+        $this->formFactory = $formFactory;
     }
 
     /**
@@ -359,7 +368,9 @@ final class FormTypeInspector
     /**
      * A collection's entries do not exist on the builder — only a prototype does — so its entry type
      * is built on its own, with the collection's `entry_options` as each entry is: the emitters get
-     * the shape of an item, not an opaque entry class, and what an item is held to.
+     * the shape of an item, not an opaque entry class, and what an item is held to. Those its type
+     * doesn't define are left out: they belong to a form extension the application loads and
+     * inspection doesn't (`csrf_protection`, a documentation bundle's), and say nothing it reads.
      *
      * @param FormConfigInterface<mixed> $config
      *
@@ -373,12 +384,18 @@ final class FormTypeInspector
         }
 
         $entryOptions = $this->resolveOption($config, 'entry_options');
+        $entryOptions = \is_array($entryOptions) ? $entryOptions : [];
 
         try {
+            if (null !== $this->registry) {
+                $defined = $this->registry->getType($entryTypeClass)->getOptionsResolver()->getDefinedOptions();
+                $entryOptions = array_intersect_key($entryOptions, array_flip($defined));
+            }
+
             return $this->formFactory->createNamedBuilder(
                 name: '__entry__',
                 type: $entryTypeClass,
-                options: \is_array($entryOptions) ? $entryOptions : [],
+                options: $entryOptions,
             );
         } catch (OptionsException|FormException $exception) {
             // Same fact as a top-level form that cannot be built, one level down: a collection

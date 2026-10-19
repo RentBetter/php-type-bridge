@@ -17,7 +17,8 @@ final class ReportPlaceType extends AbstractFormType
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         $builder
-            ->add('address', ReportAddressType::class);
+            ->add('address', ReportAddressType::class)
+            ->add('billing', ReportBillingType::class);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

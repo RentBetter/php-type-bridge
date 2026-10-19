@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Collector;
 
-use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Contract\ApiResponse;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedResponseProperty;
@@ -32,13 +31,18 @@ final class ResponseClassCollector
 
     private readonly ClassFileTypes $files;
 
+    /**
+     * @param array<string, string> $typeAliases the project-wide aliases, name => TypeScript type: a
+     *        library's property may be typed with one, as PHPStan reads it in any file
+     */
     public function __construct(
         private readonly StatusCodeResolver $statusCodeResolver = new StatusCodeResolver(),
         private readonly PhpDocShapeParser $parser = new PhpDocShapeParser(),
-        private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
+        PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
         ?ClassFileTypes $files = null,
+        private readonly array $typeAliases = [],
     ) {
         $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
     }
@@ -79,7 +83,7 @@ final class ResponseClassCollector
         $responses = [];
 
         foreach ($classFiles as $className => $file) {
-            if (!$this->classLocator->isLoadable($className)) {
+            if (!$this->files->loadable($className)) {
                 continue;
             }
 
@@ -124,7 +128,8 @@ final class ResponseClassCollector
                 // Names are the file's; `self::` is the class, which for a trait is the one using it.
                 $parsed = $this->docHelper->resolveImportedNames($type, $declared['imports'], $declaringClass, $declared['classImports'], selfClass: $property->getDeclaringClass()->getName());
                 if (null === $declared['domain']) {
-                    $parsed = $this->docHelper->namesAsClasses($parsed, \sprintf('%s is outside the source tree, in no module, so a name it writes can only be a class. %s', $declaringClass, $where));
+                    $parsed = $this->docHelper->namesAsClasses($parsed, \sprintf('%s is outside the source tree, in no module, so a name it writes can only be a class or a project-wide alias. %s', $declaringClass, $where), array_keys($this->typeAliases));
+                    $parsed = $this->docHelper->enumsAsWritten($parsed, $declaringClass, $declared['classImports'], $classFiles, $where);
                 }
                 $properties[] = new CollectedResponseProperty(
                     name: $property->getName(),
@@ -200,7 +205,7 @@ final class ResponseClassCollector
         $imports = array_diff_key($read['imports'], $read['phpStanOnly']);
         $unresolved = [...$read['unresolved'], ...$read['phpStanOnly']];
         $domain = $this->domainGuesser->guess($srcDir, $file);
-        $phpStanOnly = PhpStanOnly::of($className);
+        $phpStanOnly = $this->files->phpStanOnly($className);
         foreach (array_keys($this->files->definitions($file)) as $alias) {
             if (null !== $phpStanOnly && $phpStanOnly->covers($alias)) {
                 $unresolved[$alias] = ClassFileTypes::phpStanOnlyReason($alias, $className);
@@ -297,7 +302,7 @@ final class ResponseClassCollector
      */
     private function fileOf(string $class): string
     {
-        if (!$this->classLocator->isLoadable($class)) {
+        if (!$this->files->loadable($class)) {
             return '';
         }
 

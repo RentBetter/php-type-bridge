@@ -54,17 +54,36 @@ final readonly class ShapeField
     /**
      * The key `Base & Own` has where both declare it, as TypeScript reads the intersection: required
      * where either requires it, admitting null only where both do — otherwise the own key's type
-     * without its null — its type otherwise the own one's, which narrows the base's.
+     * without its null — its type otherwise the own one's, which narrows the base's, but for a shape
+     * both declare, whose keys are intersected in turn.
      */
     public static function intersected(self $base, self $own): self
     {
         $type = self::admitsNull($base->type) ? $own->type : self::withoutNull($own->type);
+        $baseShape = self::withoutNull(self::declared($base->type));
+        $ownShape = self::withoutNull(self::declared($type));
+        if ($baseShape instanceof ShapeType && $ownShape instanceof ShapeType) {
+            $shape = ShapeType::intersected($baseShape, $ownShape);
+            $type = match (true) {
+                $type instanceof NullableType => new NullableType($shape, $type->optional),
+                self::admitsNull($type) => new NullableType($shape, optional: false),
+                default => $shape,
+            };
+        }
         if ($base->mayBeLeftOut() && $own->mayBeLeftOut()) {
             return new self($own->name, $type, $own->optional);
         }
 
         // Required: a `?T` either side wrote is a key left out when null, which it no longer may be.
         return new self($own->name, $type instanceof NullableType && $type->optional ? $type->inner : $type, false);
+    }
+
+    /**
+     * The type a key's value is, its `?` aside: `?T`'s `T`.
+     */
+    private static function declared(ParsedType $type): ParsedType
+    {
+        return $type instanceof NullableType && $type->optional ? $type->inner : $type;
     }
 
     /**

@@ -17,6 +17,7 @@ use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\GenericType;
+use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
@@ -28,6 +29,7 @@ use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Parser\ValueOfType;
 use ReflectionClass;
 use ReflectionProperty;
 use RuntimeException;
@@ -304,12 +306,14 @@ final class PhpDocTypeHelper
      * A type written outside the source tree, its names as that file means them: each the class it
      * resolved to ({@see self::resolveImportedNames()}), spelt in full, so no module's alias of the
      * same short name answers to it. Such a file is in no module, so a name that resolved to no
-     * class fails, with why.
+     * class fails, with why — but for a project-wide alias, which PHPStan reads in any file.
+     *
+     * @param list<string> $sharedNames the project-wide aliases (`typeAliases`)
      */
-    public function namesAsClasses(ParsedType $type, string $why): ParsedType
+    public function namesAsClasses(ParsedType $type, string $why, array $sharedNames = []): ParsedType
     {
-        return $this->mapLeaves($type, static function (ParsedType $leaf) use ($why): ParsedType {
-            if (!$leaf instanceof NameRefType) {
+        return $this->mapLeaves($type, static function (ParsedType $leaf) use ($why, $sharedNames): ParsedType {
+            if (!$leaf instanceof NameRefType || (null === $leaf->class && \in_array($leaf->name, $sharedNames, true))) {
                 return $leaf;
             }
             if (null === $leaf->class) {
@@ -317,6 +321,30 @@ final class PhpDocTypeHelper
             }
 
             return new NameRefType($leaf->class, $leaf->class);
+        });
+    }
+
+    /**
+     * A type written outside the source tree, its enums as that file names them: `value-of<Status>`
+     * is the Status its `use` statements and namespace resolve, spelt in full, not whichever enum of
+     * the source tree has that short name. One outside the source tree is never emitted, so a type
+     * naming it fails, with why.
+     *
+     * @param array<string, string> $classImports the file's `use` statements ({@see self::classImports()})
+     * @param array<string, string> $classFiles   the source tree's classes
+     */
+    public function enumsAsWritten(ParsedType $type, string $ownerClass, array $classImports, array $classFiles, string $why): ParsedType
+    {
+        return $this->mapLeaves($type, function (ParsedType $leaf) use ($ownerClass, $classImports, $classFiles, $why): ParsedType {
+            if (!$leaf instanceof ValueOfType && !$leaf instanceof IdOfType) {
+                return $leaf;
+            }
+            $enum = $this->resolveClassName($leaf->enumClass, $ownerClass, $classImports) ?? ltrim($leaf->enumClass, '\\');
+            if (!isset($classFiles[$enum])) {
+                throw new RuntimeException(\sprintf('`%s` names %s, outside the source tree: an enum TypeBridge never emits. %s', $leaf->enumClass, $enum, $why));
+            }
+
+            return $leaf instanceof ValueOfType ? new ValueOfType($enum) : new IdOfType($enum);
         });
     }
 

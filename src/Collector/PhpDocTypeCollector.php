@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Collector;
 
-use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
@@ -46,7 +45,7 @@ final class PhpDocTypeCollector
             $definitions = $this->files->definitions($file);
             // An alias for PHPStan alone is not emitted, and an emitted one typed with it fails.
             $phpStanOnly = [];
-            $only = PhpStanOnly::of($className);
+            $only = $this->files->phpStanOnly($className);
             if (null !== $only) {
                 foreach (array_keys($definitions) as $alias) {
                     if ($only->covers($alias)) {

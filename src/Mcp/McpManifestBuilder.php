@@ -34,6 +34,7 @@ use Symfony\Component\Validator\Constraints\Range;
 use Symfony\Component\Validator\Constraints\Regex;
 use Symfony\Component\Validator\Validation;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
+use WeakMap;
 
 /**
  * Builds the MCP tool manifest (the `tools.json` structure) from collected endpoint contracts.
@@ -74,6 +75,9 @@ final class McpManifestBuilder
      * What a field's blank value is asked of: Symfony's own validator.
      */
     private ?ValidatorInterface $validator = null;
+
+    /** @var WeakMap<CollectedFormField, bool>|null by field, whether its blank value is refused: asked once */
+    private ?WeakMap $blankRefused = null;
 
     /**
      * @param IncludeConvention  $includes          whose `query` parameters every tool with a response body takes
@@ -234,7 +238,9 @@ final class McpManifestBuilder
      */
     private function refusesBlank(CollectedFormField $field): bool
     {
-        return $this->refuses($field->constraints, $field->blankValue);
+        $this->blankRefused ??= new WeakMap();
+
+        return $this->blankRefused[$field] ??= $this->refuses($field->constraints, $field->blankValue);
     }
 
     /**
