@@ -145,6 +145,18 @@ final class McpManifestGeneratorTest extends TestCase
         }
     }
 
+    public function testAMethodWhoseFirstRouteIsNotServedIsDescribedByTheOneThatIs(): void
+    {
+        // Its first #[Route] is confined to the dev env; the router serves the second, so the path,
+        // the params' names and their requirements are all that one's.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        $tool = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name')['ShowEnvNote'] ?? [];
+
+        self::assertSame('/api/env/notes/{id}', $tool['path'] ?? null);
+        self::assertSame(['id'], $tool['inputSchema']['required'] ?? null);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['id'] ?? null);
+    }
+
     public function testWithoutRoutingTheAttributePathStands(): void
     {
         // Existing consumers configure no routing and put the full path on the attribute;

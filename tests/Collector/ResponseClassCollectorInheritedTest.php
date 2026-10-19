@@ -135,6 +135,45 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString("export interface ShowNoteResponse {\n  title: string;\n  count: number;\n  tags: string[];\n}", $notes);
     }
 
+    public function test_a_library_propertys_enum_is_the_one_its_file_names_not_one_of_the_same_short_name(): void
+    {
+        // The library's `value-of<Status>` is its own Status, outside the source tree and never
+        // emitted — not the application's Status that shares its short name.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/LibraryBaseLib\\\\Status.*outside the source tree/s');
+
+        self::emit(self::fixtures('LibraryEnumFixtures'));
+    }
+
+    public function test_a_config_alias_on_a_library_property_is_the_emitting_modules_own(): void
+    {
+        // PHPStan reads a project-wide alias in any file, a library's included.
+        $src = self::fixtures('LibraryConfigAliasFixtures');
+        $responseCollector = new ResponseClassCollector(typeAliases: ['UuidStr' => 'string']);
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($src);
+
+        $notes = (new TypeScriptEmitter(enumResolver: $enumResolver, domainMapper: new DomainMapper('/tmp/type-bridge-output'), typeAliases: ['UuidStr' => 'string']))->emit(
+            (new PhpDocTypeCollector())->collect($src),
+            $responseCollector->collect($src),
+            [],
+        )['Notes'];
+
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  ownerId: UuidStr;\n}", $notes);
+        self::assertStringContainsString('export type UuidStr = string;', $notes);
+    }
+
+    public function test_an_enum_a_property_inherited_from_another_module_names_is_emitted_in_its_own(): void
+    {
+        // Nothing in Common names NoteState but the abstract base's property, published in Notes:
+        // Common is written with it, for Notes to import.
+        $output = self::emit(self::fixtures('CrossModuleEnumFixtures'));
+
+        self::assertArrayHasKey('Common', $output);
+        self::assertStringContainsString("export type NoteState = 'open' | 'closed';", $output['Common']);
+        self::assertMatchesRegularExpression("/import type \\{[^}]*\\bNoteState\\b[^}]*\\} from '[^']*Common[^']*';/", $output['Notes']);
+    }
+
     public function test_a_204_says_whether_it_declares_properties_of_its_own(): void
     {
         // What it was emitted as before it was null is the collected model's to say, not a question

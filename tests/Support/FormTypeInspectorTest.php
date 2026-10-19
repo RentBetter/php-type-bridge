@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Support;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Support\FormTypeInspector;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\AliasListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
@@ -154,6 +155,15 @@ final class FormTypeInspectorTest extends TestCase
 
         self::assertSame(['bug', 'idea'], $fields['kind']->choiceValues);
         self::assertSame([NotNull::class], array_map(static fn(object $constraint): string => $constraint::class, $fields['refs']->entryConstraints));
+    }
+
+    public function test_an_entry_option_of_an_extension_inspection_does_not_load_is_no_matter(): void
+    {
+        // It means something to the application, not to what inspection reads; the entry is built
+        // with the options its type has, and held to their constraints.
+        $fields = array_column((new FormTypeInspector())->inspect(AliasListType::class)['fields'], null, 'name');
+
+        self::assertSame([NotBlank::class], array_map(static fn(object $constraint): string => $constraint::class, $fields['aliases']->entryConstraints));
     }
 
     public function test_a_listener_that_rewrites_what_is_sent_transforms_it_too(): void

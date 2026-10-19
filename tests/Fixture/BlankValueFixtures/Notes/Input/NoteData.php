@@ -56,4 +56,7 @@ final class NoteData
     public ?string $fallback = null;
 
     public ?int $quantity = null;
+
+    /** @var list<string> */
+    public array $aliases = [];
 }

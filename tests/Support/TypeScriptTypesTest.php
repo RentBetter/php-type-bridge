@@ -29,6 +29,12 @@ final class TypeScriptTypesTest extends TestCase
         yield 'a function taking one, or null' => ['((a: string) => string) | null', true];
         yield 'a function returning null' => ['() => null', false];
         yield 'a generic over a function, or null' => ['Promise<(x: number) => void> | null', true];
+        // `null extends T` holds for these too, as AsQuery<T> reads them.
+        yield 'unknown' => ['unknown', true];
+        yield 'any' => ['any', true];
+        yield 'a union in brackets' => ['(string | null)', true];
+        yield 'a list of nulls, in brackets' => ['(string | null)[]', false];
+        yield 'unknown inside a generic' => ['Array<unknown>', false];
     }
 
     #[DataProvider('types')]

@@ -42,6 +42,17 @@ final class ShapeFieldIntersectionTest extends TestCase
         self::assertSame($takesNull, ShapeField::admitsNull($key->type));
     }
 
+    public function testAShapeBothSidesDeclareIsIntersectedToo(): void
+    {
+        // `filter: {a: string} & {b?: string}`: `a` is required at that depth as at the top.
+        $key = ShapeField::intersected(self::key('filter: array{a: string}'), self::key('filter?: array{b?: string}'));
+
+        self::assertFalse($key->mayBeLeftOut());
+        self::assertInstanceOf(ShapeType::class, $key->type);
+        self::assertSame(['a', 'b'], array_map(static fn(ShapeField $field): string => $field->name, $key->type->fields));
+        self::assertFalse($key->type->fields[0]->mayBeLeftOut());
+    }
+
     public function testAShapeHasEveryKeyOfEitherSide(): void
     {
         $shape = ShapeType::intersected(self::shape('array{a: string, k?: string}'), self::shape('array{k: string, b?: int}'));

@@ -217,6 +217,25 @@ final class EndpointQueryTest extends TestCase
         self::assertFalse($keys->fields[0]->mayBeLeftOut(inQuery: true));
     }
 
+    public function test_a_nested_key_typed_with_an_alias_is_read_through_it(): void
+    {
+        // `address?: ReportAddress`, the alias another class's `_self`: its keys are that shape's —
+        // optional, and the street clearable — as they would be written out.
+        $contracts = (new EndpointContractCollector())->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'updateReportPlace'), 'PATCH')]])['tools'][0];
+
+        $address = $tool['inputSchema']['properties']['address'];
+        self::assertArrayNotHasKey('required', $address);
+        self::assertSame(['type' => ['string', 'null']], $address['properties']['street']);
+        self::assertSame(['type' => 'string'], $address['properties']['city']);
+    }
+
+    public function test_as_query_keeps_a_tuple_a_tuple(): void
+    {
+        // A tuple is mapped as itself, position by position, not widened to a list of its members.
+        self::assertStringContainsString("  : T extends readonly unknown[]\n    ? { [K in keyof T]: AsQuery<T[K]> }", $this->emit()['Reports']);
+    }
+
     public function test_as_query_leaves_a_primitive_as_it_is(): void
     {
         // A branded string (`string & {readonly __brand: 'UuidStr'}`) extends object, so a helper that
@@ -282,7 +301,7 @@ final class EndpointQueryTest extends TestCase
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             // A null that means something, so the contract says `T|null`: in a query, "any product".
-            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region', 'ReportFields.description'],
+            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region', 'ReportFields.description', 'ReportAddressInput.street'],
             typeAliases: ['MaybeText' => 'string | null'],
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),

@@ -61,6 +61,19 @@ final class NoteController
     }
 
     /**
+     * Its first #[Route] is confined to an env the router is not loaded in, so the route served is
+     * the second: its path, and its params named and held as it says.
+     */
+    #[Route('/dev/notes/{code}', methods: ['GET'], env: 'dev')]
+    #[Route('/env/notes/{id}', requirements: ['id' => '[A-Z]+'], methods: ['GET'])]
+    #[ApiResponses([NoteResponse::class])]
+    #[McpTool(description: 'A note, in any env.')]
+    public function showEnvNoteAction(): NoteResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    /**
      * A string requirement written anchored: its pattern is the router's, anchors off once.
      */
     #[Route('/anchored-codes/{code}', requirements: ['code' => '^[a-z]+$'], methods: ['GET'])]
