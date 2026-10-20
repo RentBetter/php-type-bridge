@@ -6,6 +6,8 @@ namespace PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Controller
 
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedNoteType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedScopeFilterType;
@@ -200,6 +202,22 @@ final class ReportController
     #[ApiRequest(body: ReportNoteType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function updateReportNote(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/{id}/aliased-note', methods: ['PUT'])]
+    #[ApiRequest(body: AliasedNoteType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function updateAliasedNote(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/aliased-filter', methods: ['GET'])]
+    #[ApiRequest(query: AliasedFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function showAliasedFilterReport(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

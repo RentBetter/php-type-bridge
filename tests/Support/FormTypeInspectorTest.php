@@ -150,7 +150,8 @@ final class FormTypeInspectorTest extends TestCase
     public function test_a_choice_or_an_all_nested_where_it_always_holds_is_read_too(): void
     {
         // A Sequentially's constraints hold as if written beside it: its Choice narrows the values,
-        // its All holds each entry.
+        // its All holds each entry. One of them confined to another group, as a request is never
+        // validated in, holds nothing.
         $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
 
         self::assertSame(['bug', 'idea'], $fields['kind']->choiceValues);

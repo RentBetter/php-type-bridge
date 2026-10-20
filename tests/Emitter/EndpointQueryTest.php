@@ -192,6 +192,32 @@ final class EndpointQueryTest extends TestCase
         }
     }
 
+    public function test_a_key_typed_with_an_alias_whose_null_its_typescript_cannot_say_is_refused(): void
+    {
+        // `Nullable<string>` admits null as tsc evaluates it, which a reading of its text can't: the
+        // Endpoint's AsQuery<T> and the tool would read the key two ways. Saying so beats guessing.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Whether the project-wide alias "MaybeText" (`Nullable<string>`) admits null');
+
+        (new EndpointContractCollector(typeAliases: ['MaybeText' => 'Nullable<string>']))->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+    }
+
+    public function test_an_input_whose_self_is_an_alias_of_a_shape_has_that_shapes_keys(): void
+    {
+        // `_self = NoteInput`, NoteInput imported: `title` required and `note` clearable, as that
+        // shape declares — not every field required, as the form's default guesses.
+        $contracts = (new EndpointContractCollector())->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'updateAliasedNote'), 'PUT')]])['tools'][0];
+
+        self::assertSame(['id', 'title'], $tool['inputSchema']['required'], "Its path's id, and the title");
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
+
+        // A query whose `_self` is one, with a key it can't leave out, can't be left out either.
+        $query = self::asTool(self::contract($contracts, 'showAliasedFilterReport'), 'GET');
+        self::assertSame(['product'], (new McpManifestBuilder())->build(['Reports' => [$query]])['tools'][0]['inputSchema']['required'] ?? []);
+        self::assertStringContainsString('export const ShowAliasedFilterReport: Endpoint<ShowAliasedFilterReportEndpointMap, { query: ShowAliasedFilterReportQuery }> = {', $this->emit()['Reports']);
+    }
+
     public function test_a_body_key_typed_with_an_alias_that_admits_null_takes_null(): void
     {
         // An update may clear it, and a list of them may hold one: what the alias admits.
@@ -233,6 +259,13 @@ final class EndpointQueryTest extends TestCase
         $billing = $tool['inputSchema']['properties']['billing'];
         self::assertSame(['postcode'], $billing['required']);
         self::assertSame(['type' => ['string', 'null']], $billing['properties']['street']);
+    }
+
+    public function test_as_query_sends_a_null_by_leaving_the_key_out_and_no_other_way(): void
+    {
+        // A query string can't carry a null: a key that may be one is optional, and what it takes
+        // when sent is never null — `{product: null}` would be sent as the text "null".
+        self::assertStringContainsString('{ [K in keyof T as null extends T[K] ? K : never]?: AsQuery<Exclude<T[K], null>> }', $this->emit()['Reports']);
     }
 
     public function test_as_query_keeps_a_tuple_a_tuple(): void
@@ -306,7 +339,7 @@ final class EndpointQueryTest extends TestCase
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             // A null that means something, so the contract says `T|null`: in a query, "any product".
-            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region', 'ReportFields.description', 'ReportAddressInput.street'],
+            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region', 'ReportFields.description', 'ReportAddressInput.street', 'NoteInput.note'],
             typeAliases: ['MaybeText' => 'string | null'],
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),

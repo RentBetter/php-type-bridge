@@ -44,6 +44,7 @@ use Symfony\Component\Validator\Constraints\NotNull;
 use Symfony\Component\Validator\Constraints\Range;
 use Symfony\Component\Validator\Constraints\Regex;
 use Symfony\Component\Validator\Constraints\Sequentially;
+use Symfony\Component\Validator\Validation;
 
 final class McpManifestBuilderTest extends TestCase
 {
@@ -766,7 +767,8 @@ final class McpManifestBuilderTest extends TestCase
     {
         // LabelsType reads what is sent before Symfony maps anything, so its form has no children
         // and once published as a string, which a client checking arguments refused in every form
-        // the endpoint accepts. Its data class's `_self` is the only thing that says what it takes.
+        // the endpoint accepts. Its data class's `_self` is the only thing that says what it takes —
+        // read through the aliases it is written with, as the Endpoint reads them.
         $labels = $this->argumentTools()['RecordVerdict']['inputSchema']['properties']['labels'];
 
         self::assertSame([
@@ -778,6 +780,7 @@ final class McpManifestBuilderTest extends TestCase
                 ]]],
                 'remove' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'mode' => ['enum' => ['merge', 'replace']],
+                'reason' => ['type' => ['string', 'null']],
             ],
         ], $labels);
     }
@@ -801,6 +804,17 @@ final class McpManifestBuilderTest extends TestCase
         $tool = $this->toolWithBody('PUT', [$labels], new ShapeType([]));
 
         self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['labels']);
+    }
+
+    public function testALiteralUnionAllowsEachOfItsValues(): void
+    {
+        // '1' and 1, true and 1: JSON tells each pair apart, and the contract allows both.
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape("array{code: '1'|1, flag: true|1, level: 1|1}"));
+
+        $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
+        self::assertSame(['enum' => ['1', 1]], $properties['code']);
+        self::assertSame(['enum' => [true, 1]], $properties['flag']);
+        self::assertSame(['enum' => [1]], $properties['level']);
     }
 
     public function testAFieldTheContractDoesNotDeclareIsLeftToItsForm(): void
@@ -1329,6 +1343,19 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['name', 'code'], $tool['inputSchema']['required']);
         self::assertSame(['type' => 'string', 'maxLength' => 40], $tool['inputSchema']['properties']['name']);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['code']);
+    }
+
+    public function testAConstraintNestedInAnotherGroupBoundsNothing(): void
+    {
+        // The sequence is in both groups, its Regex and Length in Strict alone: validated by
+        // default, 'abcdef' is taken, so no client may be told to refuse it.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $sequence = new Sequentially([new Regex('/^\\d+$/', groups: ['Strict']), new Length(max: 3, groups: ['Strict'])], groups: ['Default', 'Strict']);
+        self::assertCount(0, Validation::createValidator()->validate('abcdef', [$sequence]));
+        $code = new CollectedFormField(name: 'code', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [$sequence]);
+
+        $tool = $this->toolWithBody('POST', [$code], $this->shape('array{code?: string}'));
+        self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['code']);
     }
 
     public function testAKeyAnIntersectionRequiresOnEitherSideIsRequired(): void

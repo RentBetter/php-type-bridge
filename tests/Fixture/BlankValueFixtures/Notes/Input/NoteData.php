@@ -46,7 +46,8 @@ final class NoteData
     /** @var list<bool> */
     public array $flags = [];
 
-    #[Assert\Sequentially([new Assert\Choice(choices: ['bug', 'idea'])])]
+    /** Held to the first Choice only: the second is in another group, which a request is never validated in. */
+    #[Assert\Sequentially([new Assert\Choice(choices: ['bug', 'idea']), new Assert\Choice(choices: ['bug'], groups: ['strict'])], groups: ['Default', 'strict'])]
     public ?string $kind = null;
 
     /** @var list<string|null> */

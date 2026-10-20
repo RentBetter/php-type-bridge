@@ -22,6 +22,7 @@ use PTGS\TypeBridge\Tests\Fixture\LibraryBaseLib\AbstractMetaResponse;
 use PTGS\TypeBridge\Tests\Fixture\LibraryBaseLib\AbstractOwnedResponse;
 use PTGS\TypeBridge\Tests\Fixture\LibraryBaseLib\Item as LibraryItem;
 use PTGS\TypeBridge\Tests\Fixture\LibraryBaseOwnedFixtures\Notes\Response\ShowNoteResponse as ShowOwnedNoteResponse;
+use PTGS\TypeBridge\Tests\Fixture\NativeTypedFixtures\Common\Response\NoteSummary;
 use PTGS\TypeBridge\Tests\Fixture\UnresolvedImportSpelledFixtures\Common\Response\LedgerResponse;
 use RuntimeException;
 
@@ -297,6 +298,24 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringNotContainsString('@deprecated', self::emit(self::fixtures('Inherited204Fixtures'))['Notes']);
     }
 
+    public function test_a_204s_deprecated_name_is_one_no_other_type_of_its_module_may_take(): void
+    {
+        // It is declared beside the 204's own: another declaration of it is a collision, said so.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('"IRestoreNoteResponse" is emitted by both');
+
+        self::emit(self::fixtures('Deprecated204ClashFixtures'), new TypeScriptNaming(interfacePrefix: 'I'));
+    }
+
+    public function test_a_type_imported_under_a_204s_deprecated_name_is_imported_under_another(): void
+    {
+        $notes = self::emit(self::fixtures('Deprecated204ImportFixtures'), new TypeScriptNaming(interfacePrefix: 'I'))['Notes'];
+
+        self::assertStringContainsString('import type { IRestoreNoteResponse as CommonIRestoreNoteResponse }', $notes);
+        self::assertStringContainsString('  code: CommonIRestoreNoteResponse;', $notes);
+        self::assertSame(1, substr_count($notes, 'export type IRestoreNoteResponse ='));
+    }
+
     public function test_a_php_stan_only_alias_is_neither_emitted_nor_imported(): void
     {
         $notes = self::emit(self::fixtures('PhpStanOnlyResponseFixtures'))['Notes'];
@@ -383,6 +402,31 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertSame(['id' => 'string', 'meta' => 'array{page: int}'], self::rawTypes($response));
         self::assertSame(AbstractMetaResponse::class, $response->properties[1]->writtenIn);
         self::assertStringContainsString('  meta: { page: number };', self::emit($src)['Notes']);
+    }
+
+    public function test_a_property_with_only_a_native_type_is_published_as_that_type_says(): void
+    {
+        // A base's, in the tree: `array` is a list or an object of anything, as json_encode writes
+        // it; a nullable type keeps its null, the response's own included.
+        $src = self::fixtures('NativeTypedFixtures');
+        $response = (new ResponseClassCollector())->collectIndex($src)['PTGS\\TypeBridge\\Tests\\Fixture\\NativeTypedFixtures\\Notes\\Response\\ShowNoteResponse'];
+        $notes = self::emit($src)['Notes'];
+
+        self::assertSame('array<array-key, mixed>', self::rawTypes($response)['meta']);
+        self::assertSame('string|null', self::rawTypes($response)['note']);
+        self::assertSame('int|null', self::rawTypes($response)['rank']);
+        // A class is the one Reflection names, wherever the property is written.
+        self::assertSame('\\' . NoteSummary::class . '|null', self::rawTypes($response)['summary']);
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  id: string;\n  rank: number | null;\n  summary: NoteSummary | null;\n  meta: Record<string, unknown> | unknown[];\n  note: string | null;\n", $notes);
+        self::assertMatchesRegularExpression('~^  count: (number \\| Record<string, unknown> \\| unknown\\[\\]|Record<string, unknown> \\| unknown\\[\\] \\| number);$~m', $notes);
+    }
+
+    public function test_a_library_base_classs_property_with_only_a_native_type_is_published_as_that_type_says(): void
+    {
+        // No docblock can be added to a library's class: what its native type says is what is sent.
+        $src = self::fixtures('NativeTypedFixtures');
+
+        self::assertStringContainsString("export interface NoteFailedResponse {\n  details: Record<string, unknown> | unknown[];\n  hint: string | null;\n}", self::emit($src)['Notes']);
     }
 
     public function test_a_library_base_classs_property_naming_a_class_of_the_tree_is_that_classs_type(): void
