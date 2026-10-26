@@ -432,6 +432,23 @@ final class DefinitionNormalizer implements ShapeNormalizer, RefNormalizer
 
 The bundle tags every autoconfigured implementation, and `RefRegistry` matches a ref's class with `is_a()`, so a Doctrine proxy finds its entity's normaliser. Each record carries its `id`. Every ref a request reaches at one level is fetched with one `resolveMany()` per entity, each id once, and the records are walked in turn: a path goes on into them (`checks.definition.latestResult`), `include` paths reach inside them, and a reference cycle is followed only as far as a path spells it out. A ref that no `RefNormalizer` claims, or a record it does not return, is a server bug (`LogicException`), not a 422.
 
+### Refusing an expand
+
+A record a caller may read can reference one they may not, and a path goes on through it. An app whose callers may not see everything a reference leads to registers an `ExpandGuard`, the service `IncludeResolver` asks before it expands:
+
+```php
+#[AsAlias(ExpandGuard::class)]
+final readonly class RoleExpandGuard implements ExpandGuard
+{
+    public function mayExpand(string $entityClass): bool
+    {
+        return $this->currentUser()->mayExpand($entityClass);
+    }
+}
+```
+
+It is asked about each entity an expand reaches, once a request, before anything of that entity is fetched — with the entity's own class, never a Doctrine proxy. A refusal ends the body: the subscriber answers 403 with the path that reached it (`` `checks.owner` cannot be expanded by this caller.``), never the entity. Without a guard every reference expands, as before.
+
 ### Sending an enum whole
 
 An enum that goes out as an object implements `PTGS\TypeBridge\Enum\ApiEnum`, which asks for `id()` and `jsonSerialize(): array`:
@@ -462,6 +479,7 @@ enum CheckStatus: string implements ApiEnum
 - `include`: `x.*` opens every optional key one level under x — never at the root, never mid-path.
 - `expand`: no `*`, since each expansion is a query. A field list narrows what is at a path to those keys and its `id`, keeping any key a deeper path goes on into: a record (`checks.definition(name)`), the rows themselves (`checks(name,status)`), or nested (`checks(name,status(name))`). The same path given twice merges its lists, a path without a list asks for the whole thing, and an unknown field is skipped.
 - A 422 for a root that is not a field of the response, a malformed path, a field list on `include`, or an expand that ends at something that is neither a ref, an `ApiEnum` nor narrowed by a list. It is the app's own 422: the subscriber builds it with the bound `ValidationErrorResponseFactory`, its path `include` or `expand`.
+- A 403 for an expand the app's `ExpandGuard` refuses (see [Refusing an expand](#refusing-an-expand)).
 
 Markers are found in the response's public properties and the arrays beneath them; any other object is left for `json_encode()`, and not looked into.
 
