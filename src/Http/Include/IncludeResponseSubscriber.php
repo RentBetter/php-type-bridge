@@ -12,6 +12,7 @@ use ReflectionClass;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpKernel\Event\ViewEvent;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\KernelEvents;
 
 /**
@@ -24,7 +25,8 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * `includes.query` in the TypeBridge config, on every endpoint whose success response has a body,
  * so no action declares them. A request sending the enum-format header (`X-Enum-Format: id` by
  * default) gets its enums as bare ids. A path the response cannot answer is the app's 422, built
- * by its ValidationErrorResponseFactory with the parameter as the error's path.
+ * by its ValidationErrorResponseFactory with the parameter as the error's path; an expand the
+ * app's ExpandGuard refuses is a 403.
  *
  * Registered by TypeBridgeBundle only when `type_bridge.includes` is enabled.
  */
@@ -66,6 +68,8 @@ final readonly class IncludeResponseSubscriber
             );
         } catch (InvalidIncludeException $invalid) {
             throw $this->validationErrors->create([['path' => $invalid->parameter, 'message' => $invalid->getMessage()]]);
+        } catch (ExpandRefusedException $refused) {
+            throw new AccessDeniedHttpException($refused->getMessage(), $refused);
         }
 
         $response = new JsonResponse(null, $status);

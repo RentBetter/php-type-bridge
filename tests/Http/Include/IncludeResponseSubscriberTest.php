@@ -16,6 +16,7 @@ use PTGS\TypeBridge\Resolver\StatusCodeResolver;
 use PTGS\TypeBridge\Response\ValidationErrorResponse;
 use PTGS\TypeBridge\Tests\Http\Fixtures\NoContentResponse;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\CheckStatus;
+use PTGS\TypeBridge\Tests\Http\Include\Fixtures\RecordingExpandGuard;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\RowsResponse;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\Thing;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\ThingNormalizer;
@@ -23,6 +24,7 @@ use PTGS\TypeBridge\Tests\Http\StubHttpKernel;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\ViewEvent;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 final class IncludeResponseSubscriberTest extends TestCase
@@ -73,6 +75,23 @@ final class IncludeResponseSubscriberTest extends TestCase
             self::assertSame(422, $error->getStatusCode());
             self::assertSame('expand', $error->errors[0]['path']);
             self::assertStringContainsString('is an enum', $error->errors[0]['message']);
+        }
+    }
+
+    public function testAnExpandTheAppsGuardRefusesIsA403(): void
+    {
+        $subscriber = new IncludeResponseSubscriber(
+            new IncludeResolver(new RefRegistry([new ThingNormalizer()]), new RecordingExpandGuard()),
+            new StatusCodeResolver(),
+            new DefaultValidationErrorResponseFactory(),
+        );
+
+        try {
+            $subscriber($this->viewEvent(self::response(), '/checks?expand=rows.thing'));
+            self::fail('The expand was not refused');
+        } catch (AccessDeniedHttpException $denied) {
+            self::assertSame(403, $denied->getStatusCode());
+            self::assertSame('`rows.thing` cannot be expanded by this caller.', $denied->getMessage());
         }
     }
 

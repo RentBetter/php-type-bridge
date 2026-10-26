@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Tests\Http\Include;
 use LogicException;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Http\Include\EnumCase;
+use PTGS\TypeBridge\Http\Include\ExpandRefusedException;
 use PTGS\TypeBridge\Http\Include\IncludeResolver;
 use PTGS\TypeBridge\Http\Include\IncludeTree;
 use PTGS\TypeBridge\Http\Include\InvalidIncludeException;
@@ -15,6 +16,7 @@ use PTGS\TypeBridge\Http\Include\Ref;
 use PTGS\TypeBridge\Http\Include\RefRegistry;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\CheckStatus;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\Priority;
+use PTGS\TypeBridge\Tests\Http\Include\Fixtures\RecordingExpandGuard;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\RowsResponse;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\Thing;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\ThingNormalizer;
@@ -230,6 +232,44 @@ final class IncludeResolverTest extends TestCase
         $this->body($response, expand: 'rows.thing');
     }
 
+    public function testAnExpandTheGuardRefusesFetchesNothingAndNamesItsPath(): void
+    {
+        $guard = new RecordingExpandGuard();
+        $response = new RowsResponse(rows: [['id' => 'a', 'thing' => new Ref(ThingProxy::class, 'thing-1')]]);
+
+        try {
+            $this->guarded($guard)->body($response, IncludeTree::parse(''), IncludeTree::parseExpand('rows.thing'));
+            self::fail('The refused expand went through');
+        } catch (ExpandRefusedException $refused) {
+            self::assertSame('rows.thing', $refused->path);
+            self::assertStringNotContainsString(Thing::class, $refused->getMessage(), 'The caller is told the path, not the entity');
+        }
+
+        self::assertSame([Thing::class], $guard->asked, 'Asked for the entity, not its proxy');
+        self::assertSame([], $this->things->fetched, 'Nothing is fetched for a refused expand');
+    }
+
+    public function testAnExpandTheGuardAllowsGoesOnAsBefore(): void
+    {
+        $guard = new RecordingExpandGuard([Thing::class]);
+        $response = new RowsResponse(rows: [['id' => 'a', 'thing' => self::ref('thing-1')]]);
+
+        $thing = self::row($this->guarded($guard)->body($response, IncludeTree::parse(''), IncludeTree::parseExpand('rows.thing.next')))['thing'];
+        self::assertIsArray($thing);
+
+        self::assertSame('thing-2', $thing['next']['id'] ?? null);
+        self::assertSame([Thing::class], $guard->asked, 'Asked once about an entity, however many levels reach it');
+    }
+
+    public function testARefLeftAsAnIdNeverAsksTheGuard(): void
+    {
+        $guard = new RecordingExpandGuard();
+        $response = new RowsResponse(rows: [['id' => 'a', 'thing' => self::ref('thing-1')]]);
+
+        self::assertSame([['id' => 'a', 'thing' => 'thing-1']], $this->guarded($guard)->body($response, IncludeTree::parse(''), IncludeTree::parseExpand(''))['rows']);
+        self::assertSame([], $guard->asked);
+    }
+
     public function testARefWhoseRecordIsNotFoundIsAServerBug(): void
     {
         $response = new RowsResponse(rows: [['id' => 'a', 'thing' => self::ref('thing-404')]]);
@@ -246,6 +286,11 @@ final class IncludeResolverTest extends TestCase
     private function body(RowsResponse $response, string $include = '', string $expand = '', bool $enumIds = false): array
     {
         return $this->resolver->body($response, IncludeTree::parse($include), IncludeTree::parseExpand($expand), $enumIds);
+    }
+
+    private function guarded(RecordingExpandGuard $guard): IncludeResolver
+    {
+        return new IncludeResolver(new RefRegistry([$this->things]), $guard);
     }
 
     /**

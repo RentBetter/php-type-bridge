@@ -29,6 +29,11 @@ use PTGS\TypeBridge\Enum\ApiEnum;
  * a request can ask for. An enum an expand names goes out whole, even to a request that asked
  * for ids.
  *
+ * An app whose callers may not see every record a reference leads to registers an ExpandGuard: it
+ * is asked about each entity an expand reaches, once, before anything of that entity is fetched,
+ * and a refusal ends the body with an ExpandRefusedException. Without one, every reference
+ * expands.
+ *
  * Markers are found in the response's public properties and the arrays beneath them; an object
  * other than a marker is left for json_encode, and is not looked into.
  *
@@ -38,6 +43,7 @@ final readonly class IncludeResolver
 {
     public function __construct(
         private RefRegistry $refs,
+        private ?ExpandGuard $guard = null,
     ) {}
 
     /**
@@ -47,6 +53,8 @@ final readonly class IncludeResolver
      *
      * @throws InvalidIncludeException a path this response has nothing for, or an expand asking
      *                                 for something it cannot give
+     * @throws ExpandRefusedException  an expand reaching a reference the ExpandGuard will not
+     *                                 expand for this request
      */
     public function body(ApiSuccessResponse $response, IncludeTree $include, IncludeTree $expand, bool $enumIds = false): array
     {
@@ -148,6 +156,8 @@ final readonly class IncludeResolver
     {
         /** @var array<class-string, array<string, array<string, mixed>>> $records by entity, then id */
         $records = [];
+        /** @var array<class-string, true> $allowed the entities the guard has let through, asked once each */
+        $allowed = [];
 
         while ([] !== $pending) {
             $level = $pending;
@@ -160,6 +170,12 @@ final readonly class IncludeResolver
             foreach ($level as $expanded) {
                 $normalizer = $this->normalizerFor($expanded->ref);
                 $entity = $normalizer::entityClass();
+                if (null !== $this->guard && !isset($allowed[$entity])) {
+                    if (!$this->guard->mayExpand($entity)) {
+                        throw new ExpandRefusedException($expanded->path);
+                    }
+                    $allowed[$entity] = true;
+                }
                 if (!isset($records[$entity][$expanded->ref->id])) {
                     $normalizers[$entity] = $normalizer;
                     $wanted[$entity][$expanded->ref->id] = true;
