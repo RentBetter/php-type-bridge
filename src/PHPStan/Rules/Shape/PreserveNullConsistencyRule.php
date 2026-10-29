@@ -6,20 +6,25 @@ namespace PTGS\TypeBridge\PHPStan\Rules\Shape;
 
 use PhpParser\Node;
 use PhpParser\Node\Stmt\Class_;
+use PhpParser\Node\Stmt\ClassLike;
+use PhpParser\Node\Stmt\Enum_;
 use PHPStan\Analyser\Scope;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
+use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Support\ClassNames;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use Throwable;
 
 /**
  * Enforces the TypeBridge `preserveNull` invariant on @phpstan-type shapes.
  *
- * For each nullable field declared in a @phpstan-type alias on a class:
+ * For each nullable field declared in a @phpstan-type alias on a class or an enum, under the name
+ * its shape is emitted as:
  *
  *   - If the field is listed in `preserveNull` config, its annotation MUST be `T|null`
  *     (will emit as `field: T | null`).
@@ -28,7 +33,7 @@ use Throwable;
  * The runtime emitter applies the same check; this rule surfaces drift at analysis time
  * before it can ship as a broken codegen.
  *
- * @implements Rule<Class_>
+ * @implements Rule<ClassLike>
  */
 final class PreserveNullConsistencyRule implements Rule
 {
@@ -48,11 +53,15 @@ final class PreserveNullConsistencyRule implements Rule
 
     public function getNodeType(): string
     {
-        return Class_::class;
+        return ClassLike::class;
     }
 
     public function processNode(Node $node, Scope $scope): array
     {
+        if (!$node instanceof Class_ && !$node instanceof Enum_) {
+            return [];
+        }
+
         $docComment = $node->getDocComment();
         if (null === $docComment) {
             return [];
@@ -81,7 +90,7 @@ final class PreserveNullConsistencyRule implements Rule
                 continue;
             }
 
-            $shapeName = $this->docHelper->emittedTypeName($alias, $ownerClass);
+            $shapeName = '_self' === $alias ? PhpDocTypeHelper::selfTypeName(ClassNames::short($ownerClass), $node instanceof Enum_, self::namesItsValues($node, $scope)) : $alias;
             foreach ($shape->fields as $field) {
                 $error = $this->checkField($field, $shapeName, $ownerClass, $startLine);
                 if (null !== $error) {
@@ -91,6 +100,23 @@ final class PreserveNullConsistencyRule implements Rule
         }
 
         return $errors;
+    }
+
+    /**
+     * Whether the declaration names its value union otherwise, with a {@see ValueOfName}: read off its
+     * attributes, as the source is analysed rather than loaded.
+     */
+    private static function namesItsValues(Class_|Enum_ $node, Scope $scope): bool
+    {
+        foreach ($node->attrGroups as $group) {
+            foreach ($group->attrs as $attribute) {
+                if (ValueOfName::class === $scope->resolveName($attribute->name)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private function checkField(ShapeField $field, string $shapeName, string $ownerClass, int $line): ?\PHPStan\Rules\IdentifierRuleError

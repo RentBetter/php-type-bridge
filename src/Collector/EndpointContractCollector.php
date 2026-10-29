@@ -89,6 +89,8 @@ final class EndpointContractCollector
      *        fails collection rather than shipping a path the application does not serve
      * @param array<string, string> $typeAliases the project-wide aliases, name => TypeScript type: a key
      *        typed with one that admits null takes null, as one its file declares does
+     * @param string $routingEnv the env the application is deployed in, where no route resolver says:
+     *        a tool whose #[Route]s are confined to another is served nowhere it is deployed
      */
     public function __construct(
         ?PhpFileClassLocator $classLocator = null,
@@ -104,11 +106,12 @@ final class EndpointContractCollector
         private readonly PhpDocShapeParser $shapeParser = new PhpDocShapeParser(),
         ?ClassFileTypes $files = null,
         private readonly array $typeAliases = [],
+        string $routingEnv = 'prod',
     ) {
         $this->files = ClassFileTypes::sharedBy($files, $docHelper, $domainGuesser, $classLocator);
         $this->domainGuesser = $this->files->domainGuesser;
         $this->docHelper = $this->files->docHelper;
-        $this->declaredRoutes = new DeclaredRoutes();
+        $this->declaredRoutes = new DeclaredRoutes($routePathResolver->env ?? $routingEnv);
         // Keyed as the router holds a requirement, anchors off, so a project keying one `^\\d+$` as
         // its attribute writes it finds the `\\d+` the router serves.
         $types = [];
@@ -443,15 +446,21 @@ final class EndpointContractCollector
     }
 
     /**
-     * The path an MCP tool is published with. With a route resolver configured it is the served
-     * path, and both ways the router can fail to supply one are errors rather than fallbacks: a
-     * routing file that will not load, or a method the loaded collection does not route. Either
-     * would otherwise publish the declared path as if it were served, and a tool pointing at a
-     * path the application answers 404 to is worse than no tool.
+     * The path an MCP tool is published with: the one served in the env the application is deployed
+     * in. With a route resolver configured it is the router's, and both ways it can fail to supply one
+     * are errors rather than fallbacks: a routing file that will not load, or a method the loaded
+     * collection does not route — a route confined to another env, or imported in another's section
+     * alone, included. Without one it is the route the attributes declare, which must be served in
+     * the env too. Either would otherwise publish a path as if it were served, and a tool pointing at
+     * a path the application answers 404 to is worse than no tool.
      */
     private function servedPath(string $className, string $methodName, ?Route $route, ?Route $served): string
     {
         if (null === $this->routePathResolver) {
+            if (null !== $route && !$this->declaredRoutes->serves($className, $methodName)) {
+                throw $this->notServed($className, $methodName, 'its #[Route]s confine it to another env:');
+            }
+
             return RoutePathResolver::clientPath($route?->getPath() ?? '');
         }
 
@@ -460,20 +469,21 @@ final class EndpointContractCollector
         }
 
         if (null === $served) {
-            $unread = [];
-            foreach ($this->routePathResolver->envLoadErrors() as $env => $error) {
-                $unread[] = \sprintf(' Read for %s, the routing configuration could not be: %s', $env, $error);
-            }
-
-            throw new RuntimeException(\sprintf(
-                'Endpoint "%s::%s" is exposed as an MCP tool but the routing configuration serves no route for it.%s',
-                $className,
-                $methodName,
-                implode('', $unread),
-            ));
+            throw $this->notServed($className, $methodName, 'the routing configuration');
         }
 
         return RoutePathResolver::clientPath($served->getPath());
+    }
+
+    private function notServed(string $className, string $methodName, string $why): RuntimeException
+    {
+        return new RuntimeException(\sprintf(
+            'Endpoint "%s::%s" is exposed as an MCP tool but %s serves no route for it in %s.',
+            $className,
+            $methodName,
+            $why,
+            $this->declaredRoutes->env,
+        ));
     }
 
     /**
@@ -767,7 +777,8 @@ final class EndpointContractCollector
      * Whether a null is asked of a project-wide alias read here ({@see self::configAliasAdmitsNull()})
      * is whether anything turns on it: in a body every key's, which may be sent null to clear it; in a
      * query only a key that can't be left out already — a query string sends a null by leaving the key
-     * out, and no item of a list sends one; in a path none.
+     * out, and no item of a list sends one; in a path none; and never beside an explicit null
+     * (`Alias|null`), which settles it.
      *
      * @param array<string, string> $classFiles
      * @param array<string, true>   $reading the aliases being read, by file and name: one that names
@@ -781,12 +792,13 @@ final class EndpointContractCollector
 
         return match (true) {
             $type instanceof NameRefType => null === $type->class ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked) : $type,
-            $type instanceof NullableType => new NullableType($read($type->inner), $type->optional),
-            $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member), $type->types)),
+            // An explicit null settles the type's own: what else it admits is not asked of it.
+            $type instanceof NullableType => new NullableType($read($type->inner, $type->optional && $nullAsked), $type->optional),
+            $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member, $nullAsked && !self::hasNull($type)), $type->types)),
             $type instanceof ListType => new ListType($read($type->inner, $nullAsked && !$inQuery)),
             $type instanceof MapType => new MapType($type->key, $read($type->value, $nullAsked && !$inQuery)),
             $type instanceof ShapeType => new ShapeType(array_map(
-                fn (ShapeField $key): ShapeField => new ShapeField($key->name, $read($key->type, $inQuery ? $nullAsked && !$key->mayBeLeftOut() : $nullAsked), $key->optional),
+                fn (ShapeField $key): ShapeField => new ShapeField($key->name, $read($key->type, $inQuery ? $nullAsked && !$key->mayBeLeftOut(inQuery: true) : $nullAsked), $key->optional),
                 $type->fields,
             ), $type->unsealed),
             $type instanceof IntersectionType => self::intersection($type, $read($type->base), $read($type->extra)),
@@ -849,6 +861,20 @@ final class EndpointContractCollector
             $name,
             $type,
         ));
+    }
+
+    /**
+     * Whether a union lists null among its members.
+     */
+    private static function hasNull(UnionType $union): bool
+    {
+        foreach ($union->types as $member) {
+            if ($member instanceof ScalarType && 'null' === $member->base()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

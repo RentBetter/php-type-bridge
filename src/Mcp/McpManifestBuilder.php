@@ -303,8 +303,9 @@ final class McpManifestBuilder
     }
 
     /**
-     * The schema with null among what it accepts: a `null` type beside its own (in `anyOf`, or as
-     * a type list), and in its `enum` when it lists its values, which would refuse null otherwise.
+     * The schema with null among what it accepts: a `null` type beside its own (as a type list, or
+     * in `anyOf` where it has no type of its own), and in its `enum` when it lists its values, which
+     * would refuse null otherwise. One that accepts null already is as it was.
      *
      * @param array<string, mixed> $schema
      *
@@ -312,8 +313,10 @@ final class McpManifestBuilder
      */
     private static function withNull(array $schema): array
     {
-        if (isset($schema['anyOf']) && \is_array($schema['anyOf'])) {
-            $schema['anyOf'][] = ['type' => 'null'];
+        if (!isset($schema['type']) && isset($schema['anyOf']) && \is_array($schema['anyOf'])) {
+            if (!\in_array(['type' => 'null'], $schema['anyOf'], true)) {
+                $schema['anyOf'][] = ['type' => 'null'];
+            }
 
             return $schema;
         }
@@ -321,7 +324,7 @@ final class McpManifestBuilder
         if (isset($schema['type']) && \is_string($schema['type'])) {
             $schema['type'] = [$schema['type'], 'null'];
         }
-        if (isset($schema['enum']) && \is_array($schema['enum'])) {
+        if (isset($schema['enum']) && \is_array($schema['enum']) && !\in_array(null, $schema['enum'], true)) {
             $schema['enum'][] = null;
         }
 
@@ -355,7 +358,15 @@ final class McpManifestBuilder
     private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null, bool $json = false, bool $makes = false): array
     {
         $schema = $this->valueSchema($field, $declared, $json, $makes);
-        $schema = [...$schema, ...$this->bounds(HeldConstraints::always($field->constraints), $schema['type']), ...$this->patternOf($field, $schema['type'])];
+        $bounds = $this->bounds(HeldConstraints::always($field->constraints), $schema['type']);
+        // A blank the server takes is submitted null, which a Length skips: its minimum holds the
+        // values that aren't blank.
+        if ('string' === $schema['type'] && ($bounds['minLength'] ?? 0) > 0 && !$this->refusesBlank($field)) {
+            $minimum = $bounds['minLength'];
+            unset($bounds['minLength']);
+            $bounds = ['anyOf' => [['maxLength' => 0], ['minLength' => $minimum]], ...$bounds];
+        }
+        $schema = [...$schema, ...$bounds, ...$this->patternOf($field, $schema['type'])];
 
         // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
         // is a compound form with a scalar the form lifts out before submit; the form shows only the
@@ -752,19 +763,20 @@ final class McpManifestBuilder
 
         // A blank value reaches the validator as null, trimmed or not, and the Regex lets it through.
         $blank = !$this->refusesBlank($field);
+        // One the server refuses the rule may match all the same (`^[A-Z]*$`): the pattern refuses it too.
+        $refused = !$blank && 1 === preg_match($regex->pattern, '') ? '(?!$)' : '';
 
         if ($field->trim) {
             // The rule as it reads the trimmed value. A padded value the server would trim is
             // refused — costing a caller nothing — rather than allowed with `\p{…}` padding, which
             // only Unicode-mode regex reads. Where the rule could match the padding itself (a space,
             // a control character, a negated class), a padded value it accepts may trim to one it
-            // doesn't, so there is no pattern. `\b` is a backspace only in a class: outside one it is
-            // a word boundary, which matches no character at all.
-            if (1 === preg_match('/ |\\\\[nrtf]|\[\^|\[(?:[^\]\\\\]|\\\\.)*\\\\b/', $inner)) {
+            // doesn't, so there is no pattern.
+            if (PortableRegex::matchesPadding($inner)) {
                 return null;
             }
 
-            return '^(?:' . $inner . ')' . ($blank ? '?' : '') . '$';
+            return '^' . $refused . '(?:' . $inner . ')' . ($blank ? '?' : '') . '$';
         }
 
         $newline = str_contains($flags, 'D') ? '' : '\n?';
@@ -772,7 +784,7 @@ final class McpManifestBuilder
             return '' === $newline ? '^(?:' . $inner . ')?$' : '^(?:(?:' . $inner . ')' . $newline . ')?$';
         }
 
-        return '^(?:' . $inner . ')' . $newline . '$';
+        return '^' . $refused . '(?:' . $inner . ')' . $newline . '$';
     }
 
     private function tighter(string $keyword, int|float $current, int|float $limit): int|float

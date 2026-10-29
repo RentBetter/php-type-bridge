@@ -754,8 +754,16 @@ final class PhpDocTypeHelper
             return $alias;
         }
 
-        $shortName = ClassNames::short($ownerClass);
+        return self::selfTypeName(ClassNames::short($ownerClass), enum_exists($ownerClass), null !== ValueOfName::of($ownerClass));
+    }
 
-        return enum_exists($ownerClass) ? ValueOfName::shapeName($ownerClass, $shortName, $shortName . 'Data') : $shortName;
+    /**
+     * The name a `_self` is collected under, by what declares it: a class's is the class; an enum's is
+     * `{Enum}Data`, beside the value union under the enum's own name, or the enum's own name where it
+     * names that union otherwise ({@see ValueOfName}). For a reader of the source that loads no class.
+     */
+    public static function selfTypeName(string $shortName, bool $enum, bool $valuesNamedOtherwise): string
+    {
+        return $enum && !$valuesNamedOtherwise ? $shortName . 'Data' : $shortName;
     }
 }

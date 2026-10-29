@@ -44,9 +44,10 @@ final readonly class CollectedFormField
      * @param mixed                    $entryBlankValue what a collection entry reaches validation as when it is
      *                                                 sent as null or blank, as `$blankValue` says of a field
      * @param bool                     $transformsValue whether the form transforms a submitted value before it is
-     *                                                 validated: a model transformer, or a view transformer but
-     *                                                 TextType's own (which only turns a null into ''). What a
-     *                                                 constraint then sees is not what was sent
+     *                                                 validated: a model transformer, a view transformer but
+     *                                                 TextType's own (which only turns a null into ''), or a
+     *                                                 listener rewriting it, its own or a form's holding it. What
+     *                                                 a constraint then sees is not what was sent
      */
     public function __construct(
         public string $name,

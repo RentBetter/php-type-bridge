@@ -179,6 +179,10 @@ final class ClassLevelRouteTest extends TestCase
         $tools = array_column((new McpManifestGenerator())->generate($app, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml', 'routingEnv' => 'dev'], $app))['tools'], null, 'name');
 
         self::assertSame('/api/debug/notes/{id}', $tools['WipeNote']['path'] ?? null);
+
+        // Not routed, its #[Route] is the path, served there.
+        $declared = array_column((new McpManifestGenerator())->generate($app, TypeBridgeConfig::fromArray(['routingEnv' => 'dev']))['tools'], null, 'name');
+        self::assertSame('/debug/notes/{id}', $declared['WipeNote']['path'] ?? null);
     }
 
     public function testAClassWhoseRoutesSymfonyRefusesIsNoRouteToGuess(): void

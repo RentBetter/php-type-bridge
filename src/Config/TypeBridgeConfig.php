@@ -63,6 +63,10 @@ final readonly class TypeBridgeConfig
      * @param string|null $projectDir the directory $routing resolves against. fromFile() sets it
      *   to the config file's own directory; fromArray() takes it as an argument, and refuses
      *   `routing` without one.
+     * @param string $routingEnv the env the application is deployed in, whose router serves its tools:
+     *   a route confined to another (`#[Route(env: 'dev')]`), or a section of the routing config
+     *   for one (`when@dev:`), is served there alone. `prod` unless the config says. Mirror
+     *   `parameters.typeBridge.routingEnv` in phpstan.neon.
      */
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),
@@ -79,6 +83,7 @@ final readonly class TypeBridgeConfig
         public IncludeConvention $includes = new IncludeConvention(),
         public ?string $routing = null,
         public ?string $projectDir = null,
+        public string $routingEnv = 'prod',
     ) {}
 
     /**
@@ -92,7 +97,7 @@ final readonly class TypeBridgeConfig
             return null;
         }
 
-        return new RoutePathResolver($this->projectDir, $this->routing);
+        return new RoutePathResolver($this->projectDir, $this->routing, $this->routingEnv);
     }
 
     /**
@@ -128,7 +133,7 @@ final readonly class TypeBridgeConfig
      */
     public static function fromArray(array $config, ?string $projectDir = null): self
     {
-        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'mcpParamDescriptionAttribute', 'mcpParamDescriptionProperty', 'typeAliases', 'includes', 'routing'];
+        $allowedKeys = ['typescript', 'preserveNull', 'output', 'requirementTypes', 'mcpScopeAttribute', 'mcpScopeProperty', 'mcpDescriptionAttribute', 'mcpDescriptionProperty', 'mcpParamDescriptionAttribute', 'mcpParamDescriptionProperty', 'typeAliases', 'includes', 'routing', 'routingEnv'];
         $unknownKeys = array_diff(array_keys($config), $allowedKeys);
         if ([] !== $unknownKeys) {
             $unknown = array_values($unknownKeys);
@@ -156,6 +161,10 @@ final readonly class TypeBridgeConfig
         $typeAliases = self::typeAliasesMap($config['typeAliases'] ?? []);
         $includes = IncludeConvention::fromArray(self::stringKeyedArray($config['includes'] ?? [], 'includes'));
         $routing = self::routingPath($config['routing'] ?? null, $projectDir);
+        $routingEnv = $config['routingEnv'] ?? 'prod';
+        if (!\is_string($routingEnv) || '' === $routingEnv) {
+            throw new RuntimeException('TypeBridge config key "routingEnv" must be the name of the env the application is deployed in (e.g. "prod").');
+        }
 
         return new self(
             typescript: $typescript,
@@ -172,6 +181,7 @@ final readonly class TypeBridgeConfig
             includes: $includes,
             routing: $routing,
             projectDir: $projectDir,
+            routingEnv: $routingEnv,
         );
     }
 

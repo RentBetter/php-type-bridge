@@ -174,12 +174,13 @@ final class McpManifestBuilderTest extends TestCase
         // A model that knows the limits sends a value inside them, rather than learning each from a
         // 422. Both places a constraint is written count, the form's option and the data class's
         // property; of two on one side, the tighter holds. A bound the schema can only misstate is
-        // left out: one read off another property, or a length counted in bytes.
+        // left out: one read off another property, or a length counted in bytes. A blank the server
+        // takes, which a Length skips, is taken too.
         $properties = $this->argumentTools()['RecordVerdict']['inputSchema']['properties'];
 
         self::assertSame(['type' => 'integer', 'minimum' => 1, 'maximum' => 5, 'exclusiveMaximum' => 4], $properties['retries']);
         self::assertSame(['type' => 'number', 'minimum' => 0.5], $properties['ratio']);
-        self::assertSame(['type' => 'string', 'maxLength' => 255, 'minLength' => 3], $properties['note']);
+        self::assertSame(['type' => 'string', 'anyOf' => [['maxLength' => 0], ['minLength' => 3]], 'maxLength' => 255], $properties['note']);
 
         $readings = $properties['readings'];
         self::assertSame(1, $readings['minItems']);
@@ -1369,21 +1370,26 @@ final class McpManifestBuilderTest extends TestCase
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
         $code = new CollectedFormField(name: 'code', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new Length(min: 3), new Regex('/^[A-Z]+$/D')]);
         $named = new CollectedFormField(name: 'named', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Length(min: 3)]);
+        $short = new CollectedFormField(name: 'short', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new Length(min: 0, max: 5)]);
 
-        $properties = $this->toolWithBody('PUT', [$code, $named], $this->shape('array{code?: string, named?: string}'))['inputSchema']['properties'];
+        $properties = $this->toolWithBody('PUT', [$code, $named, $short], $this->shape('array{code?: string, named?: string, short?: string}'))['inputSchema']['properties'];
         self::assertSame(['type' => 'string', 'anyOf' => [['maxLength' => 0], ['minLength' => 3]], 'pattern' => '^(?:[A-Z]+)?$'], $properties['code']);
         self::assertSame(['type' => 'string', 'minLength' => 3], $properties['named'], 'Its blank refused, a minimum plain');
+        self::assertSame(['type' => 'string', 'minLength' => 0, 'maxLength' => 5], $properties['short'], 'A minimum of none refuses no blank');
     }
 
     public function testANullTheUnionHasIsAllowedOnce(): void
     {
-        // `Status|null`, Status a union with null among its members: one null in the enum.
+        // `Status|null`, Status a union with null among its members: one null in the enum — and one
+        // among the alternatives of a union of types.
         $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: new ShapeType([
             new ShapeField('status', new NullableType(new UnionType([new LiteralType('open'), new LiteralType('closed'), new ScalarType('null')]), optional: false), optional: false),
+            new ShapeField('ref', new NullableType(new UnionType([new ScalarType('string'), new ScalarType('int'), new ScalarType('null')]), optional: false), optional: false),
         ]));
 
         $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
         self::assertSame(['enum' => ['open', 'closed', null]], $properties['status']);
+        self::assertSame(['anyOf' => [['type' => 'string'], ['type' => 'integer'], ['type' => 'null']]], $properties['ref']);
     }
 
     public function testAnEscapedBackslashIsNoControlEscape(): void
@@ -1403,10 +1409,12 @@ final class McpManifestBuilderTest extends TestCase
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
         $word = new CollectedFormField(name: 'word', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^\\bfoo\\b$/D')]);
         $class = new CollectedFormField(name: 'class', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^[a\\b]+$/D')]);
+        $after = new CollectedFormField(name: 'after', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^[A-Z]+\\b$/D')]);
 
-        $properties = $this->toolWithBody('POST', [$word, $class], $this->shape('array{word?: string, class?: string}'))['inputSchema']['properties'];
+        $properties = $this->toolWithBody('POST', [$word, $class, $after], $this->shape('array{word?: string, class?: string, after?: string}'))['inputSchema']['properties'];
         self::assertSame(['type' => 'string', 'pattern' => '^(?:\\bfoo\\b)$'], $properties['word']);
         self::assertSame(['type' => 'string'], $properties['class']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+\\b)$'], $properties['after'], 'A boundary after a class closes');
     }
 
     public function testAConstraintNestedInAnotherGroupBoundsNothing(): void

@@ -73,4 +73,25 @@ PHP);
         self::assertNotFalse($ping);
         self::assertStringContainsString("export const Ping: Endpoint<PingEndpointMap> = {\n  method: 'GET',\n  path: '/api/ping',\n};", $ping);
     }
+
+    /**
+     * Its first #[Route] is confined to `dev`: where the application is deployed in dev, that is the
+     * route it is described by; in prod, the second.
+     */
+    public function test_an_endpoint_is_described_by_its_route_in_the_configs_env(): void
+    {
+        $fixture = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        foreach (['dev' => "path: '/dev/notes/{code}'", 'prod' => "path: '/env/notes/{id}'"] as $env => $path) {
+            $workspace = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+            mkdir($workspace);
+            file_put_contents($workspace . '/type-bridge.php', "<?php\n\nreturn ['routingEnv' => '" . $env . "'];\n");
+
+            $tester = new CommandTester(new GenerateTypesCommand());
+            self::assertSame(0, $tester->execute(['source' => $fixture, 'output' => $workspace . '/out', '--config' => $workspace . '/type-bridge.php']));
+
+            $notes = file_get_contents($workspace . '/out/Notes/genTypes.ts');
+            self::assertNotFalse($notes);
+            self::assertMatchesRegularExpression('/export const ShowEnvNote\b[^;]*' . preg_quote($path, '/') . '/', $notes, $env);
+        }
+    }
 }

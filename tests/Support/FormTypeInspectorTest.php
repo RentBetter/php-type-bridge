@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\AliasListType;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\CodeBatchType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\YearlyTotalsType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\UppercasedCodeType;
@@ -195,6 +196,19 @@ final class FormTypeInspectorTest extends TestCase
 
         self::assertTrue($fields['code']->transformsValue);
         self::assertTrue($fields['label']->transformsValue);
+    }
+
+    public function test_a_listener_rewrites_the_fields_of_the_form_it_is_on_alone(): void
+    {
+        // Embedded or as each entry, UppercasedCodeType's listener rewrites its fields; a collection's
+        // resizing rewrites none of its entries'.
+        $fields = array_column((new FormTypeInspector())->inspect(CodeBatchType::class)['fields'], null, 'name');
+        $rewritten = static fn(array $children): array => array_map(static fn(CollectedFormField $child): bool => $child->transformsValue, array_column($children, null, 'name'));
+
+        self::assertSame(['code' => true, 'label' => true], $rewritten($fields['code']->children));
+        self::assertSame(['code' => true, 'label' => true], $rewritten($fields['codes']->entryChildren));
+        self::assertSame(['code' => false, 'label' => false], $rewritten($fields['plainCodes']->entryChildren));
+        self::assertSame(['code' => true, 'label' => true], $rewritten($fields['listedCodes']->entryChildren));
     }
 
     public function test_a_listener_that_rewrites_what_is_sent_transforms_it_too(): void

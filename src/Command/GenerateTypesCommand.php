@@ -90,6 +90,7 @@ final class GenerateTypesCommand extends Command
                     routePathResolver: $config->routePathResolver(),
                     files: $classFiles,
                     typeAliases: $config->typeAliases,
+                    routingEnv: $config->routingEnv,
                 ))->collect($sourceDir, $responseCollector->collectIndex($sourceDir)),
             );
         }

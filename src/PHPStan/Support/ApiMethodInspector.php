@@ -30,7 +30,7 @@ final class ApiMethodInspector
     ) {
         // Built here, not taken: PHPStan's container autowires every class-typed argument, and one
         // before 2.2 can't build a default written as `new`.
-        $this->declaredRoutes = new DeclaredRoutes();
+        $this->declaredRoutes = new DeclaredRoutes($routePathResolver->env ?? 'prod');
     }
 
     /**

@@ -15,6 +15,7 @@ use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
 use Symfony\Component\Form\Exception\TransformationFailedException;
 use Symfony\Component\Form\Extension\Core\CoreExtension;
+use Symfony\Component\Form\Extension\Core\EventListener\ResizeFormListener;
 use Symfony\Component\Form\Extension\Core\EventListener\TrimListener;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\CollectionType;
@@ -89,16 +90,18 @@ final class FormTypeInspector
 
         return [
             'dataClass' => $dataClass,
-            'fields' => $this->collectFields($builder),
+            'fields' => $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig())),
         ];
     }
 
     /**
      * @param FormBuilderInterface<mixed> $builder
+     * @param bool                        $rewritten whether a listener of the form or of one holding it may
+     *                                               rewrite what its fields are sent ({@see self::rewritesChildren()})
      *
      * @return list<CollectedFormField>
      */
-    private function collectFields(FormBuilderInterface $builder): array
+    private function collectFields(FormBuilderInterface $builder, bool $rewritten): array
     {
         $fields = [];
         $ownerClass = $builder->getFormConfig()->getDataClass();
@@ -133,8 +136,8 @@ final class FormTypeInspector
                 hasViewTransformers: [] !== $config->getViewTransformers(),
                 // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
                 // what is sent itself, and none of them is a field a request sends.
-                children: self::isChoice($config) ? [] : $this->collectFields($child),
-                entryChildren: null !== $entry && $entry->getCompound() ? $this->collectFields($entry) : [],
+                children: self::isChoice($config) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config)),
+                entryChildren: null !== $entry && $entry->getCompound() ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig())) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
@@ -142,7 +145,7 @@ final class FormTypeInspector
                 blankValue: $this->blankValue($config),
                 entryConstraints: $this->entryConstraints($entry, $constraints),
                 entryBlankValue: null === $entry ? null : $this->blankValue($entry->getFormConfig()),
-                transformsValue: self::transformsValue($config),
+                transformsValue: $rewritten || self::transformsValue($config),
             );
         }
 
@@ -224,6 +227,30 @@ final class FormTypeInspector
         foreach ([FormEvents::PRE_SUBMIT, FormEvents::SUBMIT] as $event) {
             foreach ($config->getEventDispatcher()->getListeners($event) as $listener) {
                 if (!\is_array($listener) || !$listener[0] instanceof TrimListener) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a listener of a compound form may rewrite what its fields are sent before they are
+     * validated: one that reads the form's submitted data before its fields do (PRE_SUBMIT) or its
+     * data once they have (SUBMIT) — which fields it touches it doesn't say. A collection's resizing,
+     * which adds and removes entries but rewrites none, and Symfony's trimming do not.
+     *
+     * A type extension the application registers is not loaded here, and what its listeners do is
+     * not seen.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private static function rewritesChildren(FormConfigInterface $config): bool
+    {
+        foreach ([FormEvents::PRE_SUBMIT, FormEvents::SUBMIT] as $event) {
+            foreach ($config->getEventDispatcher()->getListeners($event) as $listener) {
+                if (!\is_array($listener) || !($listener[0] instanceof TrimListener || $listener[0] instanceof ResizeFormListener)) {
                     return true;
                 }
             }

@@ -60,7 +60,7 @@ final class PreserveNullConsistencyRuleTest extends RuleTestCase
             ],
             [
                 'Field `hint` in shape `MissingPreserveNullNamedStatus` (on PTGS\\TypeBridge\\Tests\\PHPStan\\Fixtures\\Shape\\Negative\\MissingPreserveNullNamedStatus) has `T|null` annotation but is not listed in `typeBridge.preserveNull`. Change the annotation to `?T` (emits as `hint?: T`; field is omitted when null), or add `MissingPreserveNullNamedStatus.hint` to preserveNull if null is semantically meaningful for this field.',
-                18,
+                17,
             ],
         ]);
     }

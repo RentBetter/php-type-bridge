@@ -218,6 +218,42 @@ final class PortableRegex
     }
 
     /**
+     * Whether a fragment {@see self::readsTheSame()} accepts can match a character Symfony's trimming
+     * takes off a value: a space, a control character — `\n \r \t \f`, and a class's `\b`, a
+     * backspace — or whatever a negated class matches. Read token by token: `\\n` is a backslash and
+     * an `n`, and `\b` outside a class a word boundary, which matches no character at all.
+     */
+    public static function matchesPadding(string $fragment): bool
+    {
+        $length = \strlen($fragment);
+        $inClass = false;
+        for ($i = 0; $i < $length; ++$i) {
+            $char = $fragment[$i];
+            if ('\\' === $char) {
+                $escaped = $fragment[++$i] ?? '';
+                if ('' !== $escaped && (str_contains('nrtfvsDW', $escaped) || ($inClass && 'b' === $escaped))) {
+                    return true;
+                }
+
+                continue;
+            }
+            if (' ' === $char) {
+                return true;
+            }
+            if (!$inClass && '[' === $char) {
+                $inClass = true;
+                if ('^' === ($fragment[$i + 1] ?? '')) {
+                    return true;
+                }
+            } elseif ($inClass && ']' === $char) {
+                $inClass = false;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Where the class opening at `$open` closes, when every part of it reads the same in both
      * dialects: literals, escaped syntax characters and `\n \r \t \f \b \-`, the class escapes the
      * mode allows (`$classEscapes`), and ranges between two literals in order — and negated only

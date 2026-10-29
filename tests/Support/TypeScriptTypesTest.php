@@ -37,7 +37,7 @@ final class TypeScriptTypesTest extends TestCase
         yield 'a union in brackets' => ['(string | null)', true];
         yield 'a list of nulls, in brackets' => ['(string | null)[]', false];
         yield 'unknown inside a generic' => ['Array<unknown>', false];
-        yield 'a literal' => ["'draft' | 2 | -1 | true | `a${string}`", false];
+        yield 'a literal' => ['\'draft\' | 2 | -1 | true | `a${string}`', false];
         yield 'an object, a list, a tuple' => ['{ a: null } | null[] | [null] | readonly string[]', false];
         yield 'a function returning a union' => ['() => string | null', false];
         yield 'a constructor' => ['new () => null', false];

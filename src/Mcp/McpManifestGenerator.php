@@ -36,6 +36,7 @@ final class McpManifestGenerator
             routePathResolver: $config->routePathResolver(),
             files: $files,
             typeAliases: $config->typeAliases,
+            routingEnv: $config->routingEnv,
         );
         // A tool reads of a response only what it answers with, never what it sends.
         $contracts = $collector->collect($sourceDir, (new ResponseClassCollector(files: $files, typeAliases: $config->typeAliases))->statusIndex($sourceDir));

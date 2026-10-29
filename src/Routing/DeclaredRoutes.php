@@ -17,12 +17,16 @@ use Throwable;
  * prefix and an import's overrides. A method's served route says the rest
  * ({@see RoutePathResolver}); without one, this is what the code says it is served at.
  *
- * Each class is read once. One Symfony refuses to read — a path or requirement it rejects — has no
- * route, and why is kept for a caller that would rather say so ({@see self::loadError()}).
+ * Read in the env the application is deployed in, as its router is: a route confined to another
+ * (`#[Route(env: 'dev')]`) is not served ({@see self::serves()}), though it is still the route the
+ * code describes the method by ({@see self::routeFor()}).
+ *
+ * Each class is read once per env. One Symfony refuses to read — a path or requirement it rejects —
+ * has no route, and why is kept for a caller that would rather say so ({@see self::loadError()}).
  */
 final class DeclaredRoutes
 {
-    /** @var array<string, array<string, array<string, non-empty-list<Route>>>> by class and env ('' for none): its routes by controller */
+    /** @var array<string, array<string, array<string, non-empty-list<Route>>>> by class and env: its routes by controller */
     private array $routes = [];
 
     /** @var array<string, string> by class: why its routes could not be read */
@@ -32,21 +36,36 @@ final class DeclaredRoutes
     private static array $envs = [];
 
     /**
+     * @param string $env the env the application is deployed in, as {@see RoutePathResolver::$env}
+     */
+    public function __construct(
+        public readonly string $env = 'prod',
+    ) {}
+
+    /**
      * The route the class's attributes declare for the method — the one its first #[Route]
      * declares, as {@see RoutePathResolver::routeFor()} picks a served one — or null when they
-     * declare none, or the class can't be read. Read with no env first, as the router is; one
-     * confined to an env (`#[Route(env: 'prod')]`) is the route it is there.
+     * declare none, or the class can't be read. The one served in the env first; else the one in
+     * an env its routes are confined to, which is what the code says the method is, served or not.
      */
     public function routeFor(string $className, string $methodName): ?Route
     {
-        foreach ([null, ...self::envsOf($className, $methodName)] as $env) {
-            $route = RoutePathResolver::routeIn($this->routes[$className][$env ?? ''] ??= $this->read($className, $env), $className, $methodName);
+        foreach (array_unique([$this->env, ...self::envsOf($className, $methodName)]) as $env) {
+            $route = $this->routeIn($className, $methodName, $env);
             if (null !== $route) {
                 return $route;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Whether the class's attributes route the method in the env the application is deployed in.
+     */
+    public function serves(string $className, string $methodName): bool
+    {
+        return null !== $this->routeIn($className, $methodName, $this->env);
     }
 
     /**
@@ -89,10 +108,15 @@ final class DeclaredRoutes
         return $this->errors[$className] ?? null;
     }
 
+    private function routeIn(string $className, string $methodName, string $env): ?Route
+    {
+        return RoutePathResolver::routeIn($this->routes[$className][$env] ??= $this->read($className, $env), $className, $methodName);
+    }
+
     /**
      * @return array<string, non-empty-list<Route>>
      */
-    private function read(string $className, ?string $env): array
+    private function read(string $className, string $env): array
     {
         if (!class_exists($className) || new ReflectionClass($className)->isAbstract()) {
             return [];
