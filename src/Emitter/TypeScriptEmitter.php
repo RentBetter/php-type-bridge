@@ -16,11 +16,13 @@ use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ParsedTypes;
+use PTGS\TypeBridge\Parser\ScopedType;
 use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Sorting\AlphabeticalOrder;
 use PTGS\TypeBridge\Sorting\SortStrategy;
 use PTGS\TypeBridge\Support\DomainMapper;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use PTGS\TypeBridge\Support\RootSources;
 use ReflectionClass;
 use RuntimeException;
@@ -788,6 +790,13 @@ final class TypeScriptEmitter
     private function appendClassTypes(string $domain, ParsedType $type, array &$imports, ?string $aliasDomain = null, array $imported = []): void
     {
         $aliasDomain ??= $domain;
+        // Written in another file: what that file imports, and its module's aliases and classes.
+        if ($type instanceof ScopedType) {
+            $this->appendImportedTypes($domain, ImportedType::usedIn($type->imports, $type->inner), $imports);
+            $this->appendClassTypes($domain, $type->inner, $imports, $type->domain ?? $domain, array_fill_keys(array_map(static fn(ImportedType $import): string => $import->localAlias, $type->imports), true));
+
+            return;
+        }
         if ($type instanceof NameRefType) {
             if (isset($imported[$type->name]) || $this->symbols->isShared($type->name)) {
                 return;
@@ -818,7 +827,9 @@ final class TypeScriptEmitter
     {
         $maps = [];
         $registrations = [];
-        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses)));
+        // Every module written, one written only for an enum named from elsewhere included: its
+        // names collide as any other's.
+        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($this->enumsByDomain)));
 
         foreach ($allDomains as $domain) {
             $maps[$domain] = [];
@@ -929,7 +940,7 @@ final class TypeScriptEmitter
      */
     private function reflect(string $className): ?ReflectionClass
     {
-        if (!class_exists($className) && !interface_exists($className) && !trait_exists($className)) {
+        if (!PhpFileClassLocator::loads($className)) {
             return null;
         }
 

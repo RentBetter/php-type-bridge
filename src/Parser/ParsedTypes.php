@@ -12,7 +12,8 @@ final class ParsedTypes
     /**
      * The types a type is made of, one level down: a nullable's or a list's inner type, a map's key
      * and value — a nested shape or a value-of enum can sit on either side — a tuple's elements, a
-     * shape's key types, a union's members, an intersection's base and extra, a generic's arguments.
+     * shape's key types, a union's members, an intersection's base and extra, a generic's arguments,
+     * the type a scope holds.
      *
      * @return list<ParsedType>
      */
@@ -26,6 +27,7 @@ final class ParsedTypes
             $type instanceof UnionType => $type->types,
             $type instanceof IntersectionType => [$type->base, $type->extra],
             $type instanceof GenericType => $type->arguments,
+            $type instanceof ScopedType => [$type->inner],
             default => [],
         };
     }
@@ -44,6 +46,10 @@ final class ParsedTypes
             $type = array_pop($types);
             if ($type instanceof NameRefType && null === $type->class) {
                 $names[$type->name] = true;
+            }
+            // Written in another file: its names are that file's.
+            if ($type instanceof ScopedType) {
+                continue;
             }
             array_push($types, ...self::children($type));
         }

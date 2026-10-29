@@ -8,11 +8,11 @@ use PTGS\TypeBridge\Contract\ApiResponse;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedResponseProperty;
 use PTGS\TypeBridge\Model\ImportedType;
-use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
+use PTGS\TypeBridge\Parser\ScopedType;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
 use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainGuesser;
@@ -32,6 +32,9 @@ final class ResponseClassCollector
 
     /** @var array<string, array{imports: array<string, ImportedType>, unresolved: array<string, string>, classImports: array<string, string>, domain: string|null}|null> by source directory and class */
     private array $typeContexts = [];
+
+    /** @var array<string, array<string, ParsedType>> by source directory, response and base: what the base's template params are bound to */
+    private array $templateBindings = [];
 
     private readonly ClassFileTypes $files;
 
@@ -138,12 +141,10 @@ final class ResponseClassCollector
                 // Names are the file's; `self::` is the class, which for a trait is the one using it.
                 // A generic base's template params are what the response binds them to.
                 $templates = $declaringClass === $className ? [] : $this->templateBindings($reflection, $declaringClass, $srcDir, $classFiles);
-                $parsed = $this->docHelper->resolveImportedNames($type, $declared['imports'], $declaringClass, $declared['classImports'], array_keys($templates), selfClass: $property->getDeclaringClass()->getName());
-                if (null === $declared['domain']) {
-                    $parsed = $this->docHelper->namesAsClasses($parsed, \sprintf('%s is outside the source tree, in no module, so a name it writes can only be a class or a project-wide alias. %s', $declaringClass, $where), [...array_keys($this->typeAliases), ...array_keys($templates)]);
-                    $parsed = $this->docHelper->enumsAsWritten($parsed, $declaringClass, $declared['classImports'], $classFiles, $where);
-                }
-                $parsed = $this->docHelper->substituted($parsed, array_map(static fn (array $bound): ParsedType => $bound['type'], $templates));
+                $parsed = $this->docHelper->substituted(
+                    $this->readInFile($type, $declaringClass, $declared, $classFiles, array_keys($templates), $where, $property->getDeclaringClass()->getName()),
+                    $templates,
+                );
                 $properties[] = new CollectedResponseProperty(
                     name: $property->getName(),
                     rawType: $rawType,
@@ -152,7 +153,7 @@ final class ResponseClassCollector
                     // the wire when null (a side-load not asked for). `T|null` parses as a required
                     // nullable and stays a key that is always present.
                     optional: $parsed instanceof NullableType && $parsed->optional,
-                    imports: [...array_values($declared['imports']), ...array_merge(...array_values(array_map(static fn (array $bound): array => $bound['imports'], $templates)))],
+                    imports: array_values($declared['imports']),
                     writtenIn: $declaringClass === $className ? null : $declaringClass,
                     writtenInDomain: $declaringClass === $className ? null : $declared['domain'],
                 );
@@ -266,18 +267,51 @@ final class ResponseClassCollector
     }
 
     /**
+     * A type as the file it is written in means it: its names that file's, and a template param it
+     * names left for what binds it. A file outside the source tree is in no module, so each name it
+     * writes is spelt as the class it names — but a project-wide alias, or a template param — and a
+     * `value-of<…>` names the enum its file does.
+     *
+     * @param array{imports: array<string, ImportedType>, unresolved: array<string, string>, classImports: array<string, string>, domain: string|null} $context
+     * @param array<string, string> $classFiles
+     * @param list<string>          $templateNames
+     */
+    private function readInFile(ParsedType $type, string $class, array $context, array $classFiles, array $templateNames, string $where, ?string $selfClass = null): ParsedType
+    {
+        $parsed = $this->docHelper->resolveImportedNames($type, $context['imports'], $class, $context['classImports'], $templateNames, selfClass: $selfClass);
+        if (null === $context['domain']) {
+            $parsed = $this->docHelper->namesAsClasses($parsed, \sprintf('%s is outside the source tree, in no module, so a name it writes can only be a class or a project-wide alias. %s', $class, $where), [...array_keys($this->typeAliases), ...$templateNames]);
+            $parsed = $this->docHelper->enumsAsWritten($parsed, $class, $context['classImports'], $classFiles, $where);
+        }
+
+        return $parsed;
+    }
+
+    /**
      * What the template params of a base the response extends stand for, as the classes between them
      * bind them: each class's `@extends Parent<…>` binds its parent's params, in its own file and in
      * terms of its own params, which the class below it bound in turn. A param nothing binds is its
-     * bound (`@template L of string`), read where it is declared, or `mixed`. None for a trait, or a
-     * base with no params.
+     * default (`@template D = bool`), else its bound (`@template L of string`), read where it is
+     * declared, else `mixed`. None for a trait, or a base with no params. Worked out once for each
+     * response and base, however many properties the base declares.
      *
      * @param ReflectionClass<object> $response
      * @param array<string, string>   $classFiles
      *
-     * @return array<string, array{type: ParsedType, imports: list<ImportedType>}>
+     * @return array<string, ParsedType>
      */
     private function templateBindings(ReflectionClass $response, string $base, string $srcDir, array $classFiles): array
+    {
+        return $this->templateBindings[$srcDir . "\0" . $response->getName() . "\0" . $base] ??= $this->bindTemplates($response, $base, $srcDir, $classFiles);
+    }
+
+    /**
+     * @param ReflectionClass<object> $response
+     * @param array<string, string>   $classFiles
+     *
+     * @return array<string, ParsedType>
+     */
+    private function bindTemplates(ReflectionClass $response, string $base, string $srcDir, array $classFiles): array
     {
         $chain = [];
         for ($class = $response; false !== $class && $class->getName() !== $base; $class = $class->getParentClass()) {
@@ -296,10 +330,11 @@ final class ResponseClassCollector
             $args = $this->docHelper->extendsArgs((string) $class->getDocComment()) ?? [];
             $next = [];
             foreach ($this->docHelper->templateParams((string) $parent->getDocComment()) as $i => $param) {
+                $unbound = $param['default'] ?? $param['bound'];
                 $next[$param['name']] = match (true) {
                     isset($args[$i]) => $this->boundType($args[$i], $class->getName(), $bindings, $srcDir, $classFiles),
-                    null !== $param['bound'] => $this->boundType($param['bound'], $parent->getName(), [], $srcDir, $classFiles),
-                    default => ['type' => new ScalarType('mixed'), 'imports' => []],
+                    null !== $unbound => $this->boundType($unbound, $parent->getName(), [], $srcDir, $classFiles),
+                    default => new ScalarType('mixed'),
                 };
             }
             $bindings = $next;
@@ -309,16 +344,14 @@ final class ResponseClassCollector
     }
 
     /**
-     * A type a template param is bound to, read in the file that writes it — its names that file's,
-     * its own template params what they are bound to. An alias it names is carried under a name its
-     * file alone uses, so the base's file it is substituted into reads it as this one does.
+     * A type a template param is bound to, as the file that writes it means it — its own template
+     * params what they are bound to in turn — kept in that file's scope ({@see ScopedType}): put in
+     * the base's property, it is still read where it is written.
      *
-     * @param array<string, array{type: ParsedType, imports: list<ImportedType>}> $bindings the writing class's own params
-     * @param array<string, string>                                                $classFiles
-     *
-     * @return array{type: ParsedType, imports: list<ImportedType>}
+     * @param array<string, ParsedType> $bindings the writing class's own params
+     * @param array<string, string>     $classFiles
      */
-    private function boundType(string $written, string $class, array $bindings, string $srcDir, array $classFiles): array
+    private function boundType(string $written, string $class, array $bindings, string $srcDir, array $classFiles): ParsedType
     {
         $context = $this->typeContext($class, $classFiles[$class] ?? $this->fileOf($class), $srcDir, $classFiles);
         if (null === $context) {
@@ -331,25 +364,12 @@ final class ResponseClassCollector
         if (null !== $unresolved) {
             throw $unresolved;
         }
-        $parsed = $this->docHelper->resolveImportedNames($type, $context['imports'], $class, $context['classImports'], array_keys($bindings));
-        if (null === $context['domain']) {
-            $parsed = $this->docHelper->namesAsClasses($parsed, \sprintf('%s is outside the source tree, in no module, so a name it writes can only be a class or a project-wide alias. %s', $class, $where), [...array_keys($this->typeAliases), ...array_keys($bindings)]);
-            $parsed = $this->docHelper->enumsAsWritten($parsed, $class, $context['classImports'], $classFiles, $where);
-        }
 
-        $renamed = [];
-        $imports = [];
-        foreach (ImportedType::usedIn(array_values($context['imports']), $parsed) as $import) {
-            $name = $import->localAlias . '@' . $class;
-            $renamed[$import->localAlias] = new NameRefType($name);
-            $imports[] = new ImportedType($name, $import->targetClass, $import->targetTypeName, $import->targetDomain, $import->sourceAlias);
-        }
-        $parsed = $this->docHelper->substituted($parsed, $renamed);
-
-        return [
-            'type' => $this->docHelper->substituted($parsed, array_map(static fn (array $bound): ParsedType => $bound['type'], $bindings)),
-            'imports' => [...$imports, ...array_merge(...array_values(array_map(static fn (array $bound): array => $bound['imports'], $bindings)))],
-        ];
+        return new ScopedType(
+            $this->docHelper->substituted($this->readInFile($type, $class, $context, $classFiles, array_keys($bindings), $where), $bindings),
+            array_values($context['imports']),
+            $context['domain'],
+        );
     }
 
     /**

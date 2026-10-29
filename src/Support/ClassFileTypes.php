@@ -255,17 +255,28 @@ final class ClassFileTypes
     public function scope(string $class, string $file, string $srcDir, array $classFiles): array
     {
         $read = $this->imports($class, $file, $srcDir, $classFiles);
-        $definitions = $this->definitions($file);
+        $definitions = $this->emittedDefinitions($class, $file);
         $unresolved = [...$read['unresolved'], ...$read['phpStanOnly']];
-        $only = $this->phpStanOnly($class);
-        foreach (array_keys($definitions) as $alias) {
-            if (null !== $only && $only->covers($alias)) {
-                $unresolved[$alias] = self::phpStanOnlyReason($alias, $class);
-                unset($definitions[$alias]);
-            }
+        foreach (array_keys(array_diff_key($this->definitions($file), $definitions)) as $alias) {
+            $unresolved[$alias] = self::phpStanOnlyReason($alias, $class);
         }
 
         return ['imports' => array_diff_key($read['imports'], $read['phpStanOnly']), 'definitions' => $definitions, 'unresolved' => $unresolved];
+    }
+
+    /**
+     * The aliases the class declares that are emitted: all but those it keeps for PHPStan. Read off
+     * the file and the class alone, with no import followed.
+     *
+     * @return array<string, string>
+     */
+    public function emittedDefinitions(string $class, string $file): array
+    {
+        $only = $this->phpStanOnly($class);
+
+        return null === $only
+            ? $this->definitions($file)
+            : array_filter($this->definitions($file), static fn (string $alias): bool => !$only->covers($alias), \ARRAY_FILTER_USE_KEY);
     }
 
     /**

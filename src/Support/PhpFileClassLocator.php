@@ -77,6 +77,16 @@ final class PhpFileClassLocator
      */
     public function isLoadable(string $className): bool
     {
+        return self::loads($className);
+    }
+
+    /**
+     * The one loadability rule ({@see self::isLoadable()}), for a caller with no locator to ask.
+     *
+     * @phpstan-assert-if-true class-string $className
+     */
+    public static function loads(string $className): bool
+    {
         try {
             return class_exists($className) || interface_exists($className) || trait_exists($className);
         } catch (\Error) {

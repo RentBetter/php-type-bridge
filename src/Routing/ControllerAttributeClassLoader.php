@@ -6,6 +6,8 @@ namespace PTGS\TypeBridge\Routing;
 
 use ReflectionClass;
 use ReflectionMethod;
+use ReflectionProperty;
+use Symfony\Component\Routing\Attribute\Route as RouteAttribute;
 use Symfony\Component\Routing\Loader\AttributeClassLoader;
 use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouteCollection;
@@ -28,6 +30,12 @@ final class ControllerAttributeClassLoader extends AttributeClassLoader
      * the order they are written.
      */
     public const string ATTRIBUTE = 'typebridge_route_attribute';
+
+    /**
+     * The option holding the HTTP methods a route's own #[Route] names, uppercased: Symfony merges a
+     * class-level #[Route]'s in ahead of them, and these say which the method is for.
+     */
+    public const string METHODS = 'typebridge_route_methods';
 
     /** @var array<string, int> by `Class::method`, the last of its #[Route]s read in this load */
     private array $read = [];
@@ -67,5 +75,42 @@ final class ControllerAttributeClassLoader extends AttributeClassLoader
             '__invoke' === $method->getName() ? $class->getName() : $class->getName() . '::' . $method->getName(),
         );
         $route->setOption(self::ATTRIBUTE, $this->reading);
+        $route->setOption(self::METHODS, self::methodsOf($attr));
+    }
+
+    /**
+     * The HTTP methods a #[Route] names itself, uppercased.
+     *
+     * @return list<string>
+     */
+    public static function methodsOf(object $attr): array
+    {
+        $methods = self::setting($attr, 'methods');
+
+        return array_values(array_map(strtoupper(...), array_filter(\is_array($methods) ? $methods : [], \is_string(...))));
+    }
+
+    /**
+     * The envs a #[Route] is confined to, if any: Symfony loads it only in one of them.
+     *
+     * @return list<string>
+     */
+    public static function envsOf(object $attr): array
+    {
+        // `envs` from Symfony 7.4, a single `env` before it.
+        $envs = property_exists(RouteAttribute::class, 'envs') ? self::setting($attr, 'envs') : self::setting($attr, 'env');
+
+        return array_values(array_filter(\is_array($envs) ? $envs : [$envs], \is_string(...)));
+    }
+
+    /**
+     * A #[Route]'s own setting, whichever Symfony is installed: a public property from 7.4, a private
+     * one behind a getter before it.
+     */
+    private static function setting(object $attr, string $name): mixed
+    {
+        return $attr instanceof RouteAttribute && property_exists(RouteAttribute::class, $name)
+            ? (new ReflectionProperty(RouteAttribute::class, $name))->getValue($attr)
+            : null;
     }
 }

@@ -36,8 +36,8 @@ use Throwable;
  */
 final class RoutePathResolver
 {
-    /** @var array<string, non-empty-list<Route>>|null controller `Class::method` => the routes Symfony serves it at, in the order it loads them */
-    private ?array $routesByController = null;
+    /** @var array<string, array<string, non-empty-list<Route>>> by env ('' for none): controller `Class::method` => the routes Symfony serves it at, in the order it loads them */
+    private array $routesByController = [];
 
     private ?string $loadError = null;
 
@@ -72,7 +72,16 @@ final class RoutePathResolver
      */
     public function routeFor(string $className, string $methodName): ?Route
     {
-        return self::routeIn($this->routes(), $className, $methodName);
+        // Loaded with no env, Symfony leaves out a route confined to one: that is the route it is
+        // there ({@see DeclaredRoutes::envsOf()}).
+        foreach ([null, ...DeclaredRoutes::envsOf($className, $methodName)] as $env) {
+            $route = self::routeIn($this->routes($env), $className, $methodName);
+            if (null !== $route) {
+                return $route;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -161,25 +170,25 @@ final class RoutePathResolver
     /**
      * @return array<string, non-empty-list<Route>>
      */
-    private function routes(): array
+    private function routes(?string $env = null): array
     {
-        if (null !== $this->routesByController) {
-            return $this->routesByController;
+        if (isset($this->routesByController[$env ?? ''])) {
+            return $this->routesByController[$env ?? ''];
         }
 
         if (null === $this->routingFile) {
-            return $this->routesByController = [];
+            return $this->routesByController[$env ?? ''] = [];
         }
 
         try {
-            $collection = $this->load();
+            $collection = $this->load($env);
         } catch (Throwable $exception) {
-            $this->loadError = $exception->getMessage();
+            $this->loadError ??= $exception->getMessage();
 
-            return $this->routesByController = [];
+            return $this->routesByController[$env ?? ''] = [];
         }
 
-        return $this->routesByController = self::byController($collection);
+        return $this->routesByController[$env ?? ''] = self::byController($collection);
     }
 
     /**
@@ -201,7 +210,7 @@ final class RoutePathResolver
         return $routes;
     }
 
-    private function load(): RouteCollection
+    private function load(?string $env): RouteCollection
     {
         $entrypoint = $this->projectDirectory . \DIRECTORY_SEPARATOR . $this->routingFile;
         if (!is_file($entrypoint)) {
@@ -209,10 +218,10 @@ final class RoutePathResolver
         }
 
         $locator = new FileLocator([$this->projectDirectory, \dirname($entrypoint)]);
-        $attributeClassLoader = new ControllerAttributeClassLoader();
+        $attributeClassLoader = new ControllerAttributeClassLoader($env);
 
         $resolver = new LoaderResolver([
-            new YamlFileLoader($locator),
+            new YamlFileLoader($locator, $env),
             new Psr4DirectoryLoader($locator),
             // The class loader must precede the directory loader. Psr4DirectoryLoader resolves a
             // directory to class names and re-imports each one, and AttributeDirectoryLoader
@@ -223,8 +232,8 @@ final class RoutePathResolver
             $attributeClassLoader,
             new AttributeDirectoryLoader($locator, $attributeClassLoader),
             new AttributeFileLoader($locator, $attributeClassLoader),
-            new GlobFileLoader($locator),
-            new DirectoryLoader($locator),
+            new GlobFileLoader($locator, $env),
+            new DirectoryLoader($locator, $env),
         ]);
 
         $collection = (new DelegatingLoader($resolver))->load($entrypoint);

@@ -38,7 +38,7 @@ final readonly class PhpStanOnly
      */
     public static function of(string $class): ?self
     {
-        if (!(new PhpFileClassLocator())->isLoadable($class)) {
+        if (!PhpFileClassLocator::loads($class)) {
             return null;
         }
 

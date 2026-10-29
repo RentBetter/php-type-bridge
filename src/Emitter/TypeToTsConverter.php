@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Emitter;
 
 use PTGS\TypeBridge\Config\IncludeConvention;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
@@ -17,10 +18,12 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
+use PTGS\TypeBridge\Parser\ScopedType;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Parser\ValueOfType;
+use PTGS\TypeBridge\Support\TypeScriptTypes;
 use RuntimeException;
 
 /**
@@ -177,6 +180,16 @@ final readonly class TypeToTsConverter
             return self::localName($ids->targetDomain, $ids->canonicalName, $scope);
         }
 
+        // Written in another file: read with that file's imports, its bare names that module's.
+        if ($type instanceof ScopedType) {
+            $symbols = [];
+            foreach (ImportedType::usedIn($type->imports, $type->inner) as $import) {
+                $symbols[$import->localAlias] = self::localName($import->targetDomain, $this->symbols->resolve($import->targetDomain, $import->targetTypeName), $scope);
+            }
+
+            return $this->convert($type->inner, new ConversionScope($scope->domain, $symbols, $scope->foreignAliases, null === $type->domain || $type->domain === $scope->domain ? null : $type->domain));
+        }
+
         if ($type instanceof NameRefType) {
             if (isset($scope->importedSymbols[$type->name])) {
                 return $scope->importedSymbols[$type->name];
@@ -268,13 +281,10 @@ final readonly class TypeToTsConverter
      */
     private function listOf(ParsedType $inner, ConversionScope $scope): string
     {
+        // Read off what it converts to: a union a scalar, a map or another file's type makes too.
         $converted = $this->convert($inner, $scope);
-        $compound = $inner instanceof UnionType
-            || $inner instanceof IntersectionType
-            || ($inner instanceof NullableType && !$inner->optional)
-            || ($inner instanceof ScalarType && \in_array($inner->base(), ['scalar', 'array-key'], true));
 
-        return $compound ? '(' . $converted . ')[]' : $converted . '[]';
+        return TypeScriptTypes::needsBrackets($converted) ? '(' . $converted . ')[]' : $converted . '[]';
     }
 
     public function enumName(string $enumClass): string

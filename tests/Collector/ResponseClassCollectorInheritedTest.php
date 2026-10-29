@@ -125,7 +125,10 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
         self::assertStringContainsString("export interface ListModelNotesResponse {\n  items: Note[];\n  first: Note | null;\n", $notes);
         self::assertStringContainsString("export interface ListSummariesResponse {\n  items: NoteSummary[];\n  first: NoteSummary | null;\n", $notes);
-        self::assertStringNotContainsString('CommonNote', $notes);
+        self::assertStringNotContainsString('CommonNote', $notes, "Neither Common's Note, nor the NoteView the base's file imports for none of its properties");
+        // A type the binding's file imports from another module is imported from there.
+        self::assertStringContainsString("export interface ListTaggedNotesResponse {\n  items: Tag[];\n", $notes);
+        self::assertMatchesRegularExpression('/^import type \\{[^}]*\\bTag\\b[^}]*\\} from \'[^\']*Common[^\']*\';$/m', $notes);
     }
 
     public function test_a_template_param_is_read_as_phpstan_ranks_its_spellings(): void

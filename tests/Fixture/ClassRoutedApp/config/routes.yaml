@@ -4,3 +4,11 @@ notes_controllers:
         namespace: PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes
     type: attribute
     prefix: '/api'
+
+when@prod:
+    live_notes:
+        resource:
+            path: ../LiveNotes/
+            namespace: PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\LiveNotes
+        type: attribute
+        prefix: '/api/live'

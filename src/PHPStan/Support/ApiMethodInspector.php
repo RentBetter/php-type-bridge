@@ -9,7 +9,9 @@ use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Routing\DeclaredRoutes;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use ReflectionAttribute;
+use ReflectionClass;
 use ReflectionMethod;
+use Symfony\Component\Routing\Attribute\Route as RouteAttribute;
 
 final class ApiMethodInspector
 {
@@ -46,7 +48,11 @@ final class ApiMethodInspector
         // class's attributes declare — a class-level #[Route]'s path and methods merged into its own,
         // an invokable class's its __invoke's. One Symfony's loader reads none of — another
         // framework's attribute, say — is read off the method's attributes as written.
-        $route = $this->routePathResolver?->routeFor($className, $methodName) ?? $this->declaredRoutes->routeFor($className, $methodName);
+        // Symfony's loader is asked only of a method a #[Route] routes — its own, or for __invoke its
+        // class's: the rules inspect every method of every class.
+        $routed = [] !== $method->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF)
+            || ('__invoke' === $methodName && [] !== new ReflectionClass($className)->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF));
+        $route = $this->routePathResolver?->routeFor($className, $methodName) ?? ($routed ? $this->declaredRoutes->routeFor($className, $methodName) : null);
         [$path, $httpMethods] = null !== $route ? [RoutePathResolver::clientPath($route->getPath()), array_values($route->getMethods())] : $this->writtenRoute($method);
 
         $declaredResponses = [];

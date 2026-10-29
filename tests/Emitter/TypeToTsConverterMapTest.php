@@ -59,6 +59,12 @@ final class TypeToTsConverterMapTest extends TestCase
         self::assertSame('Record<string, string>[]', $this->convert('list<array<string, string>>'));
     }
 
+    public function test_a_list_of_maps_keyed_by_array_key_brackets_each(): void
+    {
+        // Such a map is an object or a list, a union: its list is of the union, not of its last member.
+        self::assertSame('(Record<string, unknown> | unknown[])[]', $this->convert('list<array<array-key, mixed>>'));
+    }
+
     private function convert(string $phpDoc): string
     {
         $converter = new TypeToTsConverter(

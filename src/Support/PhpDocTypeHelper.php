@@ -595,11 +595,12 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * The template params a class's docblock declares, in order — each `@template`, or its
-     * `@phpstan-`, `-covariant` and `-contravariant` spellings, once — with its bound (`of …`) as
+     * The template params a class's docblock declares, in the order first written, as PHPStan reads
+     * them: each name by its highest-ranked spelling — `@phpstan-` over `@psalm-` over `@phan-` over
+     * plain, `-covariant` and `-contravariant` alike — with its bound (`of …`) and default (`= …`) as
      * written.
      *
-     * @return list<array{name: string, bound: string|null}>
+     * @return list<array{name: string, bound: string|null, default: string|null}>
      */
     public function templateParams(string $docComment): array
     {
@@ -607,20 +608,34 @@ final class PhpDocTypeHelper
             return [];
         }
 
-        $params = [];
+        $ranks = ['' => 0, 'phan' => 1, 'psalm' => 2, 'phpstan' => 3];
+        $chosen = [];
         foreach ($this->parse($docComment)->getTags() as $tag) {
-            if ($tag->value instanceof TemplateTagValueNode && 1 === preg_match('/^@(phpstan-)?template(-covariant|-contravariant)?$/', $tag->name)) {
-                $params[$tag->value->name] ??= ['name' => $tag->value->name, 'bound' => null === $tag->value->bound ? null : (string) $tag->value->bound];
+            if (!$tag->value instanceof TemplateTagValueNode || 1 !== preg_match('/^@(?:(phan|psalm|phpstan)-)?template(?:-covariant|-contravariant)?$/', $tag->name, $spelling)) {
+                continue;
+            }
+            $rank = $ranks[$spelling[1] ?? ''];
+            if (!isset($chosen[$tag->value->name]) || $rank > $chosen[$tag->value->name]['rank']) {
+                $chosen[$tag->value->name] = ['rank' => $rank, 'value' => $tag->value];
             }
         }
 
-        return array_values($params);
+        $params = [];
+        foreach ($chosen as $name => ['value' => $value]) {
+            $params[] = [
+                'name' => $name,
+                'bound' => null === $value->bound ? null : (string) $value->bound,
+                'default' => null === $value->default ? null : (string) $value->default,
+            ];
+        }
+
+        return $params;
     }
 
     /**
-     * The types a class's docblock binds its parent's template params to, as written —
-     * `@extends Parent<A, B>`, or its `@phpstan-` or `@template-` spelling, PHPStan's own first — or
-     * null where it binds none.
+     * The types a class's docblock binds its parent's template params to, as written, PHPStan's own
+     * spelling first — `@phpstan-extends`, then `@template-extends`, `@phan-inherits`,
+     * `@phan-extends`, `@extends` — or null where it binds none.
      *
      * @return list<string>|null
      */
@@ -631,7 +646,7 @@ final class PhpDocTypeHelper
         }
 
         $node = $this->parse($docComment);
-        foreach (['@phpstan-extends', '@template-extends', '@extends'] as $tagName) {
+        foreach (['@phpstan-extends', '@template-extends', '@phan-inherits', '@phan-extends', '@extends'] as $tagName) {
             foreach ($node->getExtendsTagValues($tagName) as $extends) {
                 return array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $extends->type->genericTypes));
             }

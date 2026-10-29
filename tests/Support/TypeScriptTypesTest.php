@@ -65,6 +65,28 @@ final class TypeScriptTypesTest extends TestCase
         self::assertSame($admits, TypeScriptTypes::admitsNull($type));
     }
 
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function operands(): iterable
+    {
+        yield 'a name' => ['Note', false];
+        yield 'a generic' => ['Record<string, A | B>', false];
+        yield 'an object' => ['{ a: A | B }', false];
+        yield 'a union' => ['A | B', true];
+        yield 'an intersection' => ['A & { b: B }', true];
+        yield 'a function' => ['() => void', true];
+        yield 'a conditional' => ['A extends B ? C : D', true];
+        yield 'a key of a type' => ['keyof Note', true];
+        yield 'a bracketed union' => ['(A | B)', false];
+    }
+
+    #[DataProvider('operands')]
+    public function testItSaysWhichTypesNeedBracketsToBeAnOperand(string $type, bool $needs): void
+    {
+        self::assertSame($needs, TypeScriptTypes::needsBrackets($type));
+    }
+
     public function testAnotherOfTheConfigsAliasesIsReadAsItIsDeclared(): void
     {
         $aliases = ['MaybeId' => 'Id | null', 'Id' => 'string', 'Loop' => 'Loop | string', 'Opaque' => 'Nullable<string>'];

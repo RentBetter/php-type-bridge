@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Routing;
 
+use ReflectionAttribute;
 use ReflectionClass;
+use Symfony\Component\Routing\Attribute\Route as RouteAttribute;
 use Symfony\Component\Routing\Route;
 use Throwable;
 
@@ -20,7 +22,7 @@ use Throwable;
  */
 final class DeclaredRoutes
 {
-    /** @var array<string, array<string, non-empty-list<Route>>> by class: its routes by controller */
+    /** @var array<string, array<string, array<string, non-empty-list<Route>>>> by class and env ('' for none): its routes by controller */
     private array $routes = [];
 
     /** @var array<string, string> by class: why its routes could not be read */
@@ -29,11 +31,42 @@ final class DeclaredRoutes
     /**
      * The route the class's attributes declare for the method — the one its first #[Route]
      * declares, as {@see RoutePathResolver::routeFor()} picks a served one — or null when they
-     * declare none, or the class can't be read.
+     * declare none, or the class can't be read. Read with no env first, as the router is; one
+     * confined to an env (`#[Route(env: 'prod')]`) is the route it is there.
      */
     public function routeFor(string $className, string $methodName): ?Route
     {
-        return RoutePathResolver::routeIn($this->routes[$className] ??= $this->read($className), $className, $methodName);
+        foreach ([null, ...self::envsOf($className, $methodName)] as $env) {
+            $route = RoutePathResolver::routeIn($this->routes[$className][$env ?? ''] ??= $this->read($className, $env), $className, $methodName);
+            if (null !== $route) {
+                return $route;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The envs a method's routes are confined to, in the order written: its own #[Route]s', and its
+     * class's, which confine every method. Symfony loads such a route only in its env.
+     *
+     * @return list<string>
+     */
+    public static function envsOf(string $className, string $methodName): array
+    {
+        if (!class_exists($className) || !method_exists($className, $methodName)) {
+            return [];
+        }
+
+        $class = new ReflectionClass($className);
+        $envs = [];
+        foreach ([...$class->getMethod($methodName)->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF), ...$class->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF)] as $attribute) {
+            foreach (ControllerAttributeClassLoader::envsOf($attribute->newInstance()) as $env) {
+                $envs[$env] = $env;
+            }
+        }
+
+        return array_values($envs);
     }
 
     /**
@@ -48,16 +81,16 @@ final class DeclaredRoutes
     /**
      * @return array<string, non-empty-list<Route>>
      */
-    private function read(string $className): array
+    private function read(string $className, ?string $env): array
     {
         if (!class_exists($className) || new ReflectionClass($className)->isAbstract()) {
             return [];
         }
 
         try {
-            return RoutePathResolver::byController((new ControllerAttributeClassLoader())->load($className));
+            return RoutePathResolver::byController((new ControllerAttributeClassLoader($env))->load($className));
         } catch (Throwable $exception) {
-            $this->errors[$className] = $exception->getMessage();
+            $this->errors[$className] ??= $exception->getMessage();
 
             return [];
         }

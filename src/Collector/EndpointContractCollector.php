@@ -36,11 +36,9 @@ use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use PTGS\TypeBridge\Support\TypeScriptTypes;
-use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
-use Symfony\Component\Routing\Attribute\Route as RouteAttribute;
 use Symfony\Component\Routing\Route;
 use Throwable;
 
@@ -179,7 +177,7 @@ final class EndpointContractCollector
                     }
                     $seenNames[$endpointName] = $claimant;
                     $route = $this->routeOf($className, $method->getName());
-                    $httpMethod = self::httpMethodOf($method, $route);
+                    $httpMethod = self::httpMethodOf($route);
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
                         name: $endpointName,
@@ -432,17 +430,17 @@ final class EndpointContractCollector
 
     /**
      * The HTTP method an endpoint is called with: of those its route serves, the first its own
-     * #[Route] names — Symfony merges a class-level #[Route]'s methods in ahead of the method's, and
-     * an import's replace both — else the route's first; GET where it names none.
+     * #[Route] names ({@see ControllerAttributeClassLoader::METHODS}) — Symfony merges a class-level
+     * #[Route]'s methods in ahead of the method's, and an import's replace both — else the route's
+     * first; GET where it names none.
      */
-    private static function httpMethodOf(ReflectionMethod $method, ?Route $route): string
+    private static function httpMethodOf(?Route $route): string
     {
         $served = array_values($route?->getMethods() ?? []);
-        $declaredBy = $route?->getOption(ControllerAttributeClassLoader::ATTRIBUTE);
-        $attribute = \is_int($declaredBy) ? $method->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF)[$declaredBy] ?? null : null;
-        foreach (null === $attribute ? [] : $attribute->newInstance()->methods as $own) {
-            if (\in_array(strtoupper($own), $served, true)) {
-                return strtoupper($own);
+        $own = $route?->getOption(ControllerAttributeClassLoader::METHODS);
+        foreach (\is_array($own) ? $own : [] as $method) {
+            if (\in_array($method, $served, true)) {
+                return $method;
             }
         }
 

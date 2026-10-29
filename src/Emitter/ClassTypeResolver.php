@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Emitter;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Model\ImportedType;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use PTGS\TypeBridge\Support\RootSources;
 use ReflectionClass;
 use RuntimeException;
@@ -63,7 +64,7 @@ final class ClassTypeResolver
 
     private function lookUp(string $class): EmitImport
     {
-        if (!class_exists($class) && !interface_exists($class) && !enum_exists($class)) {
+        if (!PhpFileClassLocator::loads($class)) {
             throw new RuntimeException(\sprintf('A shape names "%s" as a type, and there is no such class.', $class));
         }
 

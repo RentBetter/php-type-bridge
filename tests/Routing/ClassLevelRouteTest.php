@@ -85,6 +85,8 @@ final class ClassLevelRouteTest extends TestCase
         self::assertSame(['id'], $tools['DeleteEnvNote']['inputSchema']['required'] ?? null);
         self::assertSame('PUT', $tools['ProdLabel']['method'] ?? null);
         self::assertSame($prefix . '/prod-labels/{labelId}', $tools['ProdLabel']['path'] ?? null);
+        // The routing config is read in that env too: its `when@prod` imports this one, under /api/live.
+        self::assertSame(('' === $prefix ? '' : '/api/live') . '/notes/{id}', $tools['ShowLiveNote']['path'] ?? null);
     }
 
     #[DataProvider('configs')]

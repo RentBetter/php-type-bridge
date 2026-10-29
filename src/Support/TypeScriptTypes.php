@@ -57,6 +57,18 @@ final class TypeScriptTypes
     }
 
     /**
+     * Whether the type needs brackets to be an operand — the element of a list, `(A | B)[]`: a union,
+     * an intersection, a function or a conditional at its top level, or a type an operator leads
+     * (`keyof T[]` is `keyof (T[])`).
+     */
+    public static function needsBrackets(string $type): bool
+    {
+        $type = trim($type);
+
+        return 1 === preg_match('/[|&?]|=>/', self::topLevel($type)) || 1 === preg_match('/^(keyof|typeof|readonly|unique|new|infer)\b/', $type);
+    }
+
+    /**
      * @param list<string>          $parts
      * @param array<string, string> $aliases
      * @param array<string, true>   $reading

@@ -48,23 +48,21 @@ final class PhpDocTypeCollector
                 continue;
             }
 
-            // A class may declare what it serialises to by importing a type as its `_self`
-            // rather than writing the shape itself; it then has nothing of its own to emit.
-            $importsSelf = !isset($this->files->definitions($file)['_self']) && $this->files->importsSelf($file);
-            if ([] === $this->files->definitions($file) && !$importsSelf) {
+            // An alias for PHPStan alone is not emitted, and an emitted one typed with it fails. A class
+            // may declare what it serialises to by importing a type as its `_self` rather than writing
+            // the shape itself; it then has nothing of its own to emit. One with neither emits nothing,
+            // and its imports are not followed.
+            $definitions = $this->files->emittedDefinitions($className, $file);
+            $importsSelf = !isset($definitions['_self']) && $this->files->importsSelf($file);
+            if ([] === $definitions && !$importsSelf) {
                 continue;
             }
 
-            // An alias for PHPStan alone is not emitted, and an emitted one typed with it fails. An
-            // import that can't be emitted fails only an alias that uses it: a file may import
+            // An import that can't be emitted fails only an alias that uses it: a file may import
             // anything for its own code. One of an alias kept for PHPStan is no symbol of any
             // module, so it is none of what the file emits; a `_self` imported from one is still
             // recorded as the class's, and fails where something names the class.
             $scope = $this->files->scope($className, $file, $srcDir, $classFiles);
-            $definitions = $scope['definitions'];
-            if ([] === $definitions && !$importsSelf) {
-                continue;
-            }
             $read = $this->files->imports($className, $file, $srcDir, $classFiles);
             $imports = $scope['imports'];
             $unresolved = $scope['unresolved'];
