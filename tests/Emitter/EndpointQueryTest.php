@@ -256,6 +256,16 @@ final class EndpointQueryTest extends TestCase
         (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
     }
 
+    public function test_a_bodys_null_is_asked_of_an_alias_only_for_an_mcp_tool(): void
+    {
+        // The same body, no tool: whether a key is cleared changes no TypeScript, so its alias's
+        // null decides nothing.
+        $src = __DIR__ . '/../Fixture/OpaqueBodyNoToolFixtures';
+        $contracts = (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
+
+        self::assertCount(1, $contracts['Prices']);
+    }
+
     public function test_a_project_wide_alias_naming_another_is_read_as_that_one_is_declared(): void
     {
         // MaybeText is OptionalText, which admits null: a key typed with it may be left out.

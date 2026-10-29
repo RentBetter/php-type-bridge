@@ -13,6 +13,7 @@ use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactStat
  * @phpstan-type _self = array{
  *     status: value-of<ContactStatus>,
  *     id: UuidStr,
+ *     kind?: ContactStatus,
  * }
  */
 final class RefData

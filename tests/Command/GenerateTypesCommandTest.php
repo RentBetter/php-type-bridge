@@ -74,6 +74,17 @@ PHP);
         self::assertStringContainsString("export const Ping: Endpoint<PingEndpointMap> = {\n  method: 'GET',\n  path: '/api/ping',\n};", $ping);
     }
 
+    public function test_a_tool_production_doesnt_serve_still_has_its_typescript(): void
+    {
+        // Its #[Route] is confined to dev: no tool of it is served in prod, which the MCP manifest
+        // says; its Endpoint is described by that route all the same.
+        $outputDir = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+        $tester = new CommandTester(new GenerateTypesCommand());
+
+        self::assertSame(0, $tester->execute(['source' => __DIR__ . '/../Fixture/DevRoutedApp', 'output' => $outputDir]));
+        self::assertStringContainsString("path: '/debug/notes/{id}'", (string) file_get_contents($outputDir . '/Notes/genTypes.ts'));
+    }
+
     public function test_a_class_this_install_cant_load_is_no_part_of_what_it_generates(): void
     {
         // DevOnlyRule's declaration throws without its require-dev interface: the command runs on,

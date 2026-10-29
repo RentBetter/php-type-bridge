@@ -24,8 +24,9 @@ final class EmbeddedFormToolTest extends TestCase
     public function test_a_required_embedded_form_left_out_is_a_new_object_its_not_null_takes(): void
     {
         // Symfony makes a required embedded form left out a new AddressData, which `address`'s
-        // NotNull takes; `billing` is not required, so it is null, which its NotNull refuses.
-        self::assertSame(['billing'], $this->schema()['required'] ?? null);
+        // NotNull takes; `billing` is not required, so it is null, which its NotNull refuses. A new
+        // PostalData has its `street` blank, which its NotBlank refuses: `postal` can't be left out.
+        self::assertSame(['billing', 'postal'], $this->schema()['required'] ?? null);
     }
 
     public function test_a_whole_value_field_is_its_shape_an_enums_values_and_an_aliass_type_included(): void
@@ -35,9 +36,22 @@ final class EmbeddedFormToolTest extends TestCase
             'properties' => [
                 'status' => ['enum' => ['active', 'archived']],
                 'id' => ['type' => 'string'],
+                // Keyed by the enum's class: its values, as its TypeScript names them.
+                'kind' => ['enum' => ['active', 'archived']],
             ],
             'required' => ['status', 'id'],
         ], $this->schema()['properties']['ref'] ?? null);
+    }
+
+    public function test_a_collections_entries_keyed_by_their_class_hold_to_that_classs_keys(): void
+    {
+        // `phones?: list<PhoneData>`: each entry's `label` may be left out or cleared; `refs?:
+        // list<RefData>`, each read whole, is RefData's shape.
+        $properties = $this->schema()['properties'];
+
+        self::assertSame(['number'], $properties['phones']['items']['required'] ?? null);
+        self::assertSame(['type' => ['string', 'null']], $properties['phones']['items']['properties']['label'] ?? null);
+        self::assertSame($properties['ref'], $properties['refs']['items'] ?? null);
     }
 
     /**

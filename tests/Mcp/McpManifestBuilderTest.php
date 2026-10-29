@@ -1113,9 +1113,27 @@ final class McpManifestBuilderTest extends TestCase
     public function testANumberOrUnrequiredSegmentHasNoPattern(): void
     {
         self::assertSame(
-            ['checkNumber' => ['type' => 'number'], 'anything' => ['type' => 'string']],
+            ['checkNumber' => ['type' => 'integer', 'minimum' => 0], 'anything' => ['type' => 'string']],
             $this->pathTool([new CollectedPathParam('checkNumber', 'number', '[0-9]+'), new CollectedPathParam('anything', 'string')]),
         );
+    }
+
+    public function testANumberSegmentHoldsToWhatItsRequirementMatches(): void
+    {
+        // The router takes `1` but not `1.5` for `[0-9]+`: an integer, and not `-1`, at least 0.
+        $properties = $this->pathTool([
+            new CollectedPathParam('digits', 'number', '\\d+'),
+            new CollectedPathParam('positive', 'number', '[1-9][0-9]*'),
+            new CollectedPathParam('signed', 'number', '-?[0-9]+'),
+            new CollectedPathParam('decimal', 'number', '[0-9]+(?:\\.[0-9]+)?'),
+            new CollectedPathParam('any', 'number'),
+        ]);
+
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['digits']);
+        self::assertSame(['type' => 'integer', 'minimum' => 1], $properties['positive']);
+        self::assertSame(['type' => 'integer'], $properties['signed']);
+        self::assertSame(['type' => 'number', 'minimum' => 0], $properties['decimal']);
+        self::assertSame(['type' => 'number'], $properties['any']);
     }
 
     /**
