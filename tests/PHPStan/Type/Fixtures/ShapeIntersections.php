@@ -9,6 +9,8 @@ use function PHPStan\Testing\assertType;
 /**
  * @phpstan-type BaseData = array{id: string, name?: string}
  * @phpstan-type OptionalBaseData = array{name?: string}
+ * @phpstan-type NullableBaseData = array{id: string, note: string|null}
+ * @phpstan-type NonEmptyBaseData = non-empty-array{a?: int, b?: int}
  * @phpstan-type OpenData = array{id: string, ...}
  * @phpstan-type OpenIntData = array{id: string, ...<int>}
  *
@@ -16,6 +18,8 @@ use function PHPStan\Testing\assertType;
  * @phpstan-type OptionalAdminData = BaseData & array{'$admin'?: array{email: string}}
  * @phpstan-type OnOptionalBaseData = OptionalBaseData & array{extra: int}
  * @phpstan-type AuditedAdminData = AdminData & array{audit: list<string>}
+ * @phpstan-type OpenOnSealedData = BaseData & array{flag: bool, ...}
+ * @phpstan-type NonEmptyExtendedData = NonEmptyBaseData & array{c?: int}
  * @phpstan-type LargeBaseData = array{
  *     a0: int, a1: int, a2: int, a3: int, a4: int, a5: int, a6: int, a7: int, a8: int, a9: int,
  *     a10: int, a11: int, a12: int, a13: int, a14: int, a15: int, a16: int, a17: int, a18: int, a19: int,
@@ -49,12 +53,15 @@ use function PHPStan\Testing\assertType;
  *     b130: string, b131: string, b132: string, b133: string, b134: string, b135: string, b136: string, b137: string, b138: string, b139: string,
  * }
  *
+ * @phpstan-type RedeclaredData = BaseData & array{id: string, extra: int}
+ * @phpstan-type RequiredNameData = BaseData & array{name: string}
+ * @phpstan-type NarrowedNoteData = NullableBaseData & array{note: string}
+ * @phpstan-type ClashData = BaseData & array{id: int}
+ * @phpstan-type LoosenedData = BaseData & array{id?: string}
+ *
  * @phpstan-type OpenExtendedData = OpenData & array{flag: bool, ...}
  * @phpstan-type OpenClashData = OpenIntData & array{flag: bool, ...<int>}
- * @phpstan-type OpenOnSealedData = BaseData & array{flag: bool, ...}
  * @phpstan-type SealedOnOpenData = OpenData & array{flag: bool}
- * @phpstan-type RedeclaredData = BaseData & array{id: string, extra: int}
- * @phpstan-type ClashData = BaseData & array{id: int}
  * @phpstan-type ReversedData = array{extra: int} & BaseData
  * @phpstan-type ThreePartData = BaseData & array{a: int} & array{b: int}
  * @phpstan-type TupleData = BaseData & array{int, int}
@@ -66,38 +73,63 @@ final class ShapeIntersections
      * @param OptionalAdminData $optionalAdmin
      * @param OnOptionalBaseData $onOptionalBase
      * @param AuditedAdminData $auditedAdmin
+     * @param OpenOnSealedData $openOnSealed
+     * @param NonEmptyExtendedData $nonEmptyExtended
      * @param LargeData $large
      */
-    public function merged(array $admin, array $optionalAdmin, array $onOptionalBase, array $auditedAdmin, array $large): void
-    {
+    public function merged(
+        array $admin,
+        array $optionalAdmin,
+        array $onOptionalBase,
+        array $auditedAdmin,
+        array $openOnSealed,
+        array $nonEmptyExtended,
+        array $large,
+    ): void {
         assertType("array{id: string, name?: string, '\$admin': array{email: string}}", $admin);
         assertType("array{id: string, name?: string, '\$admin'?: array{email: string}}", $optionalAdmin);
         assertType('array{name?: string, extra: int}', $onOptionalBase);
         assertType("array{id: string, name?: string, '\$admin': array{email: string}, audit: list<string>}", $auditedAdmin);
+        assertType('array{id: string, name?: string, flag: bool, ...}', $openOnSealed);
+        assertType('non-empty-array{a?: int, b?: int, c?: int}', $nonEmptyExtended);
         // As wide as it is, the merged shape keeps every key and its type
         assertType('int', $large['a0']);
         assertType('string', $large['b139']);
     }
 
     /**
-     * A key both parts declare, typed alike or not, is unresolvable, so each is its native type.
+     * A key the base declares may be declared again to narrow it, as an interface extending
+     * another may: to a narrower type, or required in place of optional.
      *
      * @param RedeclaredData $redeclared
-     * @param ClashData $clash
+     * @param RequiredNameData $requiredName
+     * @param NarrowedNoteData $narrowedNote
      */
-    public function redeclared(array $redeclared, array $clash): void
+    public function narrowed(array $redeclared, array $requiredName, array $narrowedNote): void
     {
-        assertType('array', $redeclared);
-        assertType('array', $clash);
+        assertType('array{id: string, name?: string, extra: int}', $redeclared);
+        assertType('array{id: string, name: string}', $requiredName);
+        assertType('array{id: string, note: string}', $narrowedNote);
     }
 
     /**
-     * Anything but a closed base extended by a closed, keyed shape is PHPStan's own reading: an open
-     * shape as it reads it, and as unresolvable the forms TypeBridge does not parse.
+     * Any other redeclaration is an invalid type, so each is its native type.
+     *
+     * @param ClashData $clash
+     * @param LoosenedData $loosened
+     */
+    public function redeclaredAsSomethingElse(array $clash, array $loosened): void
+    {
+        assertType('array', $clash);
+        assertType('array', $loosened);
+    }
+
+    /**
+     * Anything but a closed base extended by a keyed shape is PHPStan's own reading: an open base
+     * as it reads it, and as unresolvable the forms TypeBridge does not parse.
      *
      * @param OpenExtendedData $openExtended
      * @param OpenClashData $openClash
-     * @param OpenOnSealedData $openOnSealed
      * @param SealedOnOpenData $sealedOnOpen
      * @param ReversedData $reversed
      * @param ThreePartData $threePart
@@ -106,7 +138,6 @@ final class ShapeIntersections
     public function unmerged(
         array $openExtended,
         array $openClash,
-        array $openOnSealed,
         array $sealedOnOpen,
         array $reversed,
         array $threePart,
@@ -114,7 +145,6 @@ final class ShapeIntersections
     ): void {
         assertType('array{id: string, flag: bool, ...}', $openExtended);
         assertType('array', $openClash);
-        assertType('array{id: string, name?: string}', $openOnSealed);
         assertType('array{flag: bool}&array{id: string, ...}', $sealedOnOpen);
         assertType('array', $reversed);
         assertType('array', $threePart);
@@ -122,14 +152,18 @@ final class ShapeIntersections
     }
 
     /**
-     * A template parameter bound by a shape is not merged into: it would no longer be the template.
+     * A template parameter a shape bounds, and a shape keyed by one, are not merged into: they
+     * would be resolved to the bound and no longer be the template.
      *
      * @template T of BaseData
+     * @template K of 'k'
      *
      * @param T & array{extra: int} $templated
+     * @param BaseData & array{K: int} $templateKeyed
      */
-    public function templated(array $templated): void
+    public function templated(array $templated, array $templateKeyed): void
     {
         assertType('array', $templated);
+        assertType('array', $templateKeyed);
     }
 }

@@ -38,23 +38,38 @@ final class ShapeIntersectionReturnTest extends RuleTestCase
         $this->analyse([__DIR__ . '/Fixtures/ShapeIntersectionReturns.php'], [
             [
                 $method . "leavesOutTheExtension() should return {$admin} but returns array{id: string, name?: string}.",
-                27,
+                31,
                 "Array does not have offset '\$admin'.",
             ],
             [
                 $method . "mistypesTheExtension() should return {$admin} but returns array{id: string, name?: string, '\$admin': array{email: 1}}.",
-                35,
+                39,
                 $badEmail,
             ],
             [
                 $method . "mistypesTheBase() should return {$admin} but returns array{id: 'a', name: 1, '\$admin': array{email: 'a@example.com'}}.",
-                43,
+                47,
                 "Offset 'name' (string) does not accept type int.",
             ],
             [
                 $method . "mistypesAnOptionalExtension() should return array{id: string, name?: string, '\$admin'?: array{email: string}} but returns array{id: string, name?: string, '\$admin': array{email: 1}}.",
-                51,
+                55,
                 $badEmail,
+            ],
+            [
+                $method . 'leavesOutANarrowedKey() should return array{id: string, name: string} but returns array{id: string, name?: string}.',
+                63,
+                "Array might not have offset 'name'.",
+            ],
+            [
+                $method . "mistypesAnOpenExtension() should return array{id: string, name?: string, flag: bool, ...} but returns array{id: string, name?: string, flag: 'yes'}.",
+                79,
+                "Offset 'flag' (bool) does not accept type string.",
+            ],
+            [
+                $method . 'emptiesANonEmptyBase() should return non-empty-array{a?: int, b?: int, c?: int} but returns array{}.',
+                87,
+                'array{} is empty.',
             ],
         ]);
     }
