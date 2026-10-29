@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\PHPStan\Rules\Shape;
 
+use PTGS\TypeBridge\Support\ClassNames;
 use PhpParser\Node;
 use PhpParser\Node\Stmt\Class_;
 use PHPStan\Analyser\Scope;
@@ -65,7 +66,7 @@ final class NoIdSuffixRule implements Rule
 
         $errors = [];
         $className = $node->namespacedName?->toString() ?? $scope->getClassReflection()?->getName() ?? ($node->name->name ?? '<anonymous>');
-        $shapeName = self::shortName($className);
+        $shapeName = ClassNames::short($className);
 
         foreach ($shape->fields as $field) {
             if (!$this->isOffendingField($field, $shapeName)) {
@@ -126,13 +127,6 @@ final class NoIdSuffixRule implements Rule
             . 'exempted the name in every shape, which was rarely what it was written for.)',
             $fieldName,
         );
-    }
-
-    private static function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-
-        return false === $position ? $className : substr($className, $position + 1);
     }
 
     private function isStringValued(ParsedType $type): bool

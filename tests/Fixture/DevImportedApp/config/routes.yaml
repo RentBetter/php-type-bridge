@@ -1,0 +1,14 @@
+notes_controllers:
+    resource:
+        path: ../Notes/
+        namespace: PTGS\TypeBridge\Tests\Fixture\DevImportedApp\Notes
+    type: attribute
+    prefix: '/api'
+
+when@dev:
+    dev_tools:
+        resource:
+            path: ../DevTools/
+            namespace: PTGS\TypeBridge\Tests\Fixture\DevImportedApp\DevTools
+        type: attribute
+        prefix: '/api/dev'

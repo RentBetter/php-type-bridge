@@ -4,22 +4,33 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Mcp;
 
+use BackedEnum;
 use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Model\FailedBlank;
 use PTGS\TypeBridge\Parser\IdOfType;
+use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
 use PTGS\TypeBridge\Parser\MapType;
+use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Support\AttributeText;
+use PTGS\TypeBridge\Support\ClassNames;
+use PTGS\TypeBridge\Support\HeldConstraints;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
+use PTGS\TypeBridge\Support\TypeScriptTypes;
 use ReflectionProperty;
+use RuntimeException;
+use Throwable;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\Choice;
 use Symfony\Component\Validator\Constraints\Count;
@@ -28,9 +39,12 @@ use Symfony\Component\Validator\Constraints\GreaterThanOrEqual;
 use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\LessThan;
 use Symfony\Component\Validator\Constraints\LessThanOrEqual;
-use Symfony\Component\Validator\Constraints\NotBlank;
-use Symfony\Component\Validator\Constraints\NotNull;
 use Symfony\Component\Validator\Constraints\Range;
+use Symfony\Component\Validator\Constraints\Regex;
+use Symfony\Component\Validator\Validation;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
+use WeakMap;
+use stdClass;
 
 /**
  * Builds the MCP tool manifest (the `tools.json` structure) from collected endpoint contracts.
@@ -42,15 +56,18 @@ use Symfony\Component\Validator\Constraints\Range;
  * same shape the generated TypeScript is typed from, so a tool and a typed client never disagree
  * about one endpoint; the form speaks only for what the contract does not say, and for the values a
  * choice field accepts, which only the built form knows. One exception: the body of a POST — a
- * request that makes something — requires a field its constraints refuse blank (NotBlank, NotNull),
- * since a contract the request shares with an update declares every key optional, and a model would
- * otherwise learn what it can't leave out only from a 422. A key the contract declares as a scalar or
+ * request that makes something — requires a field its constraints refuse blank (a NotBlank, a NotNull,
+ * a Count — whatever refuses what its form makes of a value left out), since a contract the request
+ * shares with an update declares every key optional, and a model would
+ * otherwise learn what it can't leave out only from a 422. A body key the contract types `T|null` takes
+ * null — an update's "clear this" — where `?T` is only ever left out. A key the contract declares as a scalar or
  * a shape (a record's id, or the fields to make one) is published as either (`anyOf`), though its form
  * shows only the shape. A compound field with no children, whose type reads the value sent whole, is
  * published as the shape its data class declares, since its form shows nothing. Each argument also carries what its
  * validation bounds it by (a number's range, a string's length, a list's size) and, when the
  * project configures a parameter-documentation attribute, the description on the property it
- * binds. The HTTP method + path tell the runtime how to call the API, and `query` (when there are
+ * binds, and a string what it must look like (`pattern`) — from its route requirement or its Regex
+ * constraint, when that reads the same in JSON Schema's regex dialect. The HTTP method + path tell the runtime how to call the API, and `query` (when there are
  * any) names the arguments it sends in the query string whatever the method — a POST can take
  * query parameters as well as a body; `destructive` is the safety hint; `scopes` (when the project
  * configures a scope attribute) names the auth scopes the calling token must hold, letting the
@@ -65,13 +82,29 @@ final class McpManifestBuilder
     private const array LOWER_BOUNDS = ['minimum', 'exclusiveMinimum', 'minLength', 'minItems'];
 
     /**
+     * What a field's blank value is asked of: Symfony's own validator.
+     */
+    private ?ValidatorInterface $validator = null;
+
+    /** @var WeakMap<CollectedFormField, bool>|null by field, whether its blank value is refused: asked once */
+    private ?WeakMap $blankRefused = null;
+
+    /**
      * @param IncludeConvention  $includes          whose `query` parameters every tool with a response body takes
      * @param AttributeText|null $paramDescriptions the project's parameter-documentation attribute, read off
      *                                              the data-class property each argument binds
+     * @param array<string, string> $typeAliases    the project-wide aliases, name => TypeScript: a key
+     *                                              typed with one is the JSON type its TypeScript is, where
+     *                                              that is a primitive
+     * @param bool                  $clearMissing   whether a body is submitted with Symfony's `clearMissing`
+     *                                              on, so a field left out is submitted blank
+     *                                              ({@see \PTGS\TypeBridge\Config\TypeBridgeConfig::$clearMissing})
      */
     public function __construct(
         private readonly IncludeConvention $includes = new IncludeConvention(),
         private readonly ?AttributeText $paramDescriptions = null,
+        private readonly array $typeAliases = [],
+        private readonly bool $clearMissing = false,
     ) {}
 
     /**
@@ -86,6 +119,10 @@ final class McpManifestBuilder
             foreach ($contracts as $contract) {
                 if (null === $contract->mcp) {
                     continue;
+                }
+                // A tool the application doesn't serve where it is deployed is no tool to publish.
+                if (null !== $contract->mcp->unserved) {
+                    throw new RuntimeException($contract->mcp->unserved);
                 }
 
                 $tools[] = $this->tool($contract);
@@ -151,14 +188,32 @@ final class McpManifestBuilder
         $request = $contract->request;
         if (null !== $request) {
             foreach ($request->pathParams ?? [] as $param) {
-                // A path param's tsType ('string'/'number') doubles as its JSON Schema type, and
-                // a path segment is always required.
-                $properties[$param->name] = ['type' => $param->tsType];
+                // A path segment is always required. A string's route requirement says what it must
+                // look like, so a model learns a ticket is `SO-12` before the router's 404.
+                $properties[$param->name] = 'number' === $param->schemaType() && null !== $param->requirement
+                    ? self::numberHeldTo($param->requirement, $param->utf8)
+                    : ['type' => $param->schemaType()];
+                $pattern = 'string' === $param->schemaType() && null !== $param->requirement ? PortableRegex::routePattern($param->requirement, $param->utf8) : null;
+                if (null !== $pattern) {
+                    $properties[$param->name]['pattern'] = $pattern;
+                }
                 $required[] = $param->name;
             }
 
-            $this->addFields($request->query, $properties, $required);
-            $this->addFields($request->body, $properties, $required, makes: 'POST' === strtoupper($httpMethod));
+            $query = [];
+            $body = [];
+            $this->addFields($request->query, $query, $required);
+            // A field left out is submitted blank, and so required where that is refused, on any write
+            // but a PATCH with `clearMissing` on — Symfony's request handler submits so — and on a POST,
+            // which makes something, with it off.
+            $makes = $this->clearMissing ? 'PATCH' !== strtoupper($httpMethod) : 'POST' === strtoupper($httpMethod);
+            $this->addFields($request->body, $body, $required, makes: $makes, json: true);
+            // One argument of a name fills a path param and a field alike: it holds to both.
+            foreach ([$query, $body] as $fields) {
+                foreach ($fields as $name => $schema) {
+                    $properties[$name] = isset($properties[$name]) ? ['allOf' => [$properties[$name], $schema]] : $schema;
+                }
+            }
         }
 
         foreach ($this->includeQuery($contract) as $name => $description) {
@@ -169,54 +224,184 @@ final class McpManifestBuilder
         // encode as a JSON array, and JSON Schema requires `properties` to be an object.
         $schema = ['type' => 'object'];
         if ([] !== $properties) {
-            $schema['properties'] = $properties;
+            $schema['properties'] = self::properties($properties);
         }
         if ([] !== $required) {
-            $schema['required'] = $required;
+            // Each name once: a path param and a body field may share one, and the meta-schema
+            // holds `required` to unique items.
+            $schema['required'] = array_values(array_unique($required));
         }
 
         return $schema;
     }
 
     /**
-     * @param array<string, mixed> $properties
+     * The fields as arguments, each with the key its contract declares: its own, or for an input
+     * extending a shape (`Base & array{…}`), one it inherits, read where that shape is declared, the
+     * two read as the intersection reads them ({@see CollectedInputReference::keys()}).
+     *
+     * @param array<array-key, array<string, mixed>> $properties
      * @param list<string>         $required
      * @param bool                 $makes      whether the request makes something (a POST body), so a
      *                                         field its constraints refuse blank is one it can't go without
+     * @param bool                 $json       whether the fields are sent as JSON (a body), which can carry a
+     *                                         null; a query string cannot
      */
-    private function addFields(?CollectedInputReference $reference, array &$properties, array &$required, bool $makes = false): void
+    private function addFields(?CollectedInputReference $reference, array &$properties, array &$required, bool $makes = false, bool $json = false): void
     {
         if (null === $reference) {
             return;
         }
 
-        $declared = [];
-        foreach ($reference->contract->fields ?? [] as $key) {
-            $declared[$key->name] = $key;
-        }
-
+        $declared = self::shapeKeys($reference->keys());
         foreach ($reference->fields as $field) {
             $key = $declared[$field->name] ?? null;
-            $properties[$field->name] = $this->fieldSchema($field, $key?->type);
-            if ($this->isRequired($field, $key) || ($makes && $this->refusesBlank($field))) {
+            $properties[$field->name] = $this->fieldSchema($field, $key?->type, $json, $makes);
+            if ($json && $this->takesNull($key, $field)) {
+                $properties[$field->name] = self::withNull($properties[$field->name]);
+            }
+            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($field))) {
                 $required[] = $field->name;
             }
         }
     }
 
     /**
-     * Whether a submitted value is refused blank or missing: a NotBlank or a NotNull among the
-     * constraints it is validated against.
+     * Whether a submitted value is refused blank or missing. A field left out, sent as null or sent
+     * blank reaches validation as its form makes it ({@see CollectedFormField::$blankValue}) — null,
+     * '', an empty list, an unticked box — and whether that is refused is its constraints' to say,
+     * asked of Symfony's validator: a NotNull refuses a null and lets '' through, a NotBlank refuses
+     * an empty list though it allows a null, a Count or a Length refuses too few.
      */
     private function refusesBlank(CollectedFormField $field): bool
     {
-        foreach ($field->constraints as $constraint) {
-            if ($constraint instanceof NotBlank || $constraint instanceof NotNull) {
-                return true;
+        $this->blankRefused ??= new WeakMap();
+
+        return $this->blankRefused[$field] ??= $this->refusesSubmittedBlank($field, onData: true);
+    }
+
+    /**
+     * Whether the field submitted blank is refused: its blank against what holds of it — its own
+     * `constraints` option always, its property's only on an object that is there to validate
+     * (`$onData`) — and, for an embedded form, each of its fields submitted blank in turn, which
+     * Symfony does whether the form is required or not. Their properties' constraints hold only on
+     * the object the form makes of nothing, and only where it cascades, which their
+     * {@see CollectedFormField::$constraints} say.
+     */
+    private function refusesSubmittedBlank(CollectedFormField $field, bool $onData): bool
+    {
+        if ($this->refusesBlankValue($onData ? $field->constraints : $field->formConstraints, $field->blankValue)) {
+            return true;
+        }
+        $made = \is_object($field->blankValue) && !$field->blankValue instanceof FailedBlank;
+
+        return $field->compound && array_any($field->children, fn (CollectedFormField $child): bool => $this->refusesSubmittedBlank($child, $onData && $made));
+    }
+
+    /**
+     * Whether the field left out of a request is refused. With `clearMissing` on — Symfony's
+     * default — it is submitted blank ({@see self::refusesBlank()}). With it off it is not submitted
+     * at all, so Symfony checks nothing of it but its property, which keeps what its object holds; an
+     * application submitting that way holds a field its own constraints require to them itself, or
+     * one left out passes unchecked. So it is refused where what it is held to refuses its blank —
+     * an embedded form's being none — and an embedded form's fields, never submitted, are not asked.
+     */
+    private function refusesLeftOut(CollectedFormField $field): bool
+    {
+        if ($this->clearMissing) {
+            return $this->refusesBlank($field);
+        }
+
+        $embedded = $field->compound && null === $field->entryTypeClass && !$field->multiple;
+
+        return $this->refusesBlankValue($field->constraints, $embedded ? null : $field->blankValue);
+    }
+
+    /**
+     * Whether a blank reaching validation as the value is refused: one the form can't make a value
+     * of ({@see FailedBlank}) always is; any other where a constraint refuses it.
+     *
+     * @param list<Constraint> $constraints
+     */
+    private function refusesBlankValue(array $constraints, mixed $value): bool
+    {
+        return $value instanceof FailedBlank || $this->refuses($constraints, $value);
+    }
+
+    /**
+     * Whether any of the constraints refuses the value, nested ones included. One that can't be asked
+     * of the value alone — it reads the object the value is on, or its validator is a service the
+     * builder has none of — says nothing here.
+     *
+     * @param list<Constraint> $constraints
+     */
+    private function refuses(array $constraints, mixed $value): bool
+    {
+        $this->validator ??= Validation::createValidator();
+        foreach ($constraints as $constraint) {
+            try {
+                if (\count($this->validator->validate($value, $constraint)) > 0) {
+                    return true;
+                }
+            } catch (Throwable) {
+                continue;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Whether the key takes null as a value: the contract admits a null that is sent and means
+     * something — an update's "clear this" — and its form and validation do not refuse it.
+     */
+    private function takesNull(?ShapeField $key, CollectedFormField $field): bool
+    {
+        if (null === $key || !ShapeField::admitsNull($key->type)) {
+            return false;
+        }
+
+        // An embedded form is never set to null: Symfony submits a compound form's children, and a
+        // null sent for the form is an empty array that clears each of them — a 422 from a child's
+        // NotBlank, or a record of nulls. A list's null is an empty list, which does clear it; and
+        // a form that takes a record's id as well (`string|array{…}|null`) reads what is sent
+        // itself, before it is submitted, so its null is the "none" it declares.
+        if ($field->compound && [] !== $field->children && [] === $this->declaredScalars($key->type)) {
+            return false;
+        }
+
+        // A contract one create and one update share says `string|null`; a NotNull, or a NotBlank
+        // that does not allow null, still refuses it with a 422.
+        return !$this->refusesBlank($field);
+    }
+
+    /**
+     * The schema with null among what it accepts: a `null` type beside its own (as a type list, or
+     * in `anyOf` where it has no type of its own), and in its `enum` when it lists its values, which
+     * would refuse null otherwise. One that accepts null already is as it was.
+     *
+     * @param array<string, mixed> $schema
+     *
+     * @return array<string, mixed>
+     */
+    private static function withNull(array $schema): array
+    {
+        if (!isset($schema['type']) && isset($schema['anyOf']) && \is_array($schema['anyOf'])) {
+            if (!\in_array(['type' => 'null'], $schema['anyOf'], true)) {
+                $schema['anyOf'][] = ['type' => 'null'];
+            }
+
+            return $schema;
+        }
+
+        if (isset($schema['type']) && \is_string($schema['type'])) {
+            $schema['type'] = [$schema['type'], 'null'];
+        }
+        if (isset($schema['enum']) && \is_array($schema['enum']) && !\in_array(null, $schema['enum'], true)) {
+            $schema['enum'][] = null;
+        }
+
+        return $schema;
     }
 
     /**
@@ -228,22 +413,39 @@ final class McpManifestBuilder
      * every filter as mandatory, and a model could not list anything without inventing a value
      * for each. It is the fallback for a field the contract does not declare.
      */
-    private function isRequired(CollectedFormField $field, ?ShapeField $key): bool
+    private function isRequired(CollectedFormField $field, ?ShapeField $key, bool $inQuery): bool
     {
-        return null === $key ? $field->required : !$key->optional;
+        return null === $key ? $field->required : !$key->mayBeLeftOut($inQuery);
     }
 
     /**
      * The field's schema, with what its validation bounds it by and what its property says it is.
      *
      * @param ParsedType|null $declared the type the request contract gives this field, if it names it
+     * @param bool            $json     whether it is sent as JSON, which can carry a null
+     * @param bool            $makes    whether the request makes something, so a field nested in it that
+     *                                  its constraints refuse blank is one it can't go without
      *
      * @return array<string, mixed>
      */
-    private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null): array
+    private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null, bool $json = false, bool $makes = false): array
     {
-        $schema = $this->valueSchema($field, $declared);
-        $schema = [...$schema, ...$this->bounds($field->constraints, $schema['type'])];
+        $schema = $this->valueSchema($field, $declared, $json, $makes);
+        $always = HeldConstraints::always($field->constraints);
+        $bounds = $this->bounds($always, $schema['type']);
+        $pattern = $this->patternOf($field, $schema['type'], $always);
+        if (isset($pattern['minLength'])) {
+            $bounds['minLength'] = max($bounds['minLength'] ?? 0, $pattern['minLength']);
+            unset($pattern['minLength']);
+        }
+        // A blank the server takes is submitted null, which a Length skips: its minimum holds the
+        // values that aren't blank.
+        if ('string' === $schema['type'] && ($bounds['minLength'] ?? 0) > 0 && !$this->refusesBlank($field)) {
+            $minimum = $bounds['minLength'];
+            unset($bounds['minLength']);
+            $bounds = ['anyOf' => [['maxLength' => 0], ['minLength' => $minimum]], ...$bounds];
+        }
+        $schema = [...$schema, ...$bounds, ...$pattern];
 
         // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
         // is a compound form with a scalar the form lifts out before submit; the form shows only the
@@ -265,11 +467,11 @@ final class McpManifestBuilder
      *
      * @return array{type: string, ...<string, mixed>}
      */
-    private function valueSchema(CollectedFormField $field, ?ParsedType $declared): array
+    private function valueSchema(CollectedFormField $field, ?ParsedType $declared, bool $json = false, bool $makes = false): array
     {
         // A collection is compound too, but its shape is its entry's, repeated.
         if (null !== $field->entryTypeClass) {
-            return ['type' => 'array', 'items' => $this->entrySchema($field)];
+            return ['type' => 'array', 'items' => $this->entrySchema($field, self::listItem($declared), $json, $makes)];
         }
 
         // A choice field takes one of a known set, and a model has no other way to learn them: the
@@ -283,29 +485,23 @@ final class McpManifestBuilder
 
             return $field->multiple ? ['type' => 'array', 'items' => $leaf] : $leaf;
         }
-
-        // A compound field with no children reads what is sent whole, so its form says nothing of
-        // what it takes: the shape its data class declares does, where every part of it can be said.
-        if (null !== $field->contract && null !== $contract = $this->shapeSchema($field->contract)) {
-            return $contract;
+        // One whose choices are loaded later — an EntityType's — still takes a list of the values it
+        // reads, strings as the form reads them.
+        if ($field->multiple) {
+            return ['type' => 'array', 'items' => ['type' => 'string']];
         }
 
+        // Its fields held to the keys its key's type declares: its data class's own, where it names
+        // the class, read where the contract is.
         if ($field->compound && [] !== $field->children) {
-            $properties = [];
-            $required = [];
-            foreach ($field->children as $child) {
-                $properties[$child->name] = $this->fieldSchema($child);
-                if ($child->required) {
-                    $required[] = $child->name;
-                }
-            }
+            return $this->objectSchema($field->children, self::shapeKeys($declared), $json, $makes);
+        }
 
-            $schema = ['type' => 'object', 'properties' => $properties];
-            if ([] !== $required) {
-                $schema['required'] = $required;
-            }
-
-            return $schema;
+        // A compound field with no children reads what is sent whole, so its form says nothing of
+        // what it takes: the shape its data class declares does, where every part of it can be said;
+        // an object, where some can't.
+        if (null !== $field->contract) {
+            return $this->shapeSchema($field->contract, $json) ?? ['type' => 'object'];
         }
 
         return ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
@@ -319,7 +515,8 @@ final class McpManifestBuilder
      */
     private function declaredScalars(?ParsedType $declared): array
     {
-        if ($declared instanceof NullableType) {
+        // `?Alias` of an alias of `T|null` is a nullable of a nullable: its scalar is what both wrap.
+        while ($declared instanceof NullableType) {
             $declared = $declared->inner;
         }
         if (!$declared instanceof UnionType) {
@@ -338,34 +535,30 @@ final class McpManifestBuilder
     }
 
     /**
-     * The JSON Schema type of a scalar the contract declares. A form type's name is a guess at
-     * this (a CheckboxType binds a boolean and says so nowhere in its name); the contract states it.
-     */
-    /**
      * A declared shape as JSON Schema, or null when any part of it names a type stated elsewhere
      * (an alias, a generic, a class constant) that the builder cannot read here.
      *
-     * @return array{type: 'object', properties?: array<string, array<string, mixed>>, required?: list<string>}|null
+     * @return array{type: 'object', properties?: array<array-key, array<string, mixed>>|stdClass, required?: list<string>}|null
      */
-    private function shapeSchema(ShapeType $shape): ?array
+    private function shapeSchema(ShapeType $shape, bool $json = false): ?array
     {
         $properties = [];
         $required = [];
         foreach ($shape->fields as $key) {
-            $schema = $this->typeSchema($key->type);
+            $schema = $this->typeSchema($key->type, $json);
             if (null === $schema) {
                 return null;
             }
 
             $properties[$key->name] = $schema;
-            if (!$key->optional) {
+            if (!$key->mayBeLeftOut(inQuery: !$json)) {
                 $required[] = $key->name;
             }
         }
 
         $schema = ['type' => 'object'];
         if ([] !== $properties) {
-            $schema['properties'] = $properties;
+            $schema['properties'] = self::properties($properties);
         }
         if ([] !== $required) {
             $schema['required'] = $required;
@@ -375,12 +568,18 @@ final class McpManifestBuilder
     }
 
     /**
+     * A declared type as JSON Schema. Sent as JSON, a `T|null` takes null beside its type — a key
+     * inside a shape is cleared as much as one at the top — where `?T` is a key only left out; in a
+     * query string, which cannot carry a null, neither does.
+     *
      * @return array<string, mixed>|null
      */
-    private function typeSchema(ParsedType $type): ?array
+    private function typeSchema(ParsedType $type, bool $json = false): ?array
     {
         if ($type instanceof NullableType) {
-            return $this->typeSchema($type->inner);
+            $inner = $this->typeSchema($type->inner, $json);
+
+            return null !== $inner && $json && !$type->optional ? self::withNull($inner) : $inner;
         }
 
         $scalar = $this->declaredScalar($type);
@@ -389,7 +588,7 @@ final class McpManifestBuilder
         }
 
         if ($type instanceof ListType || $type instanceof MapType) {
-            $items = $this->typeSchema($type instanceof ListType ? $type->inner : $type->value);
+            $items = $this->typeSchema($type instanceof ListType ? $type->inner : $type->value, $json);
             if (null === $items) {
                 return null;
             }
@@ -398,51 +597,85 @@ final class McpManifestBuilder
         }
 
         return match (true) {
-            $type instanceof ShapeType => $this->shapeSchema($type),
-            $type instanceof UnionType => $this->unionSchema($type),
+            $type instanceof ShapeType => $this->shapeSchema($type, $json),
+            $type instanceof UnionType => $this->unionSchema($type, $json),
             $type instanceof LiteralType => ['enum' => [$type->value]],
             // An enum's ids are its own to say and can't be read statically; that it is a string can.
             $type instanceof IdOfType => ['type' => 'string'],
+            // A backed enum's values are what it takes.
+            $type instanceof ValueOfType => PhpFileClassLocator::loadsEnum($type->enumClass) && is_subclass_of($type->enumClass, BackedEnum::class)
+                ? ['enum' => array_map(static fn (BackedEnum $case): int|string => $case->value, $type->enumClass::cases())]
+                : null,
+            $type instanceof NameRefType && null === $type->class => $this->configAliasSchema($type->name),
             default => null,
         };
     }
 
     /**
-     * A union of literals is the values it allows; anything else is either of its members. A
-     * `null` member is dropped: a key that may be null is one a request leaves out.
+     * A project-wide alias as the JSON type its TypeScript is, through any alias it names in turn:
+     * `string`, `number` or `boolean`; null where it is anything else, or no such alias.
+     *
+     * @return array{type: string}|null
+     */
+    private function configAliasSchema(string $name): ?array
+    {
+        $standsFor = TypeScriptTypes::standsFor($name, $this->typeAliases);
+        $type = null === $standsFor ? null : TypeScriptTypes::jsonType($standsFor);
+
+        return null === $type ? null : ['type' => $type];
+    }
+
+    /**
+     * A union of literals is the values it allows; anything else is either of its members. A `null`
+     * member is a value sent as JSON, added as {@see self::withNull()} adds it; in a query string,
+     * which cannot carry one, it is dropped.
      *
      * @return array<string, mixed>|null
      */
-    private function unionSchema(UnionType $union): ?array
+    private function unionSchema(UnionType $union, bool $json = false): ?array
     {
         $members = [];
         $values = [];
+        $null = false;
         foreach ($union->types as $member) {
-            if ($member instanceof ScalarType && 'null' === $member->base()) {
+            if (ScalarType::isNull($member)) {
+                $null = true;
+
                 continue;
             }
 
-            $schema = $this->typeSchema($member);
+            $schema = $this->typeSchema($member, $json);
             if (null === $schema) {
                 return null;
             }
             $members[] = $schema;
-            if ($member instanceof LiteralType) {
+            // Each value once, told apart as JSON tells them: '1' and 1, true and 1, are two.
+            if ($member instanceof LiteralType && !\in_array($member->value, $values, true)) {
                 $values[] = $member->value;
             }
         }
 
-        if ([] !== $members && \count($values) === \count($members)) {
-            return ['enum' => array_values(array_unique($values, \SORT_REGULAR))];
+        if ([] !== $members && array_all($union->types, static fn (ParsedType $member): bool => $member instanceof LiteralType || ScalarType::isNull($member))) {
+            $schema = ['enum' => $values];
+        } else {
+            $schema = 1 === \count($members) ? $members[0] : ['anyOf' => $members];
         }
 
-        return 1 === \count($members) ? $members[0] : ['anyOf' => $members];
+        return $json && $null && [] !== $members ? self::withNull($schema) : $schema;
     }
 
+    /**
+     * The JSON Schema type of a scalar the contract declares. A form type's name is a guess at
+     * this (a CheckboxType binds a boolean and says so nowhere in its name); the contract states it.
+     */
     private function declaredScalar(?ParsedType $declared): ?string
     {
-        if ($declared instanceof NullableType) {
+        while ($declared instanceof NullableType) {
             $declared = $declared->inner;
+        }
+        // A project-wide alias is the JSON type its TypeScript is.
+        if ($declared instanceof NameRefType && null === $declared->class) {
+            return $this->configAliasSchema($declared->name)['type'] ?? null;
         }
         if (!$declared instanceof ScalarType) {
             return null;
@@ -458,31 +691,166 @@ final class McpManifestBuilder
     }
 
     /**
+     * A collection's entry: its type — the scalar the contract declares it, as for a field, its form
+     * type's name a guess at it otherwise — or for a compound entry its fields, each taking null,
+     * sent as JSON, where the entry's declared shape types it `T|null`.
+     *
+     * @param ParsedType|null $item the type the contract gives an entry (`list<T>`'s T), if it does
+     *
      * @return array<string, mixed>
      */
-    private function entrySchema(CollectedFormField $field): array
+    private function entrySchema(CollectedFormField $field, ?ParsedType $item = null, bool $json = false, bool $makes = false): array
     {
-        if ([] === $field->entryChildren) {
-            \assert(null !== $field->entryTypeClass);
-
-            return ['type' => $this->scalarTypeOf($field->entryTypeClass)];
+        // An entry its type reads whole is the shape the list declares of it — an object, where its
+        // class's shape can't be said here.
+        $shape = self::declaredShape($item);
+        if ([] === $field->entryChildren && (null !== $shape || null !== $field->entryDataClass)) {
+            return (null === $shape ? null : $this->shapeSchema($shape, $json)) ?? ['type' => 'object'];
         }
 
+        if ([] === $field->entryChildren) {
+            \assert(null !== $field->entryTypeClass);
+            $schema = ['type' => $this->declaredScalar($item) ?? $this->scalarTypeOf($field->entryTypeClass)];
+
+            // An entry takes null where its contract admits one and nothing it is held to refuses it,
+            // as the entry reaches validation: null, '' where its options keep a blank a string,
+            // false for a checkbox.
+            return $json && null !== $item && ShapeField::admitsNull($item) && !$this->refusesBlankValue($field->entryConstraints, $field->entryBlankValue)
+                ? self::withNull($schema)
+                : $schema;
+        }
+
+        return $this->objectSchema($field->entryChildren, self::shapeKeys($item), $json, $makes);
+    }
+
+    /**
+     * A compound form as an object: each field with the type its declared key gives it and, sent as
+     * JSON, null where that key takes one; required as at the top — where its key says so, or the
+     * form where it declares none, or where a request that makes something can't go without it.
+     *
+     * @param list<CollectedFormField> $children
+     * @param array<string, ShapeField> $keys the keys the compound's declared shape names
+     *
+     * @return array{type: 'object', properties: array<array-key, array<string, mixed>>|stdClass, required?: list<string>}
+     */
+    private function objectSchema(array $children, array $keys, bool $json, bool $makes): array
+    {
         $properties = [];
         $required = [];
-        foreach ($field->entryChildren as $child) {
-            $properties[$child->name] = $this->fieldSchema($child);
-            if ($child->required) {
+        foreach ($children as $child) {
+            $key = $keys[$child->name] ?? null;
+            $schema = $this->fieldSchema($child, $key?->type, $json, $makes);
+            $properties[$child->name] = $json && $this->takesNull($key, $child) ? self::withNull($schema) : $schema;
+            if ($this->isRequired($child, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($child))) {
                 $required[] = $child->name;
             }
         }
 
-        $schema = ['type' => 'object', 'properties' => $properties];
+        $schema = ['type' => 'object', 'properties' => self::properties($properties)];
         if ([] !== $required) {
             $schema['required'] = $required;
         }
 
         return $schema;
+    }
+
+    /**
+     * A number path segment as what its requirement lets the router match, asked of the requirement as
+     * the router compiles it. One that takes every whole number from 0 or 1 up — no ceiling, no gap —
+     * is an integer of at least that, or a number where it takes `1.5` too; one that may take
+     * negatives, an integer or a number. Any other (`\d{1,4}`, `[2-9]\d*`) is the string the router
+     * matches, its pattern saying which, so a tool sends no number the router answers 404 to — or a
+     * number, where its pattern can't be carried over, a `%…%` placeholder's included.
+     *
+     * @return array{type: 'integer'|'number'|'string', minimum?: int, pattern?: string}
+     */
+    private static function numberHeldTo(string $requirement, ?bool $utf8): array
+    {
+        $pattern = '{^(?:' . $requirement . ')$}sD' . (true === $utf8 ? 'u' : '');
+        $matches = static fn (string $value): bool => 1 === preg_match($pattern, $value);
+
+        $from = $matches('0') ? 0 : 1;
+        // A ceiling of digits past any a real id has shows at the last of these.
+        $unbounded = array_all(['1', '2', '9', '10', '99', '100', '1000', '123456789012', str_repeat('9', 64)], $matches);
+        if ($unbounded) {
+            $type = $matches('1.5') ? 'number' : 'integer';
+
+            return $matches('-1') ? ['type' => $type] : ['type' => $type, 'minimum' => $from];
+        }
+
+        $routed = PortableRegex::routePattern($requirement, $utf8);
+
+        return null === $routed ? ['type' => 'number'] : ['type' => 'string', 'pattern' => $routed];
+    }
+
+    /**
+     * Properties by name, as JSON reads them: keys PHP holds as 0, 1, … — named by numbers — would be
+     * written as a list, which `properties` can't be.
+     *
+     * @param array<array-key, array<string, mixed>> $properties
+     *
+     * @return array<array-key, array<string, mixed>>|stdClass
+     */
+    private static function properties(array $properties): array|stdClass
+    {
+        return array_is_list($properties) && [] !== $properties ? (object) $properties : $properties;
+    }
+
+    /**
+     * The keys of the shape a type declares, by name — itself, or the one shape of a nullable or a
+     * union; an intersection's own, where what it extends can't be read, as the top level reads them
+     * ({@see ShapeType::declaredBy()}).
+     *
+     * @return array<string, ShapeField>
+     */
+    private static function shapeKeys(?ParsedType $type): array
+    {
+        $keys = [];
+        foreach (self::declaredShape($type)->fields ?? [] as $key) {
+            $keys[$key->name] = $key;
+        }
+
+        return $keys;
+    }
+
+    /**
+     * The shape a type declares: itself, or the one shape of a nullable or a union; an intersection's
+     * own keys, where what it extends can't be read ({@see ShapeType::declaredBy()}).
+     */
+    private static function declaredShape(?ParsedType $type): ?ShapeType
+    {
+        return ShapeType::declaredBy(self::soleMember($type, ShapeType::class) ?? self::soleMember($type, IntersectionType::class));
+    }
+
+    /**
+     * The type of a list's items — of the list itself, or the one list of a nullable or a union.
+     */
+    private static function listItem(?ParsedType $type): ?ParsedType
+    {
+        return self::soleMember($type, ListType::class)?->inner;
+    }
+
+    /**
+     * The type itself if it is a `$kind`, or the one `$kind` among a nullable's or a union's
+     * members — none when there are two to choose between.
+     *
+     * @template T of ParsedType
+     *
+     * @param class-string<T> $kind
+     *
+     * @return T|null
+     */
+    private static function soleMember(?ParsedType $type, string $kind): ?ParsedType
+    {
+        while ($type instanceof NullableType) {
+            $type = $type->inner;
+        }
+        if ($type instanceof UnionType) {
+            $members = array_values(array_filter($type->types, static fn (ParsedType $member): bool => $member instanceof $kind));
+            $type = 1 === \count($members) ? $members[0] : null;
+        }
+
+        return $type instanceof $kind ? $type : null;
     }
 
     /**
@@ -512,6 +880,85 @@ final class McpManifestBuilder
         }
 
         return $bounds;
+    }
+
+    /**
+     * A string's Regex constraint as the schema's `pattern`, when it has exactly one and it reads the
+     * same in JSON Schema's dialect ({@see self::regexPattern()}). Two must both hold, which one
+     * `pattern` cannot say; one that can't be carried over would leave the other claiming to be the
+     * whole rule. Counted wherever they are nested on the value ({@see HeldConstraints}): one in a
+     * Sequentially or a Compound holds as one beside them, and one among an AtLeastOneOf's
+     * alternatives or a When's may not hold at all, so is no pattern — and one more to count.
+     *
+     * A blank the server refuses the rule may match all the same (`^[A-Z]*$` under a NotBlank): a
+     * minimum length of 1 refuses it too. A lookahead (`(?!$)`) would, but RE2 and JSON Schema's
+     * interoperable subset don't read one.
+     *
+     * @param list<Constraint> $always the field's constraints that always hold ({@see HeldConstraints::always()})
+     *
+     * @return array{pattern?: string, minLength?: int}
+     */
+    private function patternOf(CollectedFormField $field, string $type, array $always): array
+    {
+        if ('string' !== $type) {
+            return [];
+        }
+
+        $regexes = array_values(array_filter(HeldConstraints::any($field->constraints), static fn (Constraint $constraint): bool => $constraint instanceof Regex));
+        $regex = $regexes[0] ?? null;
+        if (1 !== \count($regexes) || null === $regex?->pattern || !\in_array($regex, $always, true)) {
+            return [];
+        }
+        $pattern = $this->regexPattern($regex, $field);
+        if (null === $pattern) {
+            return [];
+        }
+
+        return $this->refusesBlank($field) && 1 === preg_match($regex->pattern, '') ? ['pattern' => $pattern, 'minLength' => 1] : ['pattern' => $pattern];
+    }
+
+    /**
+     * A Regex constraint as a `pattern`, describing every value the server takes. Only a whole-value
+     * rule both dialects read alike carries over ({@see PortableRegex::wholeValueRule()}), with the
+     * value matched as it was sent (no normaliser, and no transformer of the form's: the rule reads
+     * what that makes of the value) and a match that must succeed.
+     *
+     * Around the rule goes what reaches it. The form trims the value first (its `trim` option, on by
+     * default), so the pattern is the rule on a trimmed value — refusing padding the server would
+     * take off — unless the rule could match the padding itself. A blank value is let through where
+     * nothing refuses it (refusesBlank()). And PCRE's `$` without `D` also matches before a final
+     * newline, which trimming leaves none of.
+     */
+    private function regexPattern(Regex $regex, CollectedFormField $field): ?string
+    {
+        if (!$regex->match || null !== $regex->normalizer || $field->transformsValue) {
+            return null;
+        }
+
+        $rule = null === $regex->pattern ? null : PortableRegex::wholeValueRule($regex->pattern);
+        if (null === $rule) {
+            return null;
+        }
+        [$inner, $flags] = $rule;
+
+        // The rule as it reads the trimmed value. A padded value the server would trim is refused —
+        // costing a caller nothing — rather than allowed with `\p{…}` padding, which only
+        // Unicode-mode regex reads. Where the rule could match the padding itself (a space, a control
+        // character, a negated class), a padded value it accepts may trim to one it doesn't, so there
+        // is no pattern.
+        if ($field->trim && PortableRegex::matchesPadding($inner)) {
+            return null;
+        }
+
+        // A trimmed value has no final newline for `$` to match before.
+        $newline = $field->trim || str_contains($flags, 'D') ? '' : '\n?';
+        $value = '(?:' . $inner . ')' . $newline;
+        // A blank value reaches the validator as null, trimmed or not, and the Regex lets it through.
+        if (!$this->refusesBlank($field)) {
+            $value = '' === $newline ? $value . '?' : '(?:' . $value . ')?';
+        }
+
+        return '^' . $value . '$';
     }
 
     private function tighter(string $keyword, int|float $current, int|float $limit): int|float
@@ -566,7 +1013,7 @@ final class McpManifestBuilder
 
     private function scalarTypeOf(string $formTypeClass): string
     {
-        $shortName = $this->shortName($formTypeClass);
+        $shortName = ClassNames::short($formTypeClass);
 
         return match (true) {
             str_contains($shortName, 'Boolean') => 'boolean',
@@ -574,12 +1021,5 @@ final class McpManifestBuilder
             str_contains($shortName, 'Number'), str_contains($shortName, 'Money') => 'number',
             default => 'string',
         };
-    }
-
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-
-        return false === $position ? $className : substr($className, $position + 1);
     }
 }

@@ -51,6 +51,8 @@ final class RecordVerdictData
     /** @var list<ReadingData> */
     #[Param('The evidence, one entry per figure.')]
     #[Assert\Count(min: 1, max: 20)]
+    // Each reading's own constraints are validated only because this cascades.
+    #[Assert\Valid]
     public array $readings = [];
 
     public ?LabelOperations $labels = null;

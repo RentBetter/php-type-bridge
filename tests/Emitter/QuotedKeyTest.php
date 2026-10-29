@@ -15,6 +15,7 @@ use PTGS\TypeBridge\Emitter\TypeToTsConverter;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
+use ReflectionMethod;
 
 /**
  * A quoted PHPDoc key is written as TypeScript needs it: bare when it is an identifier — `$type`
@@ -54,6 +55,12 @@ final class QuotedKeyTest extends TestCase
     {
         self::assertSame('{ $type: string; id: string }', $this->convert("array{'\$type': string, \"id\": string}"));
         self::assertSame("{ 'my-key': number; 'it\\'s'?: string; 0: boolean }", $this->convert("array{'my-key': int, \"it's\"?: string, 0: bool}"));
+    }
+
+    public function test_the_one_place_that_decides_says_so(): void
+    {
+        // Its docblock says it is the only place a key's spelling is decided; it sits on it.
+        self::assertStringContainsString('so this is the only place that decides', (string)new ReflectionMethod(TypeToTsConverter::class, 'propertyName')->getDocComment());
     }
 
     public function test_property_names(): void

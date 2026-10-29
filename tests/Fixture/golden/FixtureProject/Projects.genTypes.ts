@@ -92,9 +92,18 @@ export interface UpdateProjectResponse {
 }
 
 // Endpoint inputs
+/** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out, and only so. A primitive, a branded one included, is as it is, and a list or a tuple stays one. */
+export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | null | undefined
+  ? T
+  : T extends readonly unknown[]
+    ? { [K in keyof T]: AsQuery<T[K]> }
+    : T extends object
+      ? { [K in keyof T as null extends T[K] ? K : never]?: AsQuery<Exclude<T[K], null>> } & { [K in keyof T as null extends T[K] ? never : K]: AsQuery<T[K]> }
+      : T;
+
 export type ArchiveProjectPathParams = ProjectPathParams;
 
-export type ListProjectsQuery = ProjectFiltersData;
+export type ListProjectsQuery = AsQuery<ProjectFiltersData>;
 
 export type ShowProjectPathParams = ProjectPathParams;
 

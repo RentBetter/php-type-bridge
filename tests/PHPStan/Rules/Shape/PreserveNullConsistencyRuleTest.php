@@ -48,6 +48,23 @@ final class PreserveNullConsistencyRuleTest extends RuleTestCase
         ]);
     }
 
+    public function testHoldsAnEnumsShapeToItTooByTheNameItIsEmittedAs(): void
+    {
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Shape/Negative/MissingPreserveNullStatus.php',
+            __DIR__ . '/../../Fixtures/Shape/Negative/MissingPreserveNullNamedStatus.php',
+        ], [
+            [
+                'Field `hint` in shape `MissingPreserveNullStatusData` (on PTGS\\TypeBridge\\Tests\\PHPStan\\Fixtures\\Shape\\Negative\\MissingPreserveNullStatus) has `T|null` annotation but is not listed in `typeBridge.preserveNull`. Change the annotation to `?T` (emits as `hint?: T`; field is omitted when null), or add `MissingPreserveNullStatusData.hint` to preserveNull if null is semantically meaningful for this field.',
+                15,
+            ],
+            [
+                'Field `hint` in shape `MissingPreserveNullNamedStatus` (on PTGS\\TypeBridge\\Tests\\PHPStan\\Fixtures\\Shape\\Negative\\MissingPreserveNullNamedStatus) has `T|null` annotation but is not listed in `typeBridge.preserveNull`. Change the annotation to `?T` (emits as `hint?: T`; field is omitted when null), or add `MissingPreserveNullNamedStatus.hint` to preserveNull if null is semantically meaningful for this field.',
+                17,
+            ],
+        ]);
+    }
+
     public function testFlagsOptionalAnnotationOnPreserveNullField(): void
     {
         $this->preserveNull = ['UnnecessaryOptionalView.archivedAt'];

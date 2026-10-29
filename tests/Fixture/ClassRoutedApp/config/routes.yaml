@@ -1,0 +1,29 @@
+notes_controllers:
+    resource:
+        path: ../Notes/
+        namespace: PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes
+    type: attribute
+    prefix: '/api'
+
+# Dev imports PreviewNotes too, under another prefix, and is listed first: production's is the one served.
+when@dev:
+    preview_notes_dev:
+        resource:
+            path: ../PreviewNotes/
+            namespace: PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\PreviewNotes
+        type: attribute
+        prefix: '/api/dev-preview'
+
+when@prod:
+    live_notes:
+        resource:
+            path: ../LiveNotes/
+            namespace: PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\LiveNotes
+        type: attribute
+        prefix: '/api/live'
+    preview_notes:
+        resource:
+            path: ../PreviewNotes/
+            namespace: PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\PreviewNotes
+        type: attribute
+        prefix: '/api/preview'

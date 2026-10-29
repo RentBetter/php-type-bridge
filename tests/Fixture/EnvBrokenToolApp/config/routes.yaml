@@ -1,0 +1,12 @@
+notes_controllers:
+    resource:
+        path: ../Notes/
+        namespace: PTGS\TypeBridge\Tests\Fixture\EnvBrokenToolApp\Notes
+    type: attribute
+    prefix: '/api'
+
+# Only the dev kernel loads this, from a bundle a standalone reader can't locate.
+when@dev:
+    web_profiler_wdt:
+        resource: '@WebProfilerBundle/Resources/config/routing/wdt.xml'
+        prefix: /_wdt

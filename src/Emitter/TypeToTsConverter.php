@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Emitter;
 
 use PTGS\TypeBridge\Config\IncludeConvention;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IdOfType;
@@ -17,10 +18,12 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
+use PTGS\TypeBridge\Parser\ScopedType;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Parser\ValueOfType;
+use PTGS\TypeBridge\Support\TypeScriptTypes;
 use RuntimeException;
 
 /**
@@ -47,6 +50,59 @@ final readonly class TypeToTsConverter
     private const string BARE_PROPERTY_NAME = '/^(?:[A-Za-z_$][A-Za-z0-9_$]*|0|[1-9][0-9]*)$/';
 
     /**
+     * The type of the class a name carries, where it is the class that the name means: where no
+     * alias of the module it is written in has that name. Null where the name is that module's alias.
+     *
+     * @param string $aliasDomain the module the name is written in ({@see ConversionScope::$aliasDomain})
+     */
+    public function classSymbol(NameRefType $type, string $aliasDomain): ?EmitImport
+    {
+        if (null === $type->class || null === $this->classTypes || $this->symbols->has($aliasDomain, $type->name)) {
+            return null;
+        }
+
+        return $this->classTypes->resolve($type->class);
+    }
+
+    /**
+     * What a name refers to in a scope — the one choice converting a type and collecting what its
+     * module imports both make. A name used bare that the file imports is that import, under the name
+     * it is imported as (no module: it is named already). Otherwise, written where it means a class,
+     * the JSON the class serialises to — unless an alias of the same name in the module it is written
+     * in wins: the module's, or for an inherited property its base's, whichever module emits it — or
+     * that module's alias. A config alias is every module's, declared by each that uses it: this one's.
+     * A name resolved to a class is never an import's, whatever its short name.
+     *
+     * @return array{0: string|null, 1: string} the module the symbol is declared in, null for an
+     *         import's local name; and the symbol
+     */
+    public function referenceOf(NameRefType $type, ConversionScope $scope): array
+    {
+        if (null === $type->class && isset($scope->importedSymbols[$type->name])) {
+            return [null, $scope->importedSymbols[$type->name]];
+        }
+
+        $aliasDomain = $this->symbols->isShared($type->name) ? $scope->domain : $scope->aliasDomain ?? $scope->domain;
+        $symbol = $this->classSymbol($type, $aliasDomain);
+
+        return null !== $symbol ? [$symbol->targetDomain, $symbol->canonicalName] : [$aliasDomain, $this->symbols->resolve($aliasDomain, $type->name)];
+    }
+
+    /**
+     * The scope a type written in another file is read in ({@see ScopedType}): that file's imports,
+     * under the names this module imports their types as, and its module's aliases for its bare names.
+     */
+    public function scopeOf(ScopedType $type, ConversionScope $scope): ConversionScope
+    {
+        $symbols = [];
+        foreach (ImportedType::usedIn($type->imports, $type->inner) as $import) {
+            $symbols[$import->localAlias] = self::localName($import->targetDomain, $this->symbols->resolve($import->targetDomain, $import->targetTypeName), $scope);
+        }
+
+        return new ConversionScope($scope->domain, $symbols, $scope->foreignAliases, null === $type->domain || $type->domain === $scope->domain ? null : $type->domain);
+    }
+
+    /**
      * A shape key as a TypeScript property name: as written when it can be (`id`, `$type`), and
      * quoted when it cannot (`'my-key'`). The parser hands keys over unquoted, whatever the
      * PHPDoc spelling, so this is the only place that decides.
@@ -54,6 +110,15 @@ final readonly class TypeToTsConverter
     public static function propertyName(string $name): string
     {
         return 1 === preg_match(self::BARE_PROPERTY_NAME, $name) ? $name : self::stringLiteral($name);
+    }
+
+    /**
+     * What a symbol of a module is called where the scope is emitted: its own name in the same
+     * module, else the name it is imported under.
+     */
+    private static function localName(string $domain, string $symbol, ConversionScope $scope): string
+    {
+        return $domain === $scope->domain ? $symbol : $scope->foreignAliases[$domain][$symbol] ?? $symbol;
     }
 
     public static function stringLiteral(string $value): string
@@ -134,8 +199,9 @@ final readonly class TypeToTsConverter
             );
         }
 
+        // Under the name this module imports it as, where that clashes with one of its own.
         if ($type instanceof ValueOfType) {
-            return $this->enumName($type->enumClass);
+            return self::localName($this->names->enumDomain($type->enumClass), $this->enumName($type->enumClass), $scope);
         }
 
         if ($type instanceof IdOfType) {
@@ -147,25 +213,20 @@ final readonly class TypeToTsConverter
                 ));
             }
 
-            return $this->enumIds->resolve($type->enumClass)->canonicalName;
+            $ids = $this->enumIds->resolve($type->enumClass);
+
+            return self::localName($ids->targetDomain, $ids->canonicalName, $scope);
+        }
+
+        // Written in another file: read with that file's imports, its bare names that module's.
+        if ($type instanceof ScopedType) {
+            return $this->convert($type->inner, $this->scopeOf($type, $scope));
         }
 
         if ($type instanceof NameRefType) {
-            if (isset($scope->importedSymbols[$type->name])) {
-                return $scope->importedSymbols[$type->name];
-            }
+            [$domain, $symbol] = $this->referenceOf($type, $scope);
 
-            // A name no alias answers to, written where it means a class: the JSON the class
-            // serialises to. An alias of the same name always wins.
-            if (null !== $type->class && null !== $this->classTypes && !$this->symbols->has($scope->domain, $type->name)) {
-                $symbol = $this->classTypes->resolve($type->class);
-
-                return $symbol->targetDomain === $scope->domain
-                    ? $symbol->canonicalName
-                    : $scope->foreignAliases[$symbol->targetDomain][$symbol->canonicalName] ?? $symbol->canonicalName;
-            }
-
-            return $this->symbols->resolve($scope->domain, $type->name);
+            return null === $domain ? $symbol : self::localName($domain, $symbol, $scope);
         }
 
         if ($type instanceof TupleType) {
@@ -183,12 +244,9 @@ final readonly class TypeToTsConverter
 
         if ($type instanceof ShapeType) {
             $fields = array_map(function (ShapeField $field) use ($scope): string {
-                $optional = $field->optional || $this->isIncluded($field->type);
-                $fieldType = $field->type;
-                if ($fieldType instanceof NullableType && $fieldType->optional) {
-                    $optional = true;
-                    $fieldType = $fieldType->inner;
-                }
+                $optional = $field->mayBeLeftOut() || $this->isIncluded($field->type);
+                // `key: ?T` is emitted `key?: T`: left out, not sent as null.
+                $fieldType = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
 
                 return \sprintf('%s%s: %s', self::propertyName($field->name), $optional ? '?' : '', $this->convert($fieldType, $scope));
             }, $type->fields);
@@ -244,13 +302,10 @@ final readonly class TypeToTsConverter
      */
     private function listOf(ParsedType $inner, ConversionScope $scope): string
     {
+        // Read off what it converts to: a union a scalar, a map or another file's type makes too.
         $converted = $this->convert($inner, $scope);
-        $compound = $inner instanceof UnionType
-            || $inner instanceof IntersectionType
-            || ($inner instanceof NullableType && !$inner->optional)
-            || ($inner instanceof ScalarType && \in_array($inner->base(), ['scalar', 'array-key'], true));
 
-        return $compound ? '(' . $converted . ')[]' : $converted . '[]';
+        return TypeScriptTypes::needsBrackets($converted) ? '(' . $converted . ')[]' : $converted . '[]';
     }
 
     public function enumName(string $enumClass): string

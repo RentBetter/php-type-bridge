@@ -10,6 +10,10 @@ use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
+use PTGS\TypeBridge\Model\CollectedDomain;
+use PTGS\TypeBridge\Model\CollectedType;
+use PTGS\TypeBridge\Model\ImportedType;
+use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Tests\Fixture\FixtureProject;
@@ -77,7 +81,7 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface UpdateProjectResponse {', $projects);
         self::assertStringContainsString('project: ProjectView;', $projects);
         self::assertStringContainsString('export type DeleteProjectResponse = null;', $projects);
-        self::assertStringContainsString('export type ListProjectsQuery = ProjectFiltersData;', $projects);
+        self::assertStringContainsString('export type ListProjectsQuery = AsQuery<ProjectFiltersData>;', $projects);
         self::assertStringContainsString('export type ShowProjectPathParams = ProjectPathParams;', $projects);
         self::assertStringContainsString('export type CreateProjectBody = CreateProjectRequestData;', $projects);
         self::assertStringContainsString('export type UpdateProjectBody = UpdateProjectRequestData;', $projects);
@@ -138,7 +142,7 @@ final class TypeScriptEmitterTest extends TestCase
         self::assertStringContainsString('export interface ICreateProjectRequestData {', $projects);
         self::assertStringContainsString('export interface IUpdateProjectRequestData {', $projects);
         self::assertStringContainsString('export interface IShowProjectResponse {', $projects);
-        self::assertStringContainsString('export type ListProjectsQueryParams = IProjectFiltersData;', $projects);
+        self::assertStringContainsString('export type ListProjectsQueryParams = AsQuery<IProjectFiltersData>;', $projects);
         self::assertStringContainsString('export type ShowProjectRouteParams = IProjectPathParams;', $projects);
         self::assertStringContainsString('export type CreateProjectPayload = ICreateProjectRequestData;', $projects);
         self::assertStringContainsString('export type UpdateProjectPayload = IUpdateProjectRequestData;', $projects);
@@ -188,6 +192,24 @@ final class TypeScriptEmitterTest extends TestCase
 
         (new TypeScriptEmitter($enumResolver, new DomainMapper('/tmp/type-bridge-output')))
             ->emit($typeDomains, $responseDomains);
+    }
+
+    public function test_an_enums_shape_is_kept_in_preserve_null_by_its_collected_name(): void
+    {
+        // Emitted `NoteStatusShape` under its suffix, it is `NoteStatusData` to preserveNull, as the
+        // PHPStan rule, which knows no suffix, names it.
+        $srcDir = __DIR__ . '/../Fixture/EnumShapeNullFixtures';
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($srcDir);
+
+        $notes = (new TypeScriptEmitter(
+            enumResolver: $enumResolver,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            naming: new TypeScriptNaming(enumShapeSuffix: 'Shape'),
+            preserveNull: ['NoteStatusData.hint'],
+        ))->emit((new PhpDocTypeCollector())->collect($srcDir))['Notes'];
+
+        self::assertStringContainsString("export interface NoteStatusShape {\n  id: string;\n  hint: string | null;\n}", $notes);
     }
 
     public function test_it_fails_when_custom_names_collide(): void
@@ -252,5 +274,28 @@ final class TypeScriptEmitterTest extends TestCase
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             preserveNull: ['ProjectAdminView.internalNotes', 'ProjectOwnerView.ownerNotes'],
         ))->emit($typeDomains, $responseDomains, $contracts);
+    }
+
+    public function test_an_import_of_a_type_no_module_emits_fails_rather_than_naming_another(): void
+    {
+        // Every import a collector keeps is of a type some module emits. One that isn't — here of
+        // its own module, whose `Gone` is another class's — must not fall through to whatever the
+        // emitting module happens to call by the name it is imported as.
+        $notes = new CollectedDomain('Notes');
+        $notes->types['Gone'] = new CollectedType(name: 'Gone', definition: 'array{a: int}', parsed: (new PhpDocShapeParser())->parse('array{a: int}'), sourceFile: __FILE__, domain: 'Notes', ownerClass: self::class);
+        $notes->types['Line'] = new CollectedType(
+            name: 'Line',
+            definition: 'array{row: Gone}',
+            parsed: (new PhpDocShapeParser())->parse('array{row: Gone}'),
+            sourceFile: __FILE__,
+            domain: 'Notes',
+            ownerClass: self::class,
+            imports: [new ImportedType(localAlias: 'Gone', targetClass: 'App\\Notes\\Rows', targetTypeName: 'Row', targetDomain: 'Notes', sourceAlias: 'Row')],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Unknown TypeScript symbol "Row"');
+
+        (new TypeScriptEmitter(new EnumResolver(), new DomainMapper('/tmp/type-bridge-output')))->emit(['Notes' => $notes]);
     }
 }

@@ -46,7 +46,26 @@ final class PhpFileClassLocator
     }
 
     /**
-     * Whether a class this locator found can actually be loaded in the current install.
+     * Each short class name with the classes that have it, for resolving a name written without
+     * its namespace.
+     *
+     * @param list<string> $classNames
+     *
+     * @return array<string, list<string>>
+     */
+    public function shortNameMap(array $classNames): array
+    {
+        $map = [];
+        foreach ($classNames as $className) {
+            $map[ClassNames::short($className)][] = $className;
+        }
+
+        return $map;
+    }
+
+    /**
+     * Whether a class, interface or trait this locator found can actually be loaded in the current
+     * install. The one rule every collector asks.
      *
      * A source tree carries classes that only exist for some installs: a PHPStan rule or
      * extension kept under src/ implements interfaces from a require-dev package, so in a
@@ -58,11 +77,32 @@ final class PhpFileClassLocator
      */
     public function isLoadable(string $className): bool
     {
+        return self::loads($className);
+    }
+
+    /**
+     * The one loadability rule ({@see self::isLoadable()}), for a caller with no locator to ask.
+     *
+     * @phpstan-assert-if-true class-string $className
+     */
+    public static function loads(string $className): bool
+    {
         try {
-            return class_exists($className);
+            return class_exists($className) || interface_exists($className) || trait_exists($className);
         } catch (\Error) {
             return false;
         }
+    }
+
+    /**
+     * Whether the name is an enum this install can load: asked without loading one whose
+     * declaration throws ({@see self::loads()}).
+     *
+     * @phpstan-assert-if-true class-string<\UnitEnum> $className
+     */
+    public static function loadsEnum(string $className): bool
+    {
+        return self::loads($className) && enum_exists($className);
     }
 
     /**

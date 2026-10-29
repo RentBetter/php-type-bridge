@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Command;
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Shape\ShapeRenderer;
 use PTGS\TypeBridge\Shape\ShapeScaffolder;
+use PTGS\TypeBridge\Support\ClassNames;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
@@ -142,7 +143,7 @@ final class ScaffoldShapesCommand extends Command
         $found = [];
 
         foreach (array_keys($classFiles) as $className) {
-            if (!$this->classLocator->isLoadable($className)) {
+            if (!$this->classLocator->isLoadable($className) || (new ReflectionClass($className))->isTrait()) {
                 continue;
             }
 
@@ -175,7 +176,7 @@ final class ScaffoldShapesCommand extends Command
 
     private function insertDocBlock(string $contents, string $dataClass, string $block): string
     {
-        $shortName = substr($dataClass, (int) strrpos($dataClass, '\\') + 1);
+        $shortName = ClassNames::short($dataClass);
         $pattern = '/^((?:final\s+|readonly\s+|abstract\s+)*class\s+' . preg_quote($shortName, '/') . '\b)/m';
 
         return (string) preg_replace($pattern, $block . "\n" . '$1', $contents, 1);

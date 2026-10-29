@@ -59,6 +59,126 @@ final class McpManifestGeneratorTest extends TestCase
         self::assertSame(['/api/ping'], array_column($manifest['tools'], 'path'));
     }
 
+    public function testWhetherARouteMatchesByCharacterIsWhatTheRouterServes(): void
+    {
+        // The method says `utf8: false`; the import that loads it says `utf8: true`, and the import
+        // wins. Matched by character, `\w` is Unicode in PCRE and ASCII in JSON Schema: no pattern.
+        $dir = __DIR__ . '/../Fixture/Utf8RoutedMcpFixtures';
+        $manifest = (new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir));
+
+        $code = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties']['code'] ?? null;
+        self::assertSame(['type' => 'string'], $code);
+    }
+
+    public function testWhatAPathParamMustLookLikeIsWhatTheRouterServes(): void
+    {
+        // The method says a code is lettered; the import that loads it says a number will do too,
+        // and the import wins: the tool must not refuse `123`, which the router serves.
+        $dir = __DIR__ . '/../Fixture/RequirementRoutedMcpFixtures';
+        $manifest = (new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir));
+
+        $properties = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties'] ?? [];
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]{2,5}-[0-9]+|[0-9]+)$'], $properties['code'] ?? null);
+        // And what it is: the import's `[0-9]+` is a number.
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['page'] ?? null);
+    }
+
+    public function testAMethodRoutedTwiceIsDescribedByItsFirstRoute(): void
+    {
+        // Its params are named from the first #[Route]; its path and their requirements must be
+        // that route's too, not whichever route the collection happens to list last.
+        $dir = __DIR__ . '/../Fixture/RequirementRoutedMcpFixtures';
+        $tool = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name')['ShowNote'] ?? [];
+
+        self::assertSame('/notes/{id}', $tool['path'] ?? null);
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $tool['inputSchema']['properties']['id'] ?? null);
+    }
+
+    public function testItIsDescribedByItsFirstRouteWhateverTheRouterSortsFirst(): void
+    {
+        // A priority lists the second route first, and its path ends the way the first's does.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        $tools = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name');
+
+        self::assertSame('/api/notes/{id}', $tools['ShowNote']['path'] ?? null);
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $tools['ShowNote']['inputSchema']['properties']['id'] ?? null);
+    }
+
+    public function testARequirementOrADefaultWrittenInlineIsReadAsTheRouterReadsIt(): void
+    {
+        // `{page<[0-9]+>}` is the param `page`, a number; `{slug?intro}` is `slug`. Routed or not,
+        // the path a client is given names them as the router serves them.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        foreach (['/api/pages/{page}/{slug}' => TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir), '/pages/{page}/{slug}' => new TypeBridgeConfig()] as $path => $config) {
+            $page = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowPage'] ?? [];
+
+            self::assertSame($path, $page['path'] ?? null);
+            self::assertSame(['type' => 'integer', 'minimum' => 0], $page['inputSchema']['properties']['page'] ?? null);
+            self::assertSame(['type' => 'string'], $page['inputSchema']['properties']['slug'] ?? null);
+            self::assertSame(['page', 'slug'], $page['inputSchema']['required'] ?? null);
+        }
+    }
+
+    public function testAParamMappedToAnArgumentIsReadAsTheRouterReadsIt(): void
+    {
+        // `{slug:note}` is served as `{slug}`, routed or not: a client substituting `slug` finds it.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        foreach (['/api/notes/by-slug/{slug}' => TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir), '/notes/by-slug/{slug}' => new TypeBridgeConfig()] as $path => $config) {
+            $note = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowNoteBySlug'] ?? [];
+
+            self::assertSame($path, $note['path'] ?? null);
+            self::assertSame(['slug'], $note['inputSchema']['required'] ?? null);
+        }
+    }
+
+    public function testARequirementWrittenAnchoredIsTypedAsTheProjectKeysIt(): void
+    {
+        // The project keys its requirement type `^\d+$`, as the attribute writes it; the router takes
+        // the anchors off. Routed or not, the type is the project's.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        foreach ([TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml', 'requirementTypes' => ['^\\d+$' => 'number']], $dir), TypeBridgeConfig::fromArray(['requirementTypes' => ['^\\d+$' => 'number']])] as $config) {
+            $anchored = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowAnchored'] ?? [];
+
+            self::assertSame(['type' => 'integer', 'minimum' => 0], $anchored['inputSchema']['properties']['id'] ?? null);
+            $code = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowAnchoredCode'] ?? [];
+            self::assertSame(['type' => 'string', 'pattern' => '^(?:[a-z]+)$'], $code['inputSchema']['properties']['code'] ?? null);
+        }
+    }
+
+    public function testAToolIsPublishedWhateverAResponseSends(): void
+    {
+        // The manifest asks of a response only its status: one whose properties can't be read —
+        // typed with an alias from nowhere — fails its TypeScript, not the tools.
+        $dir = __DIR__ . '/../Fixture/StatusOnlyFixtures';
+        $tools = array_column((new McpManifestGenerator())->generate($dir, new TypeBridgeConfig())['tools'], null, 'name');
+
+        self::assertSame('/api/notes/{id}', $tools['ShowNote']['path'] ?? null);
+    }
+
+    public function testARequirementTypedWithAProjectWideAliasIsTheJsonTypeItStandsFor(): void
+    {
+        // `Code` is a string, so the argument is one, holding to its requirement; `Id` is `Num`, a
+        // number. A TypeScript alias is no JSON Schema type.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        $config = TypeBridgeConfig::fromArray(['requirementTypes' => ['^\\d+$' => 'Id', '[a-z]+' => 'Code'], 'typeAliases' => ['Id' => 'Num', 'Num' => 'number', 'Code' => 'string']]);
+        $tools = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name');
+
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $tools['ShowAnchored']['inputSchema']['properties']['id'] ?? null);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[a-z]+)$'], $tools['ShowAnchoredCode']['inputSchema']['properties']['code'] ?? null);
+    }
+
+    public function testAMethodWhoseFirstRouteIsNotServedIsDescribedByTheOneThatIs(): void
+    {
+        // Its first #[Route] is confined to the dev env; the router serves the second, so the path,
+        // the params' names and their requirements are all that one's.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        $tool = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name')['ShowEnvNote'] ?? [];
+
+        self::assertSame('/api/env/notes/{id}', $tool['path'] ?? null);
+        self::assertSame(['id'], $tool['inputSchema']['required'] ?? null);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['id'] ?? null);
+    }
+
     public function testWithoutRoutingTheAttributePathStands(): void
     {
         // Existing consumers configure no routing and put the full path on the attribute;
