@@ -16,6 +16,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\CliqueFixtures\Notes;
  *     c6?: Clique6,
  *     c7?: Clique7,
  *     c9?: Clique9,
+ *     c10?: Clique10,
  * }
  */
 final class Clique8

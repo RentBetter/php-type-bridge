@@ -72,6 +72,12 @@ final class EndpointContractCollector
     /** @var array<string, bool> by name: whether a project-wide alias admits null, read once however many keys it types */
     private array $configAliasesAdmittingNull = [];
 
+    /** How many aliases and classes one contract reads through, at most. */
+    private const int READS = 1000;
+
+    /** How many more the contract being read may read through ({@see self::mayRead()}). */
+    private int $readsLeft = self::READS;
+
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
      *        merged over {@see RequirementType::defaults()}
@@ -673,9 +679,10 @@ final class EndpointContractCollector
      */
     private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): array
     {
+        $this->readsLeft = self::READS;
         $self = $this->parseType($definition);
         if ($self instanceof NameRefType && null === $self->class) {
-            return [ShapeType::declaredBy($this->readAliases($self, $class, $file, $srcDir, $classFiles, [], $inQuery, $nullAsked)), null];
+            return [ShapeType::declaredBy($this->readAliases($self, $class, $file, $srcDir, $classFiles, self::reading($file), $inQuery, $nullAsked)), null];
         }
 
         return [
@@ -743,7 +750,7 @@ final class EndpointContractCollector
      */
     private function inheritedShape(IntersectionType $self, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): ?ShapeType
     {
-        $base = $this->readAliases($self->base, $class, $file, $srcDir, $classFiles, [], $inQuery, $nullAsked);
+        $base = $this->readAliases($self->base, $class, $file, $srcDir, $classFiles, self::reading($file), $inQuery, $nullAsked);
 
         return $base instanceof ShapeType ? $base : null;
     }
@@ -783,7 +790,7 @@ final class EndpointContractCollector
      */
     private function withAliasesRead(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): ?ShapeType
     {
-        $read = null === $shape ? null : $this->readAliases($shape, $class, $file, $srcDir, $classFiles, [], $inQuery, $nullAsked);
+        $read = null === $shape ? null : $this->readAliases($shape, $class, $file, $srcDir, $classFiles, self::reading($file), $inQuery, $nullAsked);
 
         return $read instanceof ShapeType ? $read : $shape;
     }
@@ -850,7 +857,7 @@ final class EndpointContractCollector
 
         // Keyed by the name it is declared under, which an import may give another.
         $key = $declared['file'] . "\0" . $declared['name'];
-        $parsed = isset($reading[$key]) ? null : $this->parseType($declared['definition']);
+        $parsed = isset($reading[$key]) || !$this->mayRead() ? null : $this->parseType($declared['definition']);
         if (null === $parsed) {
             return $alias;
         }
@@ -859,6 +866,27 @@ final class EndpointContractCollector
         $parsed = $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
 
         return $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true], $inQuery, $nullAsked);
+    }
+
+    /**
+     * The aliases being read where a class's own `_self` is: the class itself, which a key of it
+     * naming it again does not read again.
+     *
+     * @return array<string, true>
+     */
+    private static function reading(string $file): array
+    {
+        return [$file . "\0_self" => true];
+    }
+
+    /**
+     * Whether one more alias or class may be read through for the contract being read: each is read
+     * on every path it is named on, so classes naming one another unroll into every order of them.
+     * Past a bound no real contract nears, a name stays a name.
+     */
+    private function mayRead(): bool
+    {
+        return --$this->readsLeft >= 0;
     }
 
     /**
@@ -882,7 +910,7 @@ final class EndpointContractCollector
         }
         $self = $this->files->emittedDefinitions($class, $file)['_self'] ?? null;
         $key = $file . "\0_self";
-        $parsed = null === $self || isset($reading[$key]) ? null : $this->parseType($self);
+        $parsed = null === $self || isset($reading[$key]) || !$this->mayRead() ? null : $this->parseType($self);
         if (null === $parsed) {
             return $type;
         }

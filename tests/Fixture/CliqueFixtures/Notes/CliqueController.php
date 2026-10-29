@@ -19,4 +19,13 @@ final class CliqueController
     {
         throw new \LogicException('Fixture only.');
     }
+
+    #[Route('/cliques/copy', methods: ['PUT'])]
+    #[ApiRequest(body: CliqueInputType::class)]
+    #[ApiResponses([CliqueResponse::class])]
+    #[McpTool(description: 'Save a copy of a clique.')]
+    public function copyCliqueAction(): CliqueResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
 }

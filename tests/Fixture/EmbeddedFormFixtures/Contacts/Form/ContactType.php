@@ -36,6 +36,7 @@ final class ContactType extends AbstractFormType
             // written in, `['a' => null]`.
             ->add('meta', FormType::class);
         $builder->get('meta')->add('a', TextType::class);
+        $builder->add('courier', PostalType::class, ['required' => false]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

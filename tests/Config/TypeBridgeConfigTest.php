@@ -262,6 +262,16 @@ PHP);
         self::assertSame('staging', $config->routePathResolver()?->env);
     }
 
+    public function test_a_body_is_submitted_with_clear_missing_unless_the_config_says(): void
+    {
+        self::assertTrue(TypeBridgeConfig::fromArray([])->clearMissing);
+        self::assertFalse(TypeBridgeConfig::fromArray(['clearMissing' => false])->clearMissing);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('clearMissing');
+        TypeBridgeConfig::fromArray(['clearMissing' => 'no']);
+    }
+
     public function test_rejects_a_routing_env_that_names_none(): void
     {
         $this->expectException(RuntimeException::class);

@@ -35,6 +35,7 @@ use Symfony\Component\OptionsResolver\Exception\ExceptionInterface as OptionsExc
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\All;
 use Symfony\Component\Validator\Constraints\Choice;
+use Symfony\Component\Validator\Constraints\Valid;
 use Symfony\Component\Validator\Validation;
 use Throwable;
 
@@ -90,7 +91,7 @@ final class FormTypeInspector
 
         return [
             'dataClass' => $dataClass,
-            'fields' => $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig())),
+            'fields' => $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig()), validated: true),
         ];
     }
 
@@ -98,10 +99,14 @@ final class FormTypeInspector
      * @param FormBuilderInterface<mixed> $builder
      * @param bool                        $rewritten whether a listener of the form or of one holding it may
      *                                               rewrite what its fields are sent ({@see self::rewritesChildren()})
+     * @param bool                        $validated whether the object the form's data is gets its own constraints
+     *                                               validated: Symfony validates the root's data, and an embedded
+     *                                               object only where its property cascades (#[Assert\Valid]) — a
+     *                                               field's own `constraints` option holds wherever it is submitted
      *
      * @return list<CollectedFormField>
      */
-    private function collectFields(FormBuilderInterface $builder, bool $rewritten): array
+    private function collectFields(FormBuilderInterface $builder, bool $rewritten, bool $validated): array
     {
         $fields = [];
         $ownerClass = $builder->getFormConfig()->getDataClass();
@@ -116,7 +121,10 @@ final class FormTypeInspector
             $name = (string) $name;
             $propertyPath = $this->resolvePropertyPath($config, $name);
             $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
-            $constraints = $this->collectConstraints($config, $property);
+            $formConstraints = $this->collectConstraints($config, null);
+            $constraints = $validated ? $this->collectConstraints($config, $property) : $formConstraints;
+            // What it holds is validated in turn only where it cascades from a validated object.
+            $cascades = $validated && array_any(HeldConstraints::always($constraints), static fn (Constraint $constraint): bool => $constraint instanceof Valid);
             $entry = $this->entryBuilder($config);
 
             $fields[] = new CollectedFormField(
@@ -137,16 +145,17 @@ final class FormTypeInspector
                 // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
                 // what is sent itself, and none of them is a field a request sends — as a field, or
                 // as each entry of a collection.
-                children: self::isChoice($config) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config)),
-                entryChildren: null !== $entry && $entry->getCompound() && !self::isChoice($entry->getFormConfig()) ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig())) : [],
+                children: self::isChoice($config) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades),
+                entryChildren: null !== $entry && $entry->getCompound() && !self::isChoice($entry->getFormConfig()) ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()), $cascades) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
                 trim: false !== $this->resolveOption($config, 'trim'),
-                blankValue: $this->blankValue($config),
+                blankValue: $this->blankValue($config, self::mappedFieldNames($child)),
                 entryConstraints: $this->entryConstraints($entry, $constraints),
-                entryBlankValue: null === $entry ? null : $this->blankValue($entry->getFormConfig()),
+                entryBlankValue: null === $entry ? null : $this->blankValue($entry->getFormConfig(), self::mappedFieldNames($entry)),
                 transformsValue: $rewritten || self::transformsValue($config),
+                formConstraints: $formConstraints,
             );
         }
 
@@ -163,13 +172,15 @@ final class FormTypeInspector
      * Listeners, which see only what was sent, are not run.
      *
      * A compound field is what its type makes it: a collection is emptied, []; an expanded choice
-     * chooses none; an embedded form is null as far as its own constraints go. A choice a loader
-     * fills is never loaded here. One whose transformer fails a blank is a {@see FailedBlank}: the
-     * form is invalid, as Symfony submits it.
+     * chooses none; an embedded form is a new object of its data class where it is required, null
+     * where it isn't, and with no data class the array its fields are written into, each blank. A
+     * choice a loader fills is never loaded here. One whose transformer fails a blank is a
+     * {@see FailedBlank}: the form is invalid, as Symfony submits it.
      *
      * @param FormConfigInterface<mixed> $config
+     * @param list<string>               $fieldNames the fields an embedded form writes into its data
      */
-    private function blankValue(FormConfigInterface $config): mixed
+    private function blankValue(FormConfigInterface $config, array $fieldNames = []): mixed
     {
         if ($config->getCompound()) {
             for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
@@ -177,23 +188,10 @@ final class FormTypeInspector
                     return [];
                 }
             }
-
             if ($this->isMultipleChoice($config)) {
                 return [];
             }
-
-            // An embedded form with a data class is what its `empty_data` makes of nothing: a new
-            // object of the class where the form is required, null where it isn't.
-            try {
-                $value = null === $config->getDataClass() ? null : $config->getEmptyData();
-                $value = $value instanceof Closure ? $value(new Form($config), null) : $value;
-
-                return \is_object($value) ? $value : null;
-            } catch (Throwable) {
-                return null;
-            }
-        }
-        if (null !== $this->resolveOption($config, 'choice_loader')) {
+        } elseif (null !== $this->resolveOption($config, 'choice_loader')) {
             return $this->isMultipleChoice($config) ? [] : null;
         }
 
@@ -201,6 +199,12 @@ final class FormTypeInspector
             $value = $config->getEmptyData();
             if ($value instanceof Closure) {
                 $value = $value(new Form($config), null);
+            }
+            // An embedded form with no data class is the array its fields are written into, each
+            // blank; one with a data class is what its `empty_data` makes — a new object of the class
+            // where the form is required, null where it isn't.
+            if ($config->getCompound() && null === $config->getDataClass() && [] === $value) {
+                $value = array_fill_keys($fieldNames, null);
             }
             $viewTransformers = $config->getViewTransformers();
             if ([] === $viewTransformers && '' === $value) {
@@ -217,6 +221,25 @@ final class FormTypeInspector
             // An `empty_data` closure that reads what only a request has: what it makes is unknown.
             return null;
         }
+    }
+
+    /**
+     * The names of the fields a form writes into its data.
+     *
+     * @param FormBuilderInterface<mixed> $form
+     *
+     * @return list<string>
+     */
+    private static function mappedFieldNames(FormBuilderInterface $form): array
+    {
+        $names = [];
+        foreach ($form->all() as $name => $field) {
+            if ($field->getMapped()) {
+                $names[] = (string) $name;
+            }
+        }
+
+        return $names;
     }
 
     /**

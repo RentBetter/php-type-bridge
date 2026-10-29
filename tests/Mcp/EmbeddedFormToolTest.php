@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Mcp;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Collector\EndpointContractCollector;
+use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Mcp\McpManifestGenerator;
+use PTGS\TypeBridge\Parser\NameRefType;
+use PTGS\TypeBridge\Parser\ShapeType;
 
 /**
  * An embedded form, end to end: keyed by its data class, read whole, left out.
@@ -26,10 +30,24 @@ final class EmbeddedFormToolTest extends TestCase
         // Symfony makes a required embedded form left out a new AddressData, which `address`'s
         // NotNull takes; `billing` is not required, so it is null, which its NotNull refuses. A new
         // PostalData has its `street` blank, which its NotBlank refuses where `postal` cascades
-        // (#[Assert\Valid]) — not where `shipping` doesn't. `memo`'s field's own `constraints`
-        // hold left out, the form not required as it is; and `meta`, with no data class, is the
-        // array its field is written into, which its NotNull takes.
+        // (#[Assert\Valid]) — not where `shipping` doesn't, nor where `courier`, not required, is
+        // null. `memo`'s field's own `constraints` hold left out, the form not required as it is;
+        // and `meta`, with no data class, is the array its field is written into, which its
+        // NotBlank takes.
         self::assertSame(['billing', 'postal', 'memo'], $this->schema()['required'] ?? null);
+    }
+
+    public function test_a_field_left_out_without_clear_missing_is_its_propertys_none(): void
+    {
+        // Submitted with `clearMissing: false`, a field left out isn't submitted: no form check runs,
+        // its property is null, and its own constraints alone hold — `address`, `billing`, `postal`
+        // and `shipping` by their NotNull, `meta` by its NotBlank; `memo` and `courier` by nothing.
+        self::assertSame(['address', 'billing', 'postal', 'shipping', 'meta'], $this->schema([], clearMissing: false)['required'] ?? null);
+
+        // And within a form sent: `postal`'s `geo`, a new GeoData where it is submitted blank, is null
+        // where it isn't submitted, which its NotNull refuses.
+        self::assertSame(['street'], $this->schema()['properties']['postal']['required'] ?? null);
+        self::assertSame(['street', 'geo'], $this->schema([], clearMissing: false)['properties']['postal']['required'] ?? null);
     }
 
     public function test_a_whole_value_field_is_its_shape_an_enums_values_and_an_aliass_type_included(): void
@@ -55,18 +73,44 @@ final class EmbeddedFormToolTest extends TestCase
         $properties = $this->schema()['properties'];
 
         self::assertSame(['number'], $properties['phones']['items']['required'] ?? null);
+        // PhoneData's own Length is never validated: `phones` doesn't cascade.
+        self::assertSame(['type' => 'string'], $properties['phones']['items']['properties']['number'] ?? null);
         self::assertSame(['type' => ['string', 'null']], $properties['phones']['items']['properties']['label'] ?? null);
         self::assertSame($properties['ref'], $properties['refs']['items'] ?? null);
     }
 
     public function test_classes_naming_each_other_are_read_in_bounded_time(): void
     {
-        // Nine input classes each keyed by every other: unrolled on every path, that is 9! reads.
+        // Ten input classes each keyed by every other: unrolled on every path, that is 9! reads of
+        // each. Each contract may read as many as the first did.
+        $src = __DIR__ . '/../Fixture/CliqueFixtures';
         $started = microtime(true);
-        $tools = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/CliqueFixtures', new TypeBridgeConfig())['tools'];
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Notes'];
 
-        self::assertCount(1, $tools);
         self::assertLessThan(10.0, microtime(true) - $started);
+        self::assertCount(2, $contracts);
+        self::assertEquals($contracts[0]->request?->body?->keys(), $contracts[1]->request?->body?->keys());
+        self::assertInstanceOf(ShapeType::class, $contracts[1]->request?->body?->keys()?->fields[0]->type);
+    }
+
+    public function test_aliases_naming_each_other_are_read_in_bounded_time(): void
+    {
+        // Ten aliases of one class, each with a key of every other.
+        $src = __DIR__ . '/../Fixture/AliasCliqueFixtures';
+        $started = microtime(true);
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Notes'];
+
+        self::assertLessThan(10.0, microtime(true) - $started);
+        self::assertInstanceOf(ShapeType::class, $contracts[0]->request?->body?->keys()?->fields[0]->type);
+    }
+
+    public function test_an_inputs_key_naming_its_own_class_stays_a_name(): void
+    {
+        // NodeInput's `parent` is NodeInput, the class being read: not read again inside itself.
+        $src = __DIR__ . '/../Fixture/SelfNamingInputFixtures';
+        $keys = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Nodes'][0]->request?->body?->keys();
+
+        self::assertInstanceOf(NameRefType::class, $keys?->fields[1]->type);
     }
 
     public function test_a_class_naming_itself_is_read_once_round(): void
@@ -88,9 +132,9 @@ final class EmbeddedFormToolTest extends TestCase
      *
      * @return array<string, mixed>
      */
-    private function schema(array $aliases = []): array
+    private function schema(array $aliases = [], bool $clearMissing = true): array
     {
-        $config = TypeBridgeConfig::fromArray(['typeAliases' => ['UuidStr' => 'string', ...$aliases]]);
+        $config = TypeBridgeConfig::fromArray(['typeAliases' => ['UuidStr' => 'string', ...$aliases], 'clearMissing' => $clearMissing]);
 
         return (new McpManifestGenerator())->generate(self::SRC, $config)['tools'][0]['inputSchema'];
     }

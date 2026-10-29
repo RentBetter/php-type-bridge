@@ -18,6 +18,7 @@ use Symfony\Component\Validator\Constraints as Assert;
  *     shipping?: PostalData,
  *     memo?: MemoData,
  *     meta?: array{a?: string},
+ *     courier?: PostalData,
  * }
  */
 final class ContactData
@@ -50,6 +51,10 @@ final class ContactData
     public ?MemoData $memo = null;
 
     /** @var array<string, mixed>|null */
-    #[Assert\NotNull]
+    #[Assert\NotBlank]
     public ?array $meta = null;
+
+    // Cascades, but not required: left out it is null, and there is no PostalData to validate.
+    #[Assert\Valid]
+    public ?PostalData $courier = null;
 }

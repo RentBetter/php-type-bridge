@@ -43,6 +43,9 @@ final readonly class CollectedFormField
      *                                                 `entry_options` constraints and an All on its property
      * @param mixed                    $entryBlankValue what a collection entry reaches validation as when it is
      *                                                 sent as null or blank, as `$blankValue` says of a field
+     * @param list<Constraint>         $formConstraints the field's own `constraints` option alone, which Symfony
+     *                                                 validates wherever the field is submitted; `$constraints`
+     *                                                 has its property's too, where the object it is on is validated
      * @param bool                     $transformsValue whether the form transforms a submitted value before it is
      *                                                 validated: a model transformer, a view transformer but
      *                                                 TextType's own (which only turns a null into ''), or a
@@ -75,6 +78,7 @@ final readonly class CollectedFormField
         public array $entryConstraints = [],
         public mixed $entryBlankValue = null,
         public bool $transformsValue = false,
+        public array $formConstraints = [],
     ) {}
 
     /**
@@ -112,6 +116,7 @@ final readonly class CollectedFormField
             entryConstraints: $this->entryConstraints,
             entryBlankValue: $this->entryBlankValue,
             transformsValue: $this->transformsValue,
+            formConstraints: $this->formConstraints,
         );
     }
 }

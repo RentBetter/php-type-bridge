@@ -423,8 +423,9 @@ final class PhpDocTypeHelper
                 continue;
             }
 
+            // Several in one statement, by commas: `use A\B, C\D as E;`.
             $prefix = '';
-            $names = [$statement];
+            $names = explode(',', $statement);
             if (1 === preg_match('/^(.*?)\\\\?\{(.*)\}$/s', $statement, $group)) {
                 $prefix = trim($group[1], '\\ ') . '\\';
                 $names = explode(',', $group[2]);

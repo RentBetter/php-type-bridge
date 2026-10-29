@@ -17,7 +17,7 @@ final class PostalType extends AbstractFormType
 {
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
-        $builder->add('street', TextType::class);
+        $builder->add('street', TextType::class)->add('geo', GeoType::class);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

@@ -93,15 +93,18 @@ final class McpManifestBuilder
      * @param IncludeConvention  $includes          whose `query` parameters every tool with a response body takes
      * @param AttributeText|null $paramDescriptions the project's parameter-documentation attribute, read off
      *                                              the data-class property each argument binds
-     */
-    /**
-     * @param array<string, string> $typeAliases the project-wide aliases, name => TypeScript: a key
-     *        typed with one is the JSON type its TypeScript is, where that is a primitive
+     * @param array<string, string> $typeAliases    the project-wide aliases, name => TypeScript: a key
+     *                                              typed with one is the JSON type its TypeScript is, where
+     *                                              that is a primitive
+     * @param bool                  $clearMissing   whether a body is submitted with Symfony's `clearMissing`
+     *                                              on, so a field left out is submitted blank
+     *                                              ({@see \PTGS\TypeBridge\Config\TypeBridgeConfig::$clearMissing})
      */
     public function __construct(
         private readonly IncludeConvention $includes = new IncludeConvention(),
         private readonly ?AttributeText $paramDescriptions = null,
         private readonly array $typeAliases = [],
+        private readonly bool $clearMissing = true,
     ) {}
 
     /**
@@ -253,7 +256,7 @@ final class McpManifestBuilder
             if ($json && $this->takesNull($key, $field)) {
                 $properties[$field->name] = self::withNull($properties[$field->name]);
             }
-            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && $this->refusesBlank($field))) {
+            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($field))) {
                 $required[] = $field->name;
             }
         }
@@ -270,10 +273,44 @@ final class McpManifestBuilder
     {
         $this->blankRefused ??= new WeakMap();
 
-        // An embedded form left out that is a new object of its data class has each of its fields
-        // submitted blank in turn: one refusing that refuses the form.
-        return $this->blankRefused[$field] ??= $this->refusesBlankValue($field->constraints, $field->blankValue)
-            || (\is_object($field->blankValue) && !$field->blankValue instanceof FailedBlank && array_any($field->children, $this->refusesBlank(...)));
+        return $this->blankRefused[$field] ??= $this->refusesSubmittedBlank($field, onData: true);
+    }
+
+    /**
+     * Whether the field submitted blank is refused: its blank against what holds of it — its own
+     * `constraints` option always, its property's only on an object that is there to validate
+     * (`$onData`) — and, for an embedded form, each of its fields submitted blank in turn, which
+     * Symfony does whether the form is required or not. Their properties' constraints hold only on
+     * the object the form makes of nothing, and only where it cascades, which their
+     * {@see CollectedFormField::$constraints} say.
+     */
+    private function refusesSubmittedBlank(CollectedFormField $field, bool $onData): bool
+    {
+        if ($this->refusesBlankValue($onData ? $field->constraints : $field->formConstraints, $field->blankValue)) {
+            return true;
+        }
+        $made = \is_object($field->blankValue) && !$field->blankValue instanceof FailedBlank;
+
+        return $field->compound && array_any($field->children, fn (CollectedFormField $child): bool => $this->refusesSubmittedBlank($child, $onData && $made));
+    }
+
+    /**
+     * Whether the field left out of a request is refused. With `clearMissing` on — Symfony's
+     * default — it is submitted blank ({@see self::refusesBlank()}). With it off it is not submitted
+     * at all, so Symfony checks nothing of it but its property, which keeps what its object holds; an
+     * application submitting that way holds a field its own constraints require to them itself, or
+     * one left out passes unchecked. So it is refused where what it is held to refuses its blank —
+     * an embedded form's being none — and an embedded form's fields, never submitted, are not asked.
+     */
+    private function refusesLeftOut(CollectedFormField $field): bool
+    {
+        if ($this->clearMissing) {
+            return $this->refusesBlank($field);
+        }
+
+        $embedded = $field->compound && null === $field->entryTypeClass && !$field->multiple;
+
+        return $this->refusesBlankValue($field->constraints, $embedded ? null : $field->blankValue);
     }
 
     /**
@@ -696,7 +733,7 @@ final class McpManifestBuilder
             $key = $keys[$child->name] ?? null;
             $schema = $this->fieldSchema($child, $key?->type, $json, $makes);
             $properties[$child->name] = $json && $this->takesNull($key, $child) ? self::withNull($schema) : $schema;
-            if ($this->isRequired($child, $key, inQuery: !$json) || ($makes && $this->refusesBlank($child))) {
+            if ($this->isRequired($child, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($child))) {
                 $required[] = $child->name;
             }
         }
@@ -711,22 +748,30 @@ final class McpManifestBuilder
 
     /**
      * A number path segment as what its requirement lets the router match, asked of the requirement as
-     * the router compiles it: an integer where it takes no `1.5`, and at least 0 — or 1 — where it
-     * takes no `-1` (nor `0`). A tool can then not send a number the router answers 404 to.
+     * the router compiles it. One that takes every whole number from 0 or 1 up — no ceiling, no gap —
+     * is an integer of at least that, or a number where it takes `1.5` too; one that may take
+     * negatives, an integer or a number. Any other (`\d{1,4}`, `[2-9]\d*`) is the string the router
+     * matches, its pattern saying which, so a tool sends no number the router answers 404 to — or a
+     * number, where its pattern can't be carried over, a `%…%` placeholder's included.
      *
-     * @return array{type: 'integer'|'number', minimum?: int}
+     * @return array{type: 'integer'|'number'|'string', minimum?: int, pattern?: string}
      */
     private static function numberHeldTo(string $requirement, ?bool $utf8): array
     {
         $pattern = '{^(?:' . $requirement . ')$}sD' . (true === $utf8 ? 'u' : '');
         $matches = static fn (string $value): bool => 1 === preg_match($pattern, $value);
 
-        $schema = ['type' => $matches('1.5') ? 'number' : 'integer'];
-        if (!$matches('-1') && ($matches('0') || $matches('1'))) {
-            $schema['minimum'] = $matches('0') ? 0 : 1;
+        $from = $matches('0') ? 0 : 1;
+        $unbounded = array_all(['1', '2', '9', '10', '99', '100', '1000', '123456789012'], $matches);
+        if ($unbounded) {
+            $type = $matches('1.5') ? 'number' : 'integer';
+
+            return $matches('-1') ? ['type' => $type] : ['type' => $type, 'minimum' => $from];
         }
 
-        return $schema;
+        $routed = PortableRegex::routePattern($requirement, $utf8);
+
+        return null === $routed ? ['type' => 'number'] : ['type' => 'string', 'pattern' => $routed];
     }
 
     /**
