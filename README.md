@@ -231,6 +231,8 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 
 A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written.
 
+PHPStan reads `Base & array{...}` the same way: one shape holding the keys of both, which a normaliser returns as `[...$base, 'extra' => …]` (`ShapeIntersectionTypeNodeResolverExtension`, auto-loaded through `extension.neon`). On its own PHPStan reads the intersection of two closed shapes as `never`. A key both parts declare is still an error.
+
 ### Keys sent only when asked for
 
 An API can leave parts of a response out unless the request asks for them (`?include=checks.debug`), and mark those keys in its shapes with a generic of its own — `included<T>`, which its PHPStan extension reads as `T|Optional<T>`. Whether such a key is there depends on two things, and the shape says which:
