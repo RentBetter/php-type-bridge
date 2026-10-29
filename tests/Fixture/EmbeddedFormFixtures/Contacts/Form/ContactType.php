@@ -26,7 +26,8 @@ final class ContactType extends AbstractFormType
             ->add('ref', RefType::class, ['required' => false])
             ->add('postal', PostalType::class)
             ->add('phones', CollectionType::class, ['entry_type' => PhoneType::class, 'allow_add' => true])
-            ->add('refs', CollectionType::class, ['entry_type' => RefType::class, 'allow_add' => true]);
+            ->add('refs', CollectionType::class, ['entry_type' => RefType::class, 'allow_add' => true])
+            ->add('tree', NodeType::class, ['required' => false]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

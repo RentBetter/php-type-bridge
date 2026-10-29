@@ -80,7 +80,7 @@ final class McpManifestGeneratorTest extends TestCase
         $properties = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties'] ?? [];
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]{2,5}-[0-9]+|[0-9]+)$'], $properties['code'] ?? null);
         // And what it is: the import's `[0-9]+` is a number.
-        self::assertSame(['type' => 'number'], $properties['page'] ?? null);
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['page'] ?? null);
     }
 
     public function testAMethodRoutedTwiceIsDescribedByItsFirstRoute(): void
@@ -91,7 +91,7 @@ final class McpManifestGeneratorTest extends TestCase
         $tool = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name')['ShowNote'] ?? [];
 
         self::assertSame('/notes/{id}', $tool['path'] ?? null);
-        self::assertSame(['type' => 'number'], $tool['inputSchema']['properties']['id'] ?? null);
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $tool['inputSchema']['properties']['id'] ?? null);
     }
 
     public function testItIsDescribedByItsFirstRouteWhateverTheRouterSortsFirst(): void
@@ -101,7 +101,7 @@ final class McpManifestGeneratorTest extends TestCase
         $tools = array_column((new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir))['tools'], null, 'name');
 
         self::assertSame('/api/notes/{id}', $tools['ShowNote']['path'] ?? null);
-        self::assertSame(['type' => 'number'], $tools['ShowNote']['inputSchema']['properties']['id'] ?? null);
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $tools['ShowNote']['inputSchema']['properties']['id'] ?? null);
     }
 
     public function testARequirementOrADefaultWrittenInlineIsReadAsTheRouterReadsIt(): void
@@ -113,7 +113,7 @@ final class McpManifestGeneratorTest extends TestCase
             $page = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowPage'] ?? [];
 
             self::assertSame($path, $page['path'] ?? null);
-            self::assertSame(['type' => 'number'], $page['inputSchema']['properties']['page'] ?? null);
+            self::assertSame(['type' => 'integer', 'minimum' => 0], $page['inputSchema']['properties']['page'] ?? null);
             self::assertSame(['type' => 'string'], $page['inputSchema']['properties']['slug'] ?? null);
             self::assertSame(['page', 'slug'], $page['inputSchema']['required'] ?? null);
         }
@@ -139,7 +139,7 @@ final class McpManifestGeneratorTest extends TestCase
         foreach ([TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml', 'requirementTypes' => ['^\\d+$' => 'number']], $dir), TypeBridgeConfig::fromArray(['requirementTypes' => ['^\\d+$' => 'number']])] as $config) {
             $anchored = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowAnchored'] ?? [];
 
-            self::assertSame(['type' => 'number'], $anchored['inputSchema']['properties']['id'] ?? null);
+            self::assertSame(['type' => 'integer', 'minimum' => 0], $anchored['inputSchema']['properties']['id'] ?? null);
             $code = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name')['ShowAnchoredCode'] ?? [];
             self::assertSame(['type' => 'string', 'pattern' => '^(?:[a-z]+)$'], $code['inputSchema']['properties']['code'] ?? null);
         }
@@ -163,7 +163,7 @@ final class McpManifestGeneratorTest extends TestCase
         $config = TypeBridgeConfig::fromArray(['requirementTypes' => ['^\\d+$' => 'Id', '[a-z]+' => 'Code'], 'typeAliases' => ['Id' => 'Num', 'Num' => 'number', 'Code' => 'string']]);
         $tools = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name');
 
-        self::assertSame(['type' => 'number'], $tools['ShowAnchored']['inputSchema']['properties']['id'] ?? null);
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $tools['ShowAnchored']['inputSchema']['properties']['id'] ?? null);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[a-z]+)$'], $tools['ShowAnchoredCode']['inputSchema']['properties']['code'] ?? null);
     }
 

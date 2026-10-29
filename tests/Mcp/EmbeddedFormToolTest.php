@@ -36,8 +36,10 @@ final class EmbeddedFormToolTest extends TestCase
             'properties' => [
                 'status' => ['enum' => ['active', 'archived']],
                 'id' => ['type' => 'string'],
-                // Keyed by the enum's class: its values, as its TypeScript names them.
+                // Keyed by the enum's class: its values, as its TypeScript names them — or, where it
+                // names its value union otherwise, its `_self`.
                 'kind' => ['enum' => ['active', 'archived']],
+                'sort' => ['type' => 'object', 'properties' => ['code' => ['type' => 'string']], 'required' => ['code']],
             ],
             'required' => ['status', 'id'],
         ], $this->schema()['properties']['ref'] ?? null);
@@ -54,12 +56,28 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame($properties['ref'], $properties['refs']['items'] ?? null);
     }
 
+    public function test_a_class_naming_itself_is_read_once_round(): void
+    {
+        // NodeData's `children` are NodeData: what a child is can't be said there, so neither can the
+        // tree — an object.
+        self::assertSame(['type' => 'object'], $this->schema()['properties']['tree'] ?? null);
+    }
+
+    public function test_a_project_wide_alias_of_a_classs_name_is_the_alias(): void
+    {
+        // `address?: AddressData`, AddressData a config alias too: the alias, as everywhere a name is
+        // one — its keys none, so its fields are held to the form's own `required`.
+        self::assertSame(['street', 'line2'], $this->schema(['AddressData' => 'string'])['properties']['address']['required'] ?? null);
+    }
+
     /**
+     * @param array<string, string> $aliases
+     *
      * @return array<string, mixed>
      */
-    private function schema(): array
+    private function schema(array $aliases = []): array
     {
-        $config = TypeBridgeConfig::fromArray(['typeAliases' => ['UuidStr' => 'string']]);
+        $config = TypeBridgeConfig::fromArray(['typeAliases' => ['UuidStr' => 'string', ...$aliases]]);
 
         return (new McpManifestGenerator())->generate(self::SRC, $config)['tools'][0]['inputSchema'];
     }

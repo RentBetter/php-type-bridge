@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Input;
 
+use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactKind;
 use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactStatus;
 
 /**
@@ -14,6 +15,7 @@ use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactStat
  *     status: value-of<ContactStatus>,
  *     id: UuidStr,
  *     kind?: ContactStatus,
+ *     sort?: ContactKind,
  * }
  */
 final class RefData

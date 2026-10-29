@@ -61,7 +61,7 @@ final class ClassLevelRouteTest extends TestCase
         self::assertSame($prefix . '/accounts/{accountId}/notes/{id}', $tool['path'] ?? null);
         self::assertSame(['accountId', 'id'], $tool['inputSchema']['required'] ?? null);
         // The class's requirement is the param's, as the router holds it.
-        self::assertSame(['type' => 'number'], $tool['inputSchema']['properties']['accountId'] ?? null);
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $tool['inputSchema']['properties']['accountId'] ?? null);
     }
 
     #[DataProvider('configs')]

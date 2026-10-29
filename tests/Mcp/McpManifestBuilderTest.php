@@ -298,13 +298,14 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame('/api/projects', $byName['CreateProject']['path']);
         self::assertArrayHasKey('inputSchema', $byName['CreateProject']);
 
-        // Delete's {id} path param is route-derived: Requirement::POSITIVE_INT -> number.
+        // Delete's {id} path param is route-derived: Requirement::POSITIVE_INT -> number, an integer
+        // of at least 1 as the requirement matches.
         self::assertSame('DELETE', $byName['DeleteProject']['method']);
         self::assertSame('/api/projects/{id}', $byName['DeleteProject']['path']);
         self::assertSame(true, $byName['DeleteProject']['destructive']);
         self::assertSame([
             'type' => 'object',
-            'properties' => ['id' => ['type' => 'number']],
+            'properties' => ['id' => ['type' => 'integer', 'minimum' => 1]],
             'required' => ['id'],
         ], $byName['DeleteProject']['inputSchema']);
 

@@ -16,7 +16,7 @@ final class PriceType extends AbstractFormType
 {
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
-        $builder->add('title', TextType::class)->add('price', TextType::class, ['required' => false]);
+        $builder->add('title', TextType::class)->add('price', TextType::class, ['required' => false])->add('fee', FeeType::class, ['required' => false]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

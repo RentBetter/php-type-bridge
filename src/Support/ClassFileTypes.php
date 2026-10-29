@@ -22,7 +22,7 @@ use InvalidArgumentException;
  */
 final class ClassFileTypes
 {
-    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>}|false> by file; false where it can't be read */
+    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}|false> by file; false where it can't be read */
     private array $files = [];
 
     /** @var array<string, bool> by class */
@@ -149,9 +149,20 @@ final class ClassFileTypes
     }
 
     /**
+     * The types the file binds a trait's template params to where it uses the trait
+     * ({@see PhpDocTypeHelper::readFile()}): none where it binds none, or can't be read.
+     *
+     * @return list<string>
+     */
+    public function usesArgs(string $file, string $traitShortName): array
+    {
+        return ('' === $file ? false : $this->read($file))['uses'][$traitShortName] ?? [];
+    }
+
+    /**
      * What the file declares, imports and `use`s, read out of it once.
      *
-     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>}|false
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}|false
      */
     private function read(string $file): array|false
     {

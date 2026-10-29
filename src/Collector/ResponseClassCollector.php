@@ -38,9 +38,6 @@ final class ResponseClassCollector
     /** @var array<string, array<string, ParsedType>> by source directory, response and base: what the base's template params are bound to */
     private array $templateBindings = [];
 
-    /** @var array<string, list<string>> by file and trait: what the file binds the trait's template params to */
-    private array $usesArgs = [];
-
     private readonly ClassFileTypes $files;
 
     private readonly DomainGuesser $domainGuesser;
@@ -376,22 +373,11 @@ final class ResponseClassCollector
 
         $bindings = $user->getName() === $response->getName() ? [] : $this->templateBindings($response, $user->getName(), $srcDir, $classFiles);
         foreach (self::traitPath($property) as $trait) {
-            $bindings = $this->paramsBound($trait, $this->usesArgs($classFiles[$user->getName()] ?? $this->fileOf($user->getName()), $trait->getShortName()), $user->getName(), $bindings, $srcDir, $classFiles);
+            $bindings = $this->paramsBound($trait, $this->files->usesArgs($classFiles[$user->getName()] ?? $this->fileOf($user->getName()), $trait->getShortName()), $user->getName(), $bindings, $srcDir, $classFiles);
             $user = $trait;
         }
 
         return $this->templateBindings[$key] = $bindings;
-    }
-
-    /**
-     * What the file binds a trait's template params to where it uses it ({@see PhpDocTypeHelper::usesArgs()}),
-     * read once however many responses use the trait through it.
-     *
-     * @return list<string>
-     */
-    private function usesArgs(string $file, string $trait): array
-    {
-        return $this->usesArgs[$file . "\0" . $trait] ??= $this->docHelper->usesArgs('' !== $file && is_file($file) ? (string) file_get_contents($file) : '', $trait) ?? [];
     }
 
     /**

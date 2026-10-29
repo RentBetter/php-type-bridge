@@ -17,6 +17,9 @@ final readonly class CollectedMcpTool
 {
     /**
      * @param list<string> $scopes
+     * @param string|null  $unserved why the application, as it is deployed, serves no route for the
+     *        tool: the manifest fails on it, which the TypeScript, describing the endpoint as its
+     *        route does, does not
      */
     public function __construct(
         public string $name,
@@ -25,5 +28,6 @@ final readonly class CollectedMcpTool
         public string $httpPath,
         public bool $destructive,
         public array $scopes = [],
+        public ?string $unserved = null,
     ) {}
 }

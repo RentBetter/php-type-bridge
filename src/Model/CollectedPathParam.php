@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Model;
 
+use PTGS\TypeBridge\Support\TypeScriptTypes;
+
 /**
  * A single route-derived path parameter: the placeholder name and its resolved TS type.
  * The route requirement is retained as the router holds it — Symfony's Route takes a leading `^`
@@ -33,10 +35,6 @@ final readonly class CollectedPathParam
      */
     public function schemaType(): string
     {
-        return match (trim($this->standsFor ?? $this->tsType)) {
-            'number' => 'number',
-            'boolean' => 'boolean',
-            default => 'string',
-        };
+        return TypeScriptTypes::jsonType($this->standsFor ?? $this->tsType) ?? 'string';
     }
 }

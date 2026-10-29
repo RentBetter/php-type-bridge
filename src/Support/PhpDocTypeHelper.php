@@ -348,13 +348,18 @@ final class PhpDocTypeHelper
      * ({@see self::classImports()}) and its import tags ({@see self::importTags()}) — the file
      * tokenised once, each docblock parsed once.
      *
-     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>}
+     * And the types it binds a trait's template params to where a class or trait in it uses the
+     * trait — `@use Trait<…>` on the `use` statement (or the class), ranked as PHPStan ranks them:
+     * `@phpstan-use`, `@template-use`, `@use` — by the trait's short name, as it is written.
+     *
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}
      */
     public function readFile(string $content): array
     {
         $tokens = \PhpToken::tokenize($content);
         $definitions = [];
         $importTags = [];
+        $uses = [];
         foreach ($tokens as $token) {
             if (!$token->is(\T_DOC_COMMENT)) {
                 continue;
@@ -366,9 +371,26 @@ final class PhpDocTypeHelper
             foreach ($node->getTypeAliasImportTagValues() as $tag) {
                 $importTags[] = $tag;
             }
+            foreach (['@phpstan-use', '@template-use', '@use'] as $rank => $tagName) {
+                foreach ($node->getUsesTagValues($tagName) as $use) {
+                    $uses[ClassNames::short(ltrim($use->type->type->name, '\\'))][$rank] ??= array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $use->type->genericTypes));
+                }
+            }
         }
 
-        return ['definitions' => $definitions, 'classImports' => $this->classImportsIn($tokens), 'importTags' => $importTags];
+        // Of a trait's bindings, the best-ranked.
+        $bound = [];
+        foreach ($uses as $trait => $ranked) {
+            ksort($ranked);
+            $bound[$trait] = reset($ranked);
+        }
+
+        return [
+            'definitions' => $definitions,
+            'classImports' => $this->classImportsIn($tokens),
+            'importTags' => $importTags,
+            'uses' => $bound,
+        ];
     }
 
     /**
@@ -543,19 +565,6 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * The class a name written in a file means, as PHP resolves it there ({@see self::resolveClassName()}):
-     * null where it is no class this install loads.
-     *
-     * @param array<string, string> $classImports the file's `use` statements
-     *
-     * @return ?class-string
-     */
-    public function className(string $name, string $ownerClass, array $classImports): ?string
-    {
-        return $this->resolveClassName($name, $ownerClass, $classImports);
-    }
-
-    /**
      * The class a name means where it was written, as PHP resolves it: fully qualified, through
      * the file's `use` statements, in the owner's namespace, or global — or null when it is no
      * class at all (an alias).
@@ -563,7 +572,7 @@ final class PhpDocTypeHelper
      * @param array<string, string> $classImports
      * @return ?class-string
      */
-    private function resolveClassName(string $name, ?string $ownerClass, array $classImports): ?string
+    public function resolveClassName(string $name, ?string $ownerClass, array $classImports): ?string
     {
         $candidates = [];
         if (str_starts_with($name, '\\')) {
@@ -692,32 +701,6 @@ final class PhpDocTypeHelper
         }
 
         return null;
-    }
-
-    /**
-     * The types a file binds a trait's template params to where a class or trait in it uses the
-     * trait — `@use Trait<…>` on the `use` statement (or the class), ranked as PHPStan ranks them:
-     * `@phpstan-use`, `@template-use`, `@use` — or null where it binds none. The trait is named as
-     * it is written, its short name compared.
-     *
-     * @return list<string>|null
-     */
-    public function usesArgs(string $content, string $traitShortName): ?array
-    {
-        $found = [];
-        foreach ($this->docComments($content) as $docComment) {
-            $node = $this->parse($docComment);
-            foreach (['@phpstan-use', '@template-use', '@use'] as $rank => $tagName) {
-                foreach ($node->getUsesTagValues($tagName) as $uses) {
-                    if (ClassNames::short(ltrim($uses->type->type->name, '\\')) === $traitShortName) {
-                        $found[$rank] ??= array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $uses->type->genericTypes));
-                    }
-                }
-            }
-        }
-        ksort($found);
-
-        return [] === $found ? null : $found[array_key_first($found)];
     }
 
     /**

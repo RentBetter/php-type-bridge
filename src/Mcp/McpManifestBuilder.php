@@ -27,7 +27,9 @@ use PTGS\TypeBridge\Support\AttributeText;
 use PTGS\TypeBridge\Support\ClassNames;
 use PTGS\TypeBridge\Support\HeldConstraints;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
+use PTGS\TypeBridge\Support\TypeScriptTypes;
 use ReflectionProperty;
+use RuntimeException;
 use Throwable;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\Choice;
@@ -115,6 +117,10 @@ final class McpManifestBuilder
                 if (null === $contract->mcp) {
                     continue;
                 }
+                // A tool the application doesn't serve where it is deployed is no tool to publish.
+                if (null !== $contract->mcp->unserved) {
+                    throw new RuntimeException($contract->mcp->unserved);
+                }
 
                 $tools[] = $this->tool($contract);
             }
@@ -181,7 +187,9 @@ final class McpManifestBuilder
             foreach ($request->pathParams ?? [] as $param) {
                 // A path segment is always required. A string's route requirement says what it must
                 // look like, so a model learns a ticket is `SO-12` before the router's 404.
-                $properties[$param->name] = ['type' => $param->schemaType()];
+                $properties[$param->name] = 'number' === $param->schemaType() && null !== $param->requirement
+                    ? self::numberHeldTo($param->requirement, $param->utf8)
+                    : ['type' => $param->schemaType()];
                 $pattern = 'string' === $param->schemaType() && null !== $param->requirement ? PortableRegex::routePattern($param->requirement, $param->utf8) : null;
                 if (null !== $pattern) {
                     $properties[$param->name]['pattern'] = $pattern;
@@ -262,7 +270,10 @@ final class McpManifestBuilder
     {
         $this->blankRefused ??= new WeakMap();
 
-        return $this->blankRefused[$field] ??= $this->refusesBlankValue($field->constraints, $field->blankValue);
+        // An embedded form left out that is a new object of its data class has each of its fields
+        // submitted blank in turn: one refusing that refuses the form.
+        return $this->blankRefused[$field] ??= $this->refusesBlankValue($field->constraints, $field->blankValue)
+            || (\is_object($field->blankValue) && !$field->blankValue instanceof FailedBlank && array_any($field->children, $this->refusesBlank(...)));
     }
 
     /**
@@ -439,10 +450,10 @@ final class McpManifestBuilder
             return ['type' => 'array', 'items' => ['type' => 'string']];
         }
 
-        // Its fields held to the keys its key's type declares — or, where that names its data class,
-        // the class's own.
+        // Its fields held to the keys its key's type declares: its data class's own, where it names
+        // the class, read where the contract is.
         if ($field->compound && [] !== $field->children) {
-            return $this->objectSchema($field->children, self::shapeKeys($declared) ?: self::shapeKeys($field->contract), $json, $makes);
+            return $this->objectSchema($field->children, self::shapeKeys($declared), $json, $makes);
         }
 
         // A compound field with no children reads what is sent whole, so its form says nothing of
@@ -567,17 +578,10 @@ final class McpManifestBuilder
      */
     private function configAliasSchema(string $name): ?array
     {
-        $type = $this->typeAliases[$name] ?? null;
-        for ($depth = 0; null !== $type && isset($this->typeAliases[trim($type)]) && $depth < 8; ++$depth) {
-            $type = $this->typeAliases[trim($type)];
-        }
+        $standsFor = TypeScriptTypes::standsFor($name, $this->typeAliases);
+        $type = null === $standsFor ? null : TypeScriptTypes::jsonType($standsFor);
 
-        return match (null === $type ? null : trim($type)) {
-            'string' => ['type' => 'string'],
-            'number' => ['type' => 'number'],
-            'boolean' => ['type' => 'boolean'],
-            default => null,
-        };
+        return null === $type ? null : ['type' => $type];
     }
 
     /**
@@ -654,7 +658,7 @@ final class McpManifestBuilder
     {
         // An entry its type reads whole is the shape the list declares of it — an object, where its
         // class's shape can't be said here.
-        $shape = ShapeType::declaredBy(self::soleMember($item, ShapeType::class) ?? self::soleMember($item, IntersectionType::class));
+        $shape = self::declaredShape($item);
         if ([] === $field->entryChildren && (null !== $shape || null !== $field->entryDataClass)) {
             return (null === $shape ? null : $this->shapeSchema($shape, $json)) ?? ['type' => 'object'];
         }
@@ -706,6 +710,26 @@ final class McpManifestBuilder
     }
 
     /**
+     * A number path segment as what its requirement lets the router match, asked of the requirement as
+     * the router compiles it: an integer where it takes no `1.5`, and at least 0 — or 1 — where it
+     * takes no `-1` (nor `0`). A tool can then not send a number the router answers 404 to.
+     *
+     * @return array{type: 'integer'|'number', minimum?: int}
+     */
+    private static function numberHeldTo(string $requirement, ?bool $utf8): array
+    {
+        $pattern = '{^(?:' . $requirement . ')$}sD' . (true === $utf8 ? 'u' : '');
+        $matches = static fn (string $value): bool => 1 === preg_match($pattern, $value);
+
+        $schema = ['type' => $matches('1.5') ? 'number' : 'integer'];
+        if (!$matches('-1') && ($matches('0') || $matches('1'))) {
+            $schema['minimum'] = $matches('0') ? 0 : 1;
+        }
+
+        return $schema;
+    }
+
+    /**
      * Properties by name, as JSON reads them: keys PHP holds as 0, 1, … — named by numbers — would be
      * written as a list, which `properties` can't be.
      *
@@ -728,11 +752,20 @@ final class McpManifestBuilder
     private static function shapeKeys(?ParsedType $type): array
     {
         $keys = [];
-        foreach (ShapeType::declaredBy(self::soleMember($type, ShapeType::class) ?? self::soleMember($type, IntersectionType::class))->fields ?? [] as $key) {
+        foreach (self::declaredShape($type)->fields ?? [] as $key) {
             $keys[$key->name] = $key;
         }
 
         return $keys;
+    }
+
+    /**
+     * The shape a type declares: itself, or the one shape of a nullable or a union; an intersection's
+     * own keys, where what it extends can't be read ({@see ShapeType::declaredBy()}).
+     */
+    private static function declaredShape(?ParsedType $type): ?ShapeType
+    {
+        return ShapeType::declaredBy(self::soleMember($type, ShapeType::class) ?? self::soleMember($type, IntersectionType::class));
     }
 
     /**

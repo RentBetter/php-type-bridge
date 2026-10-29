@@ -58,6 +58,33 @@ final class TypeScriptTypes
     }
 
     /**
+     * The TypeScript a project-wide alias stands for, through any alias it names in turn; null where
+     * the type is no such alias.
+     *
+     * @param array<string, string> $aliases the config's aliases, name => TypeScript
+     */
+    public static function standsFor(string $type, array $aliases, int $depth = 0): ?string
+    {
+        $standsFor = $depth > 8 ? null : $aliases[trim($type)] ?? null;
+
+        return null === $standsFor ? null : self::standsFor($standsFor, $aliases, $depth + 1) ?? $standsFor;
+    }
+
+    /**
+     * The JSON type a TypeScript type is, where it is a primitive JSON says: `string`, `number` or
+     * `boolean`; null for anything else.
+     */
+    public static function jsonType(string $type): ?string
+    {
+        return match (trim($type)) {
+            'string' => 'string',
+            'number' => 'number',
+            'boolean' => 'boolean',
+            default => null,
+        };
+    }
+
+    /**
      * Whether the type needs brackets to be an operand — the element of a list, `(A | B)[]`: a union,
      * an intersection, a function or a conditional at its top level, or a type an operator leads
      * (`keyof T[]` is `keyof (T[])`).

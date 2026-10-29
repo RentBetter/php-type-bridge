@@ -14,6 +14,7 @@ use Symfony\Component\Validator\Constraints as Assert;
  *     postal?: PostalData,
  *     phones?: list<PhoneData>,
  *     refs?: list<RefData>,
+ *     tree?: NodeData,
  * }
  */
 final class ContactData
@@ -34,4 +35,6 @@ final class ContactData
 
     /** @var list<RefData> */
     public array $refs = [];
+
+    public ?NodeData $tree = null;
 }

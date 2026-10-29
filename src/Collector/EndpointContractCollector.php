@@ -8,6 +8,7 @@ use LogicException;
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\McpTool;
+use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
@@ -233,14 +234,16 @@ final class EndpointContractCollector
 
         /** @var McpTool $tool */
         $tool = $attributes[0]->newInstance();
+        [$path, $unserved] = $this->servedPath($className, $method->getName(), $route, $served);
 
         return new CollectedMcpTool(
             name: $tool->name ?? $endpointName,
             description: $this->resolveMcpDescription($method, $tool),
             httpMethod: $httpMethod,
-            httpPath: $this->servedPath($className, $method->getName(), $route, $served),
+            httpPath: $path,
             destructive: $tool->destructive ?? ('GET' !== $httpMethod),
             scopes: $this->resolveMcpScopes($method),
+            unserved: $unserved,
         );
     }
 
@@ -439,44 +442,40 @@ final class EndpointContractCollector
     }
 
     /**
-     * The path an MCP tool is published with: the one served in the env the application is deployed
-     * in. With a route resolver configured it is the router's, and both ways it can fail to supply one
-     * are errors rather than fallbacks: a routing file that will not load, or a method the loaded
-     * collection does not route — a route confined to another env, or imported in another's section
-     * alone, included. Without one it is the route the attributes declare, which must be served in
-     * the env too. Either would otherwise publish a path as if it were served, and a tool pointing at
-     * a path the application answers 404 to is worse than no tool.
+     * The path an MCP tool is published with — the one served in the env the application is deployed
+     * in — and why there is none. With a route resolver configured it is the router's, and both ways
+     * it can fail to supply one are errors rather than fallbacks: a routing file that will not load,
+     * or a method the loaded collection does not route — a route confined to another env, or
+     * imported in another's section alone, included. Without one it is the route the attributes
+     * declare, which must be served in the env too. Either would otherwise publish a path as if it
+     * were served, and a tool pointing at a path the application answers 404 to is worse than no
+     * tool. The manifest fails on it; the endpoint's TypeScript, described by its route, does not.
+     *
+     * @return array{0: string, 1: string|null} the path, and why it isn't served
      */
-    private function servedPath(string $className, string $methodName, ?Route $route, ?Route $served): string
+    private function servedPath(string $className, string $methodName, ?Route $route, ?Route $served): array
     {
+        $declared = RoutePathResolver::clientPath($route?->getPath() ?? '');
         if (null === $this->routePathResolver) {
-            if (null !== $route && !$this->declaredRoutes->serves($className, $methodName)) {
-                throw $this->notServed($className, $methodName, 'its #[Route]s confine it to another env:');
-            }
-
-            return RoutePathResolver::clientPath($route?->getPath() ?? '');
+            return [$declared, null !== $route && !$this->declaredRoutes->serves($className, $methodName) ? $this->notServed($className, $methodName, 'what its #[Route]s declare') : null];
         }
 
         if (null !== $error = $this->routePathResolver->loadError()) {
-            throw new RuntimeException(\sprintf('Cannot resolve served route paths for MCP tools: %s', $error));
+            return [$declared, \sprintf('Cannot resolve served route paths for MCP tools: %s', $error)];
         }
 
-        if (null === $served) {
-            throw $this->notServed($className, $methodName, 'the routing configuration');
-        }
-
-        return RoutePathResolver::clientPath($served->getPath());
+        return null === $served ? [$declared, $this->notServed($className, $methodName, 'the routing configuration')] : [RoutePathResolver::clientPath($served->getPath()), null];
     }
 
-    private function notServed(string $className, string $methodName, string $why): RuntimeException
+    private function notServed(string $className, string $methodName, string $why): string
     {
-        return new RuntimeException(\sprintf(
+        return \sprintf(
             'Endpoint "%s::%s" is exposed as an MCP tool but %s serves no route for it in %s.',
             $className,
             $methodName,
             $why,
             $this->declaredRoutes->env,
-        ));
+        );
     }
 
     /**
@@ -495,9 +494,11 @@ final class EndpointContractCollector
             ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles, inQuery: false, nullAsked: false)
             : null;
 
+        // What only a tool reads — a body's null, an embedded form's keys — is read only for one.
+        $tool = [] !== $method->getAttributes(McpTool::class);
         $collected = new CollectedEndpointRequest(
-            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles, inQuery: true) : null,
-            body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles, inQuery: false) : null,
+            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles, inQuery: true, tool: $tool) : null,
+            body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles, inQuery: false, tool: $tool) : null,
             path: $path,
             pathParams: null === $path ? $this->derivePathParamsFromRoute($route) : null,
         );
@@ -539,7 +540,7 @@ final class EndpointContractCollector
         foreach ($names as $name) {
             $requirement = $route->getRequirement($name);
             $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
-            $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8, $this->configAliasStandsFor($tsType));
+            $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8, TypeScriptTypes::standsFor($tsType, $this->typeAliases));
         }
 
         return $params;
@@ -566,8 +567,10 @@ final class EndpointContractCollector
     /**
      * @param array<string, string> $classFiles
      * @param class-string $formClass
+     * @param bool $tool whether the endpoint is an MCP tool: only its schema turns on whether a body's
+     *        key takes null, or on what an embedded form's data class declares
      */
-    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles, bool $inQuery): CollectedInputReference
+    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles, bool $inQuery, bool $tool): CollectedInputReference
     {
         if (!isset($classFiles[$formClass])) {
             throw new RuntimeException(\sprintf(
@@ -590,9 +593,10 @@ final class EndpointContractCollector
             ownerClass: $resolvedForm['dataClass'],
             srcDir: $srcDir,
             classFiles: $classFiles,
-            fields: $this->withDeclaredContracts($resolvedForm['fields'], $srcDir, $classFiles, $inQuery),
+            fields: $tool ? $this->withDeclaredContracts($resolvedForm['fields'], $srcDir, $classFiles, $inQuery) : $resolvedForm['fields'],
             inQuery: $inQuery,
-            nullAsked: true,
+            // A query's key that can't be left out turns its Endpoint's `query` required, tool or not.
+            nullAsked: $inQuery || $tool,
         );
     }
 
@@ -613,7 +617,7 @@ final class EndpointContractCollector
             fn (CollectedFormField $field): CollectedFormField => $field->withDeclared(
                 children: $this->withDeclaredContracts($field->children, $srcDir, $classFiles, $inQuery),
                 entryChildren: $this->withDeclaredContracts($field->entryChildren, $srcDir, $classFiles, $inQuery),
-                contract: $field->compound && null !== $field->dataClass
+                contract: $field->compound && [] === $field->children && null !== $field->dataClass
                     ? $this->contractOf($field->dataClass, $srcDir, $classFiles, $inQuery)
                     : null,
             ),
@@ -802,7 +806,9 @@ final class EndpointContractCollector
         $read = fn (ParsedType $part, ?bool $asked = null): ParsedType => $this->readAliases($part, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $asked ?? $nullAsked);
 
         return match (true) {
-            $type instanceof NameRefType => null === $type->class ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked) : $type,
+            $type instanceof NameRefType => null === $type->class
+                ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked)
+                : $this->readClass($type, $type->class, $srcDir, $classFiles, $reading, $inQuery, $nullAsked),
             // An explicit null settles the type's own: what else it admits is not asked of it.
             $type instanceof NullableType => new NullableType($read($type->inner, $type->optional && $nullAsked), $type->optional),
             $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member, $nullAsked && !$type->hasNull()), $type->types)),
@@ -815,7 +821,7 @@ final class EndpointContractCollector
             ), $type->unsealed),
             $type instanceof IntersectionType => self::intersection($type, $read($type->base), $read($type->extra)),
             // The enum the file names, spelt in full, so a reader elsewhere can ask for its values.
-            $type instanceof ValueOfType => new ValueOfType($this->docHelper->className($type->enumClass, $class, $this->files->classImports($file)) ?? $type->enumClass),
+            $type instanceof ValueOfType => new ValueOfType($this->docHelper->resolveClassName($type->enumClass, $class, $this->files->classImports($file)) ?? $type->enumClass),
             default => $type,
         };
     }
@@ -829,6 +835,11 @@ final class EndpointContractCollector
     private function readAlias(NameRefType $alias, string $class, string $file, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
         $declared = $this->aliasDefinition($alias->name, $class, $file, $srcDir, $classFiles);
+        // No alias of the file's: a class it names, as PHP resolves the name there.
+        $named = null === $declared && !isset($this->typeAliases[$alias->name]) ? $this->docHelper->resolveClassName($alias->name, $class, $this->files->classImports($file)) : null;
+        if (null !== $named) {
+            return $this->readClass($alias, $named, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
+        }
         if (null === $declared) {
             // Asked only where it decides something; otherwise read as far as its text says.
             $admitsNull = isset($this->typeAliases[$alias->name])
@@ -851,14 +862,32 @@ final class EndpointContractCollector
     }
 
     /**
-     * The TypeScript a project-wide alias stands for, through any alias it names in turn; null where
-     * the type is no such alias.
+     * A key typed with a class, as the class is sent and its TypeScript names it: an enum, its values
+     * — but one that names its value union otherwise (#[ValueOfName]), whose own name is its `_self`;
+     * any other class its `_self`, read where it is declared, as an alias is. As written where the
+     * class declares none, or names itself at any remove.
+     *
+     * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading
      */
-    private function configAliasStandsFor(string $type, int $depth = 0): ?string
+    private function readClass(NameRefType $type, string $class, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
-        $standsFor = $depth > 8 ? null : $this->typeAliases[trim($type)] ?? null;
+        if (PhpFileClassLocator::loadsEnum($class) && null === ValueOfName::of($class)) {
+            return new ValueOfType($class);
+        }
 
-        return null === $standsFor ? null : $this->configAliasStandsFor($standsFor, $depth + 1) ?? $standsFor;
+        $file = $classFiles[$class] ?? null;
+        if (null === $file) {
+            return $type;
+        }
+        $self = $this->files->emittedDefinitions($class, $file)['_self'] ?? null;
+        $key = $file . "\0_self";
+        $parsed = null === $self || isset($reading[$key]) ? null : $this->parseType($self);
+        if (null === $parsed) {
+            return $type;
+        }
+
+        return $this->readAliases($parsed, $class, $file, $srcDir, $classFiles, [...$reading, $key => true], $inQuery, $nullAsked);
     }
 
     /**
