@@ -15,6 +15,7 @@ use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyProductF
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ConfigProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ImportedProductFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LayeredNoteType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LayeredProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LayeredRegionFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LeftOutProductFilterType;
@@ -210,6 +211,14 @@ final class ReportController
     #[ApiRequest(body: AliasedNoteType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function updateAliasedNote(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/{id}/layered-note', methods: ['PUT'])]
+    #[ApiRequest(body: LayeredNoteType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function updateLayeredNote(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

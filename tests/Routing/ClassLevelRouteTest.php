@@ -16,8 +16,8 @@ use PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
-use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\AccountNoteController;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\ArchiveNoteController;
+use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\LabelController;
 
 /**
  * A #[Route] on the class is as much the route as the method's: Symfony serves an invokable
@@ -61,12 +61,21 @@ final class ClassLevelRouteTest extends TestCase
     }
 
     #[DataProvider('configs')]
+    public function testAnImportantParamIsAParamLikeAnyOther(TypeBridgeConfig $config, string $prefix): void
+    {
+        $tool = $this->tools($config)['ExportNote'] ?? [];
+
+        self::assertSame($prefix . '/accounts/{accountId}/notes/{id}.{!_format}', $tool['path'] ?? null);
+        self::assertSame(['accountId', 'id', '_format'], $tool['inputSchema']['required'] ?? null);
+    }
+
+    #[DataProvider('configs')]
     public function testAClassRoutesMethodsAreAMethodsThatNamesNone(TypeBridgeConfig $config, string $prefix): void
     {
         $tool = $this->tools($config)['ReplaceLabel'] ?? [];
 
         self::assertSame('PUT', $tool['method'] ?? null);
-        self::assertSame($prefix . '/accounts/{accountId}/labels/{labelId}', $tool['path'] ?? null);
+        self::assertSame($prefix . '/labels/{labelId}', $tool['path'] ?? null);
     }
 
     #[DataProvider('configs')]
@@ -83,7 +92,18 @@ final class ClassLevelRouteTest extends TestCase
 
         self::assertStringContainsString("export const ArchiveNote: Endpoint<ArchiveNoteEndpointMap, { path: ArchiveNotePathParams }> = {\n  method: 'POST',\n  path: '" . $prefix . "/notes/{id}/archive',\n};", $notes);
         self::assertStringContainsString('export type DeleteNotePathParams = { accountId: number; id: string };', $notes);
-        self::assertStringContainsString("  method: 'PUT',\n  path: '" . $prefix . "/accounts/{accountId}/labels/{labelId}',", $notes);
+        self::assertStringContainsString("  method: 'PUT',\n  path: '" . $prefix . "/labels/{labelId}',", $notes);
+    }
+
+    public function testAClassWhoseRoutesSymfonyRefusesIsNoRouteToGuess(): void
+    {
+        // A requirement with no placeholder name: the router would refuse it, so no method or path is
+        // published for it as if it had none.
+        $src = __DIR__ . '/../Fixture/BrokenRouteFixtures';
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('The #[Route]s of PTGS\\TypeBridge\\Tests\\Fixture\\BrokenRouteFixtures\\Notes\\NoteController cannot be read as Symfony reads them: A placeholder name must be a string');
+
+        (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
     }
 
     public function testTheControllerRulesReadTheRouteTheGeneratorPublishes(): void
@@ -93,9 +113,9 @@ final class ClassLevelRouteTest extends TestCase
             self::assertSame(['POST'], $archive?->httpMethods);
             self::assertSame($prefix . '/notes/{id}/archive', $archive?->path);
 
-            $replace = $inspector->inspect(AccountNoteController::class, 'replaceLabelAction');
+            $replace = $inspector->inspect(LabelController::class, 'replaceLabelAction');
             self::assertSame(['PUT'], $replace?->httpMethods);
-            self::assertSame($prefix . '/accounts/{accountId}/labels/{labelId}', $replace?->path);
+            self::assertSame($prefix . '/labels/{labelId}', $replace?->path);
         }
     }
 

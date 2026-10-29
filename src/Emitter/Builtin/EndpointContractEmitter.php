@@ -56,18 +56,19 @@ final class EndpointContractEmitter implements TypeEmitter
 
     /**
      * `AsQuery<T>`: T as a query string sends it. A query string carries no null, so a key that may
-     * be null is sent by leaving it out — at any depth, a shape it sends included. The type itself
+     * be null is sent by leaving it out, and only so — what it takes when sent is never null, or a
+     * client would send the text "null" — at any depth, a shape it sends included. The type itself
      * stays as declared, for whatever else uses it — a body, a response — where a null is sent and
      * the key is always there.
      */
     public const string AS_QUERY_HELPER = <<<'TS'
-        /** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out. A primitive, a branded one included, is as it is, and a list or a tuple stays one. */
+        /** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out, and only so. A primitive, a branded one included, is as it is, and a list or a tuple stays one. */
         export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | null | undefined
           ? T
           : T extends readonly unknown[]
             ? { [K in keyof T]: AsQuery<T[K]> }
             : T extends object
-              ? { [K in keyof T as null extends T[K] ? K : never]?: AsQuery<T[K]> } & { [K in keyof T as null extends T[K] ? never : K]: AsQuery<T[K]> }
+              ? { [K in keyof T as null extends T[K] ? K : never]?: AsQuery<Exclude<T[K], null>> } & { [K in keyof T as null extends T[K] ? never : K]: AsQuery<T[K]> }
               : T;
         TS;
 

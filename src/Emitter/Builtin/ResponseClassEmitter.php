@@ -46,8 +46,8 @@ final class ResponseClassEmitter implements TypeEmitter
             $lines = [\sprintf('export type %s = null;', $name)];
             // One that declares properties of its own was an interface of them, under the interface
             // prefix: the name stays a while, deprecated, so code that imports it still compiles.
-            $was = $context->naming->interfaceName($response->name);
-            if ($was !== $name && $response->declaresProperties) {
+            $was = $context->names->deprecatedResponseName($response);
+            if (null !== $was) {
                 $lines[] = \sprintf('/** @deprecated A 204 is sent with no body; use %s. */', $name);
                 $lines[] = \sprintf('export type %s = %s;', $was, $name);
             }

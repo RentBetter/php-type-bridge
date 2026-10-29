@@ -39,6 +39,9 @@ final class ClassFileTypes
     /** @var array<string, array<string, list<string>>> by source directory */
     private array $shortNameMaps = [];
 
+    /** @var array<string, true> by source directory and class: the imports being followed */
+    private array $following = [];
+
     public function __construct(
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
@@ -145,10 +148,12 @@ final class ClassFileTypes
     }
 
     /**
-     * The types the class imports, by the name it imports each as. `unresolved` is those whose
-     * target can't be found or can't be loaded in this install, and `phpStanOnly` those of an alias
-     * kept for PHPStan — still among `imports`, for what only reads its keys — each with why it
-     * can't be emitted.
+     * The types the class imports, by the name it imports each as, each as the class that declares
+     * it says: one imported from a class that only imports it itself is that class's import, followed
+     * to where the alias is declared, as PHPStan follows it. `unresolved` is those whose target can't
+     * be found or can't be loaded in this install, and `phpStanOnly` those of an alias kept for
+     * PHPStan — still among `imports`, for what only reads its keys — each with why it can't be
+     * emitted.
      *
      * @param array<string, string> $classFiles
      *
@@ -169,11 +174,23 @@ final class ClassFileTypes
             $this->shortNameMaps[$srcDir] ??= $this->classLocator->shortNameMap(array_keys($classFiles)),
             $this->domainGuesser,
         );
+        // Read while it is followed: an import that leads back here is left where it points.
+        if (isset($this->following[$key])) {
+            return ['imports' => $read['imports'], 'unresolved' => $read['unresolved'], 'phpStanOnly' => []];
+        }
+        $this->following[$key] = true;
 
         $imports = [];
         $unresolved = $read['unresolved'];
         $phpStanOnly = [];
         foreach ($read['imports'] as $alias => $import) {
+            $followed = $this->declaredAt($import, $srcDir, $classFiles);
+            if (\is_string($followed)) {
+                $unresolved[$alias] = $followed;
+
+                continue;
+            }
+            $import = $followed;
             if (!$this->loadable($import->targetClass)) {
                 $unresolved[$alias] = self::unloadableReason($import->sourceName(), $import->targetClass);
 
@@ -185,7 +202,40 @@ final class ClassFileTypes
             }
         }
 
+        unset($this->following[$key]);
+
         return $this->imports[$key] = ['imports' => $imports, 'unresolved' => $unresolved, 'phpStanOnly' => $phpStanOnly];
+    }
+
+    /**
+     * The import, followed to the class that declares the alias it names: where its target only
+     * imports that alias, the target's import of it — itself followed — under the name this file
+     * gives it. Why it can't be followed, where the target's import of it can't be; the import as it
+     * is where the target declares the alias, or neither declares nor imports it — reading it there
+     * says it is missing.
+     *
+     * @param array<string, string> $classFiles
+     */
+    private function declaredAt(ImportedType $import, string $srcDir, array $classFiles): ImportedType|string
+    {
+        $file = $classFiles[$import->targetClass] ?? null;
+        if (null === $file || isset($this->definitions($file)[$import->sourceName()])) {
+            return $import;
+        }
+
+        $further = $this->imports($import->targetClass, $file, $srcDir, $classFiles);
+        $next = $further['imports'][$import->sourceName()] ?? null;
+        if (null === $next) {
+            return $further['unresolved'][$import->sourceName()] ?? $import;
+        }
+
+        return new ImportedType(
+            localAlias: $import->localAlias,
+            targetClass: $next->targetClass,
+            targetTypeName: $next->targetTypeName,
+            targetDomain: $next->targetDomain,
+            sourceAlias: $next->sourceName(),
+        );
     }
 
     /**

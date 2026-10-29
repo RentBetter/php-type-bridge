@@ -25,6 +25,8 @@ final class EndpointQueryTest extends TestCase
 {
     private const string SRC = __DIR__ . '/../Fixture/RequiredQueryFixtures';
 
+    private const array TYPE_ALIASES = ['MaybeText' => 'string | null', 'ConfigBase' => '{ a?: string }'];
+
     public function test_a_query_with_a_required_key_cannot_be_left_out(): void
     {
         $reports = $this->emit()['Reports'];
@@ -192,6 +194,16 @@ final class EndpointQueryTest extends TestCase
         }
     }
 
+    public function test_a_project_wide_alias_naming_another_is_read_as_that_one_is_declared(): void
+    {
+        // MaybeText is OptionalText, which admits null: a key typed with it may be left out.
+        $aliases = ['MaybeText' => 'OptionalText', 'OptionalText' => 'string | null'];
+        $contracts = (new EndpointContractCollector(typeAliases: $aliases))->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'listConfigProductReports'), 'GET')]])['tools'][0];
+
+        self::assertSame([], $tool['inputSchema']['required'] ?? []);
+    }
+
     public function test_a_key_typed_with_an_alias_whose_null_its_typescript_cannot_say_is_refused(): void
     {
         // `Nullable<string>` admits null as tsc evaluates it, which a reading of its text can't: the
@@ -216,6 +228,17 @@ final class EndpointQueryTest extends TestCase
         $query = self::asTool(self::contract($contracts, 'showAliasedFilterReport'), 'GET');
         self::assertSame(['product'], (new McpManifestBuilder())->build(['Reports' => [$query]])['tools'][0]['inputSchema']['required'] ?? []);
         self::assertStringContainsString('export const ShowAliasedFilterReport: Endpoint<ShowAliasedFilterReportEndpointMap, { query: ShowAliasedFilterReportQuery }> = {', $this->emit()['Reports']);
+    }
+
+    public function test_an_input_whose_self_extends_a_shape_it_cannot_read_still_reads_its_own_keys(): void
+    {
+        // `_self = LayeredNoteInput`, which extends the config's ConfigBase: what that adds can't be
+        // read, and the keys it declares itself are read as declared — `note` clearable.
+        $contracts = (new EndpointContractCollector(typeAliases: self::TYPE_ALIASES))->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'updateLayeredNote'), 'PUT')]])['tools'][0];
+
+        self::assertSame(['id', 'title'], $tool['inputSchema']['required'], "Its path's id, and the title");
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
     }
 
     public function test_a_body_key_typed_with_an_alias_that_admits_null_takes_null(): void
@@ -340,11 +363,11 @@ final class EndpointQueryTest extends TestCase
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             // A null that means something, so the contract says `T|null`: in a query, "any product".
             preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region', 'ReportFields.description', 'ReportAddressInput.street', 'NoteInput.note'],
-            typeAliases: ['MaybeText' => 'string | null'],
+            typeAliases: self::TYPE_ALIASES,
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),
             $responseCollector->collect(self::SRC),
-            (new EndpointContractCollector(typeAliases: ['MaybeText' => 'string | null']))->collect(self::SRC, $responseCollector->collectIndex(self::SRC)),
+            (new EndpointContractCollector(typeAliases: self::TYPE_ALIASES))->collect(self::SRC, $responseCollector->collectIndex(self::SRC)),
         );
     }
 }

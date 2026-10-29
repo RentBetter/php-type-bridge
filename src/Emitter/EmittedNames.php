@@ -32,7 +32,7 @@ final readonly class EmittedNames
         // shape takes the enum's own name when its value union has been named something else.
         if ($type->isSelf && enum_exists($type->ownerClass)) {
             $shortName = $this->enumResolver->getShortName($type->ownerClass);
-            $name = null === ValueOfName::of($type->ownerClass) ? $this->naming->enumShapeName($shortName) : $shortName;
+            $name = ValueOfName::shapeName($type->ownerClass, $shortName, $this->naming->enumShapeName($shortName));
         }
 
         if ($type->parsed instanceof ShapeType || $type->parsed instanceof IntersectionType) {
@@ -49,6 +49,18 @@ final readonly class EmittedNames
         }
 
         return $this->naming->interfaceName($response->name);
+    }
+
+    /**
+     * The name a 204 that declares properties of its own kept, deprecated, beside its own: it was an
+     * interface of them, under the interface prefix, and code importing it still compiles. Null for
+     * any other response, and where the prefix leaves its name as it was.
+     */
+    public function deprecatedResponseName(CollectedApiResponseClass $response): ?string
+    {
+        $was = $this->naming->interfaceName($response->name);
+
+        return 204 === $response->status && [] === $response->properties && $response->declaresProperties && $was !== $response->name ? $was : null;
     }
 
     public function enumName(string $enumClass): string

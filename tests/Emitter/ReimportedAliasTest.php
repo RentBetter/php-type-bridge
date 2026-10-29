@@ -34,19 +34,38 @@ final class ReimportedAliasTest extends TestCase
         self::assertStringContainsString("export interface ReportOwnerResponse {\n  owner: OwnerData;\n}", $reports);
     }
 
+    public function testAnAliasReimportedFromOutsideTheSourceTreeSaysWhyWhereItIsUsed(): void
+    {
+        // NoteItems re-imports a library's `_self`; NoteData imports it from there. Why NoteItems' import
+        // can't be emitted is why NoteData's can't.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Class reference "Item" from "[^"]*NoteItems" could not be resolved\. The @phpstan-type _self on [^ ]*NoteData is typed with it\./');
+
+        $this->emit(__DIR__ . '/../Fixture/ReimportedLibraryFixtures');
+    }
+
+    public function testImportsThatLeadBackToEachOtherFailAsAnAliasNeitherDeclares(): void
+    {
+        // NoteData imports `Code` from NoteCodes, which imports it back: followed once round, not forever.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Unknown TypeScript symbol "Code"');
+
+        $this->emit(__DIR__ . '/../Fixture/CyclicImportFixtures');
+    }
+
     /**
      * @return array<string, string>
      */
-    private function emit(): array
+    private function emit(string $src = self::SRC): array
     {
         $responses = new ResponseClassCollector();
         $enums = new EnumResolver();
-        $enums->scanDirectory(self::SRC);
+        $enums->scanDirectory($src);
 
         return (new TypeScriptEmitter(enumResolver: $enums, domainMapper: new DomainMapper('/tmp/type-bridge-output')))->emit(
-            (new PhpDocTypeCollector())->collect(self::SRC),
-            $responses->collect(self::SRC),
-            (new EndpointContractCollector())->collect(self::SRC, $responses->collectIndex(self::SRC)),
+            (new PhpDocTypeCollector())->collect($src),
+            $responses->collect($src),
+            (new EndpointContractCollector())->collect($src, $responses->collectIndex($src)),
         );
     }
 }

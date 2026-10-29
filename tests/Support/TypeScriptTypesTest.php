@@ -53,6 +53,9 @@ final class TypeScriptTypesTest extends TestCase
         yield 'a typeof' => ['typeof window', null];
         yield 'one member it cannot read, beside one that does' => ['Nullable<string> | null', true];
         yield 'one member it cannot read, beside none that does' => ['Nullable<string> | string', null];
+        yield 'a conditional whose last branch has a null in its union' => ['string extends string ? string : number | null', null];
+        yield 'an intersection with a part it cannot read' => ['Nullable<string> & unknown', null];
+        yield 'a quote escaped in a literal' => ["'it\\'s' | null", true];
     }
 
     #[DataProvider('types')]

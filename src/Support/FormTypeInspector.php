@@ -239,7 +239,7 @@ final class FormTypeInspector
         foreach (HeldConstraints::always($constraints) as $constraint) {
             if ($constraint instanceof All) {
                 $nested = \is_array($constraint->constraints) ? $constraint->constraints : [$constraint->constraints];
-                $held = [...$held, ...array_values(array_filter($nested, static fn(mixed $one): bool => $one instanceof Constraint && self::isValidatedByDefault($one)))];
+                $held = [...$held, ...array_values(array_filter($nested, static fn(mixed $one): bool => $one instanceof Constraint && HeldConstraints::validatedByDefault($one)))];
             }
         }
 
@@ -314,17 +314,7 @@ final class FormTypeInspector
             $constraints = [...$constraints, ...$this->propertyConstraints($property)];
         }
 
-        return array_values(array_filter($constraints, self::isValidatedByDefault(...)));
-    }
-
-    /**
-     * Whether a request is validated against the constraint: it is in the Default group.
-     */
-    private static function isValidatedByDefault(Constraint $constraint): bool
-    {
-        $groups = $constraint->groups;
-
-        return null === $groups || \in_array(Constraint::DEFAULT_GROUP, $groups, true);
+        return array_values(array_filter($constraints, HeldConstraints::validatedByDefault(...)));
     }
 
     /**

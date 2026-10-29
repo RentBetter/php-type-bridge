@@ -44,7 +44,7 @@ final class ParsedTypes
             if ($type instanceof NameRefType) {
                 $names[$type->name] = true;
             }
-            $types = [...$types, ...self::children($type)];
+            array_push($types, ...self::children($type));
         }
 
         return $names;

@@ -72,8 +72,17 @@ final class RoutePathResolver
      */
     public function routeFor(string $className, string $methodName): ?Route
     {
-        $routes = $this->routes();
+        return self::routeIn($this->routes(), $className, $methodName);
+    }
 
+    /**
+     * The route a controller method is served at among routes indexed by controller
+     * ({@see self::byController()}), as {@see self::routeFor()} picks it.
+     *
+     * @param array<string, non-empty-list<Route>> $routes
+     */
+    public static function routeIn(array $routes, string $className, string $methodName): ?Route
+    {
         // Symfony keys an invokable controller's route by the bare class name, so that key
         // answers for __invoke and nothing else — a constructor or helper on the same class
         // has no route, and must not inherit one.
@@ -160,6 +169,17 @@ final class RoutePathResolver
             return $this->routesByController = [];
         }
 
+        return $this->routesByController = self::byController($collection);
+    }
+
+    /**
+     * The routes by the controller each is served by, its `_controller` default, in the order they
+     * are loaded.
+     *
+     * @return array<string, non-empty-list<Route>>
+     */
+    public static function byController(RouteCollection $collection): array
+    {
         $routes = [];
         foreach ($collection as $route) {
             $controller = $route->getDefault('_controller');
@@ -168,7 +188,7 @@ final class RoutePathResolver
             }
         }
 
-        return $this->routesByController = $routes;
+        return $routes;
     }
 
     private function load(): RouteCollection

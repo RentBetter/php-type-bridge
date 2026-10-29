@@ -6,21 +6,30 @@ namespace PTGS\TypeBridge\PHPStan\Support;
 
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Routing\DeclaredRoutes;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use ReflectionAttribute;
 use ReflectionMethod;
 
 final class ApiMethodInspector
 {
+    /** What each controller's attributes route it at, read once per class. */
+    private readonly DeclaredRoutes $declaredRoutes;
+
     /**
      * @param RoutePathResolver|null $routePathResolver resolves the *served* path, which the
-     *        method attribute alone does not give: a routing-config `prefix` and any class-level
-     *        #[Route] are part of it too. Without one, only the attribute's own path is known, so
-     *        an application that prefixes in routing config will look like it has no API routes.
+     *        controller's attributes alone do not give: a routing-config `prefix` is part of it too.
+     *        Without one, only the route the attributes declare is known — a class-level #[Route]
+     *        merged in — so an application that prefixes in routing config will look like it has no
+     *        API routes.
      */
     public function __construct(
         private readonly ?RoutePathResolver $routePathResolver = null,
-    ) {}
+    ) {
+        // Built here, not taken: PHPStan's container autowires every class-typed argument, and one
+        // before 2.2 can't build a default written as `new`.
+        $this->declaredRoutes = new DeclaredRoutes();
+    }
 
     /**
      * @param class-string $className
@@ -33,29 +42,12 @@ final class ApiMethodInspector
 
         $method = new ReflectionMethod($className, $methodName);
 
-        $path = null;
-        $httpMethods = [];
-        foreach ($method->getAttributes() as $attribute) {
-            if (!$this->isRouteAttribute($attribute)) {
-                continue;
-            }
-
-            $arguments = $attribute->getArguments();
-            $pathArgument = $arguments['path'] ?? ($arguments[0] ?? null);
-            if (\is_string($pathArgument)) {
-                $path = $pathArgument;
-            }
-
-            $methodsArgument = $arguments['methods'] ?? [];
-            if (\is_array($methodsArgument)) {
-                $httpMethods = array_values(array_unique(array_map(
-                    static fn (mixed $value): string => strtoupper((string) $value),
-                    array_filter($methodsArgument, static fn (mixed $value): bool => \is_string($value) && '' !== $value),
-                )));
-            }
-
-            break;
-        }
+        // The route the generator describes the method by: the one it is served at, else the one its
+        // class's attributes declare — a class-level #[Route]'s path and methods merged into its own,
+        // an invokable class's its __invoke's. One Symfony's loader reads none of — another
+        // framework's attribute, say — is read off the method's attributes as written.
+        $route = $this->routePathResolver?->routeFor($className, $methodName) ?? $this->declaredRoutes->routeFor($className, $methodName);
+        [$path, $httpMethods] = null !== $route ? [$route->getPath(), array_values($route->getMethods())] : $this->writtenRoute($method);
 
         $declaredResponses = [];
         $responsesAttributes = $method->getAttributes(ApiResponses::class);
@@ -71,18 +63,42 @@ final class ApiMethodInspector
             }
         }
 
-        // The router's answer wins where it has one: it already accounts for the routing-config
-        // prefix and any class-level #[Route], which the attribute read above cannot see — and is
-        // the route the first #[Route] declares, as the generator publishes it.
-        $resolvedPath = $this->routePathResolver?->pathFor($className, $methodName);
-
         return new InspectedApiMethod(
-            path: $resolvedPath ?? (null === $path ? null : RoutePathResolver::declaredPath($path)),
+            path: $path,
             httpMethods: $httpMethods,
             hasApiRequest: [] !== $method->getAttributes(ApiRequest::class),
             hasApiResponses: [] !== $responsesAttributes,
             declaredResponses: $declaredResponses,
         );
+    }
+
+    /**
+     * The path and HTTP methods the method's first route attribute writes, its path as the router
+     * would serve it ({@see RoutePathResolver::declaredPath()}).
+     *
+     * @return array{0: string|null, 1: list<string>}
+     */
+    private function writtenRoute(ReflectionMethod $method): array
+    {
+        foreach ($method->getAttributes() as $attribute) {
+            if (!$this->isRouteAttribute($attribute)) {
+                continue;
+            }
+
+            $arguments = $attribute->getArguments();
+            $path = $arguments['path'] ?? ($arguments[0] ?? null);
+            $methods = $arguments['methods'] ?? [];
+
+            return [
+                \is_string($path) ? RoutePathResolver::declaredPath($path) : null,
+                \is_array($methods) ? array_values(array_unique(array_map(
+                    static fn (mixed $value): string => strtoupper((string) $value),
+                    array_filter($methods, static fn (mixed $value): bool => \is_string($value) && '' !== $value),
+                ))) : [],
+            ];
+        }
+
+        return [null, []];
     }
 
     /**

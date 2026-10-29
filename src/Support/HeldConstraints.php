@@ -16,6 +16,10 @@ use Symfony\Component\Validator\Constraints\When;
  * The constraints a value is held to, read through what nests them. What a Sequentially or a
  * Compound nests holds whenever it does, as if written beside it; what an AtLeastOneOf or a When
  * nests only may; and what an All or a Collection nests holds the value's items or keys, not it.
+ *
+ * A request is validated in the Default group, and a composite validates what it nests in the group
+ * it is validated in: one confined to other groups holds nothing, however deep — a nested one with
+ * no groups of its own takes its composite's.
  */
 final class HeldConstraints
 {
@@ -30,7 +34,7 @@ final class HeldConstraints
     public static function always(array $constraints): array
     {
         $held = [];
-        foreach ($constraints as $constraint) {
+        foreach (array_filter($constraints, self::validatedByDefault(...)) as $constraint) {
             $held[] = $constraint;
             if ($constraint instanceof Sequentially || $constraint instanceof Compound) {
                 $held = [...$held, ...self::always(self::nested($constraint))];
@@ -51,7 +55,7 @@ final class HeldConstraints
     public static function any(array $constraints): array
     {
         $reached = [];
-        foreach ($constraints as $constraint) {
+        foreach (array_filter($constraints, self::validatedByDefault(...)) as $constraint) {
             $reached[] = $constraint;
             // A When is a Composite, and asked first: both its branches, whatever a Symfony version's
             // Composite says it nests.
@@ -65,6 +69,16 @@ final class HeldConstraints
         }
 
         return $reached;
+    }
+
+    /**
+     * Whether a request is validated against the constraint: it is in the Default group.
+     */
+    public static function validatedByDefault(Constraint $constraint): bool
+    {
+        $groups = $constraint->groups;
+
+        return null === $groups || \in_array(Constraint::DEFAULT_GROUP, $groups, true);
     }
 
     /**

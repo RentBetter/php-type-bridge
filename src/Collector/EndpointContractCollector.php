@@ -25,7 +25,7 @@ use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
-use PTGS\TypeBridge\Routing\ControllerAttributeClassLoader;
+use PTGS\TypeBridge\Routing\DeclaredRoutes;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\AttributeText;
@@ -35,11 +35,10 @@ use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use PTGS\TypeBridge\Support\TypeScriptTypes;
-use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
-use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Route;
 use Throwable;
 
 final class EndpointContractCollector
@@ -51,6 +50,9 @@ final class EndpointContractCollector
     private readonly ClassFileTypes $files;
 
     private readonly ?AttributeText $toolDescriptions;
+
+    /** What each controller's attributes route it at, read once per class. */
+    private readonly DeclaredRoutes $declaredRoutes;
 
     /** @var array<string, ParsedType|null> each type written, parsed once however many inputs name it */
     private array $parsedTypes = [];
@@ -94,6 +96,7 @@ final class EndpointContractCollector
         private readonly array $typeAliases = [],
     ) {
         $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
+        $this->declaredRoutes = new DeclaredRoutes();
         // Keyed as the router holds a requirement, anchors off, so a project keying one `^\\d+$` as
         // its attribute writes it finds the `\\d+` the router serves.
         $types = [];
@@ -161,7 +164,8 @@ final class EndpointContractCollector
                         ));
                     }
                     $seenNames[$endpointName] = $claimant;
-                    [$httpMethod, $httpPath] = $this->routeMethodAndPath($method);
+                    $route = $this->routeOf($className, $method->getName());
+                    $httpMethod = $route?->getMethods()[0] ?? 'GET';
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
                         name: $endpointName,
@@ -169,10 +173,10 @@ final class EndpointContractCollector
                         controllerClass: $className,
                         methodName: $method->getName(),
                         responses: $responses,
-                        request: $this->resolveRequestContract($method, $srcDir, $classFiles),
-                        mcp: $this->resolveMcpTool($method, $endpointName),
+                        request: $this->resolveRequestContract($method, $route, $srcDir, $classFiles),
+                        mcp: $this->resolveMcpTool($method, $className, $endpointName, $httpMethod, $route),
                         httpMethod: $httpMethod,
-                        httpPath: $this->contractPath($method, $httpPath),
+                        httpPath: $route?->getPath() ?? '',
                     );
                 }
             }
@@ -201,7 +205,7 @@ final class EndpointContractCollector
         return ucfirst('' !== $base ? $base : $methodName);
     }
 
-    private function resolveMcpTool(ReflectionMethod $method, string $endpointName): ?CollectedMcpTool
+    private function resolveMcpTool(ReflectionMethod $method, string $className, string $endpointName, string $httpMethod, ?Route $route): ?CollectedMcpTool
     {
         $attributes = $method->getAttributes(McpTool::class);
         if ([] === $attributes) {
@@ -210,14 +214,12 @@ final class EndpointContractCollector
 
         /** @var McpTool $tool */
         $tool = $attributes[0]->newInstance();
-        [$httpMethod, $httpPath] = $this->routeMethodAndPath($method);
-        $httpPath = $this->servedPath($method, $httpPath);
 
         return new CollectedMcpTool(
             name: $tool->name ?? $endpointName,
             description: $this->resolveMcpDescription($method, $tool),
             httpMethod: $httpMethod,
-            httpPath: $httpPath,
+            httpPath: $this->servedPath($className, $method->getName(), $route),
             destructive: $tool->destructive ?? ('GET' !== $httpMethod),
             scopes: $this->resolveMcpScopes($method),
         );
@@ -392,30 +394,42 @@ final class EndpointContractCollector
     }
 
     /**
-     * The path a client calls an endpoint at: the one Symfony serves when the routing config is
-     * given — its prefixes and any class-level #[Route] included — and the method attribute's own
-     * otherwise. Unlike an MCP tool's, an endpoint the router does not know keeps its attribute
-     * path rather than failing generation.
+     * The route a method is described by — its HTTP method, its path and its params: the one Symfony
+     * serves it at when the routing config is given and serves it, its prefixes and an import's
+     * overrides included; otherwise the one its class's attributes declare, a class-level #[Route]
+     * merged in as the router merges it ({@see DeclaredRoutes}). Unlike an MCP tool's, an endpoint the
+     * router does not know keeps its declared route rather than failing generation. Null when nothing
+     * routes it.
      */
-    private function contractPath(ReflectionMethod $method, string $attributePath): string
+    private function routeOf(string $className, string $methodName): ?Route
     {
-        return $this->routePathResolver?->pathFor($method->getDeclaringClass()->getName(), $method->getName()) ?? $attributePath;
+        $served = $this->routePathResolver?->routeFor($className, $methodName);
+        if (null !== $served) {
+            return $served;
+        }
+
+        $declared = $this->declaredRoutes->routeFor($className, $methodName);
+        if (null === $declared && null !== $error = $this->declaredRoutes->loadError($className)) {
+            throw new RuntimeException(\sprintf('The #[Route]s of %s cannot be read as Symfony reads them: %s', $className, $error));
+        }
+
+        return $declared;
     }
 
     /**
      * The path an MCP tool is published with. With a route resolver configured it is the served
      * path, and both ways the router can fail to supply one are errors rather than fallbacks: a
      * routing file that will not load, or a method the loaded collection does not route. Either
-     * would otherwise publish the attribute path as if it were served, and a tool pointing at a
+     * would otherwise publish the declared path as if it were served, and a tool pointing at a
      * path the application answers 404 to is worse than no tool.
      */
-    private function servedPath(ReflectionMethod $method, string $attributePath): string
+    private function servedPath(string $className, string $methodName, ?Route $route): string
     {
         if (null === $this->routePathResolver) {
-            return $attributePath;
+            return $route?->getPath() ?? '';
         }
 
-        $served = $this->routePathResolver->pathFor($method->getDeclaringClass()->getName(), $method->getName());
+        $served = $this->routePathResolver->pathFor($className, $methodName);
         if (null !== $error = $this->routePathResolver->loadError()) {
             throw new RuntimeException(\sprintf('Cannot resolve served route paths for MCP tools: %s', $error));
         }
@@ -423,8 +437,8 @@ final class EndpointContractCollector
         if (null === $served) {
             throw new RuntimeException(\sprintf(
                 'Endpoint "%s::%s" is exposed as an MCP tool but the routing configuration serves no route for it.',
-                $method->getDeclaringClass()->getName(),
-                $method->getName(),
+                $className,
+                $methodName,
             ));
         }
 
@@ -432,55 +446,16 @@ final class EndpointContractCollector
     }
 
     /**
-     * The #[Route] a method is described by: the one that declared the route the router serves it at
-     * ({@see ControllerAttributeClassLoader::ATTRIBUTE}) — its first, unless that one is not served,
-     * confined to an env the router is not loaded in — or, without routing, its first.
-     *
-     * @return ReflectionAttribute<Route>|null
-     */
-    private function routeAttribute(ReflectionMethod $method): ?ReflectionAttribute
-    {
-        $attributes = $method->getAttributes(Route::class, ReflectionAttribute::IS_INSTANCEOF);
-        $declaredBy = $this->routePathResolver?->routeFor($method->getDeclaringClass()->getName(), $method->getName())?->getOption(ControllerAttributeClassLoader::ATTRIBUTE);
-
-        return $attributes[\is_int($declaredBy) ? $declaredBy : 0] ?? $attributes[0] ?? null;
-    }
-
-    /**
-     * @return array{0: string, 1: string} [HTTP method (uppercased, first listed), path template]
-     */
-    private function routeMethodAndPath(ReflectionMethod $method): array
-    {
-        $routeAttribute = $this->routeAttribute($method);
-        if (null === $routeAttribute) {
-            return ['GET', ''];
-        }
-
-        $arguments = $routeAttribute->getArguments();
-        $path = $arguments['path'] ?? $arguments[0] ?? '';
-        $methods = $arguments['methods'] ?? [];
-
-        $httpMethod = 'GET';
-        if (\is_string($methods)) {
-            $httpMethod = strtoupper($methods);
-        } elseif (\is_array($methods) && \is_string($firstMethod = $methods[0] ?? null)) {
-            $httpMethod = strtoupper($firstMethod);
-        }
-
-        return [$httpMethod, \is_string($path) ? RoutePathResolver::declaredPath($path) : ''];
-    }
-
-    /**
      * @param array<string, string> $classFiles
      */
-    private function resolveRequestContract(ReflectionMethod $method, string $srcDir, array $classFiles): ?CollectedEndpointRequest
+    private function resolveRequestContract(ReflectionMethod $method, ?Route $route, string $srcDir, array $classFiles): ?CollectedEndpointRequest
     {
         $attributes = $method->getAttributes(ApiRequest::class);
         /** @var ApiRequest|null $request */
         $request = [] !== $attributes ? $attributes[0]->newInstance() : null;
 
         // An explicit class on #[ApiRequest(path:)] wins; otherwise the path params are
-        // derived from the #[Route] placeholders (each a string unless its requirement
+        // derived from the route's placeholders (each a string unless its requirement
         // refines the type — see PathParam).
         $path = null !== $request && null !== $request->path
             ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles)
@@ -490,55 +465,37 @@ final class EndpointContractCollector
             query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles) : null,
             body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles) : null,
             path: $path,
-            pathParams: null === $path ? $this->derivePathParamsFromRoute($method) : null,
+            pathParams: null === $path ? $this->derivePathParamsFromRoute($route) : null,
         );
 
         return $collected->hasAnyInput() ? $collected : null;
     }
 
     /**
-     * Derives path parameters from the method's #[Route] placeholders. Each segment types as a
-     * plain string unless its route requirement matches a known {@see PathParam} pattern. Returns
-     * null when there is no #[Route] or it carries no placeholders.
+     * Derives path parameters from the placeholders of the route a method is described by
+     * ({@see self::routeOf()}): a class-level #[Route]'s, and a routing prefix's, as much as its own.
+     * Each segment types as a plain string unless its requirement — the route's, an import's
+     * overriding the attribute's — matches a known {@see PathParam} pattern. Null when there is no
+     * route or it has no placeholders.
      *
      * @return list<CollectedPathParam>|null
      */
-    private function derivePathParamsFromRoute(ReflectionMethod $method): ?array
+    private function derivePathParamsFromRoute(?Route $route): ?array
     {
-        $routeAttribute = $this->routeAttribute($method);
-        if (null === $routeAttribute) {
-            return null;
-        }
-
-        $arguments = $routeAttribute->getArguments();
-        $pathTemplate = $arguments['path'] ?? $arguments[0] ?? null;
-        $requirements = $arguments['requirements'] ?? [];
-        if (!\is_array($requirements)) {
-            $requirements = [];
-        }
-        // As the router reads it: a requirement or a default written inline is the route's, and the
-        // path names the param alone.
-        $declared = \is_string($pathTemplate) ? RoutePathResolver::declaredRoute($pathTemplate, $requirements) : null;
-        if (null === $declared || 0 === preg_match_all('/\{(\w+)\}/', $declared->getPath(), $matches)) {
+        // Named as Symfony's RouteCompiler reads a placeholder: `{!slug}` is `slug` too.
+        if (null === $route || 0 === preg_match_all('/\{!?([\w\x80-\xFF]+)\}/', $route->getPath(), $matches)) {
             return null;
         }
 
         // Whether the router matches the requirements by character (`u`) or by byte: the option as
-        // the router has it when its config is loaded — an import's overrides the attribute's —
-        // else the attribute's; with neither, the router's default, which is not known here.
-        $served = $this->routePathResolver?->routeFor($method->getDeclaringClass()->getName(), $method->getName());
-        $options = $arguments['options'] ?? [];
-        $utf8 = null !== $served
-            ? ($served->hasOption('utf8') ? $served->getOption('utf8') : null)
-            : ($arguments['utf8'] ?? (\is_array($options) ? $options['utf8'] ?? null : null));
+        // the route has it — an import's overrides the attribute's; with neither, the router's
+        // default, which is not known here.
+        $utf8 = $route->hasOption('utf8') ? $route->getOption('utf8') : null;
         $utf8 = \is_bool($utf8) ? $utf8 : null;
 
         $params = [];
         foreach ($matches[1] as $name) {
-            // What a segment must look like, too, is the router's: an import's requirement
-            // overrides the attribute's as its `utf8` does.
-            $requirement = ($served ?? $declared)->getRequirement($name);
-            $requirement = \is_string($requirement) ? $requirement : null;
+            $requirement = $route->getRequirement($name);
             $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
             $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8);
         }
@@ -573,7 +530,7 @@ final class EndpointContractCollector
             ownerClass: $resolvedForm['dataClass'],
             srcDir: $srcDir,
             classFiles: $classFiles,
-            fields: $this->withDeclaredContracts($resolvedForm['fields'], $classFiles),
+            fields: $this->withDeclaredContracts($resolvedForm['fields'], $srcDir, $classFiles),
         );
     }
 
@@ -588,14 +545,14 @@ final class EndpointContractCollector
      *
      * @return list<CollectedFormField>
      */
-    private function withDeclaredContracts(array $fields, array $classFiles): array
+    private function withDeclaredContracts(array $fields, string $srcDir, array $classFiles): array
     {
         return array_map(
             fn (CollectedFormField $field): CollectedFormField => $field->withDeclared(
-                children: $this->withDeclaredContracts($field->children, $classFiles),
-                entryChildren: $this->withDeclaredContracts($field->entryChildren, $classFiles),
+                children: $this->withDeclaredContracts($field->children, $srcDir, $classFiles),
+                entryChildren: $this->withDeclaredContracts($field->entryChildren, $srcDir, $classFiles),
                 contract: $field->compound && [] === $field->children && null !== $field->dataClass
-                    ? $this->contractOf($field->dataClass, $classFiles)
+                    ? $this->contractOf($field->dataClass, $srcDir, $classFiles)
                     : null,
             ),
             $fields,
@@ -603,17 +560,47 @@ final class EndpointContractCollector
     }
 
     /**
-     * The `_self` shape a class in the source tree declares, or null when it is outside the tree,
-     * declares none, or declares one that is not a shape.
+     * The keys of the `_self` shape a class in the source tree declares — those it inherits included,
+     * and each alias it is written with read as it is declared, as an input's are — or null when it
+     * is outside the tree, declares none, or declares one that is not a shape.
      *
      * @param array<string, string> $classFiles
      */
-    private function contractOf(string $class, array $classFiles): ?ShapeType
+    private function contractOf(string $class, string $srcDir, array $classFiles): ?ShapeType
     {
         $file = $classFiles[$class] ?? null;
-        $self = null === $file ? null : $this->files->definitions($file)['_self'] ?? null;
+        $self = null === $file || !$this->files->readable($file) ? null : $this->files->definitions($file)['_self'] ?? null;
+        if (null === $self) {
+            return null;
+        }
 
-        return null === $self ? null : $this->declaredShape($self);
+        [$own, $inherited] = $this->selfContract($self, $class, $file, $srcDir, $classFiles);
+
+        return null === $own || null === $inherited ? $own : ShapeType::intersected($inherited, $own);
+    }
+
+    /**
+     * What a class's `_self` declares: the keys of its own, and for an intersection those it inherits,
+     * read where its base is declared ({@see self::inheritedShape()}) — each alias read as it is
+     * declared. A `_self` written as another alias, the file's own or one it imports, is that alias's
+     * shape, read whole.
+     *
+     * @param string                $class      the class whose file declares it
+     * @param array<string, string> $classFiles
+     *
+     * @return array{0: ShapeType|null, 1: ShapeType|null} its own keys, and those it inherits
+     */
+    private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles): array
+    {
+        $self = $this->parseType($definition);
+        if ($self instanceof NameRefType && null === $self->class) {
+            return [self::shapeOf($this->readAliases($self, $class, $file, $srcDir, $classFiles, [])), null];
+        }
+
+        return [
+            $this->withAliasesRead(self::shapeOf($self), $class, $file, $srcDir, $classFiles),
+            $self instanceof IntersectionType ? $this->inheritedShape($self, $class, $file, $srcDir, $classFiles) : null,
+        ];
     }
 
     /**
@@ -649,7 +636,9 @@ final class EndpointContractCollector
             ));
         }
 
-        $self = $this->parseType($definitions['_self']);
+        // The keys it inherits are as much its contract as its own: whether a query may be left out,
+        // and whether a body key is required or may be cleared, is theirs to say too.
+        [$contract, $inherited] = $this->selfContract($definitions['_self'], $ownerClass, $file, $srcDir, $classFiles);
 
         return new CollectedInputReference(
             formClass: $formClass,
@@ -657,12 +646,8 @@ final class EndpointContractCollector
             typeName: $this->docHelper->emittedTypeName('_self', $ownerClass),
             domain: $this->domainGuesser->guess($srcDir, $file),
             fields: $fields,
-            contract: $this->withAliasesRead(self::shapeOf($self), $ownerClass, $file, $srcDir, $classFiles),
-            // The keys it inherits are as much its contract as its own: whether a query may be left
-            // out, and whether a body key is required or may be cleared, is theirs to say too.
-            inheritedContract: $self instanceof IntersectionType
-                ? $this->inheritedShape($self, $ownerClass, $file, $srcDir, $classFiles)
-                : null,
+            contract: $contract,
+            inheritedContract: $inherited,
         );
     }
 
@@ -771,7 +756,7 @@ final class EndpointContractCollector
     {
         $declared = $this->aliasDefinition($alias->name, $class, $file, $srcDir, $classFiles);
         if (null === $declared) {
-            return isset($this->typeAliases[$alias->name]) && TypeScriptTypes::admitsNull($this->typeAliases[$alias->name])
+            return isset($this->typeAliases[$alias->name]) && $this->configAliasAdmitsNull($alias->name)
                 ? new NullableType($alias, optional: false)
                 : $alias;
         }
@@ -786,6 +771,23 @@ final class EndpointContractCollector
         $parsed = $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
 
         return $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true]);
+    }
+
+    /**
+     * Whether a project-wide alias admits null, as its TypeScript says ({@see TypeScriptTypes::admitsNull()}).
+     * A key typed with it is one a client may leave out of a query, or clear, where it does, and the
+     * Endpoint's AsQuery<T> reads that off the TypeScript as tsc evaluates it: where its text can't
+     * say, guessing would have the Endpoint and the tool read the key two ways.
+     */
+    private function configAliasAdmitsNull(string $name): bool
+    {
+        $type = $this->typeAliases[$name];
+
+        return TypeScriptTypes::admitsNull($type, $this->typeAliases) ?? throw new RuntimeException(\sprintf(
+            'Whether the project-wide alias "%s" (`%s`) admits null can\'t be read from its TypeScript, and a key of a request is typed with it: whether that key may be left out, or cleared, turns on it. Write the null out — `%2$s | null` where it admits one, `NonNullable<%2$s>` where it doesn\'t.',
+            $name,
+            $type,
+        ));
     }
 
     /**
@@ -812,21 +814,15 @@ final class EndpointContractCollector
 
     /**
      * An intersection read: the shape its base and its own keys make, where its base reads as one
-     * ({@see ShapeType::intersected()}); as written otherwise.
+     * ({@see ShapeType::intersected()}); its own keys read, on the base as written, otherwise.
      */
     private static function intersection(IntersectionType $written, ParsedType $base, ParsedType $extra): ParsedType
     {
-        return $base instanceof ShapeType && $extra instanceof ShapeType ? ShapeType::intersected($base, $extra) : $written;
-    }
+        if (!$extra instanceof ShapeType) {
+            return $written;
+        }
 
-    /**
-     * The keys an input class declares, when its `_self` is a shape. An intersection gives the
-     * keys it adds: the ones it inherits are named elsewhere and are not read here, so a field
-     * among them is left to its form.
-     */
-    private function declaredShape(string $self): ?ShapeType
-    {
-        return self::shapeOf($this->parseType($self));
+        return $base instanceof ShapeType ? ShapeType::intersected($base, $extra) : new IntersectionType($written->base, $extra);
     }
 
     private static function shapeOf(?ParsedType $parsed): ?ShapeType

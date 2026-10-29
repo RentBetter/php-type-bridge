@@ -768,17 +768,18 @@ final class McpManifestBuilderTest extends TestCase
         // LabelsType reads what is sent before Symfony maps anything, so its form has no children
         // and once published as a string, which a client checking arguments refused in every form
         // the endpoint accepts. Its data class's `_self` is the only thing that says what it takes —
-        // read through the aliases it is written with, as the Endpoint reads them.
+        // read through the aliases it is written with, the keys it extends included, as the Endpoint
+        // reads them.
         $labels = $this->argumentTools()['RecordVerdict']['inputSchema']['properties']['labels'];
 
         self::assertSame([
             'type' => 'object',
             'properties' => [
+                'remove' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'set' => ['type' => 'array', 'items' => ['anyOf' => [
                     ['type' => 'string'],
                     ['type' => 'object', 'properties' => ['name' => ['type' => 'string'], 'colour' => ['type' => 'string']], 'required' => ['name']],
                 ]]],
-                'remove' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'mode' => ['enum' => ['merge', 'replace']],
                 'reason' => ['type' => ['string', 'null']],
             ],
@@ -809,10 +810,11 @@ final class McpManifestBuilderTest extends TestCase
     public function testALiteralUnionAllowsEachOfItsValues(): void
     {
         // '1' and 1, true and 1: JSON tells each pair apart, and the contract allows both.
-        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape("array{code: '1'|1, flag: true|1, level: 1|1}"));
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape("array{code: '1'|1, flag: true|1, level: 1|1, kind: 'a'|int}"));
 
         $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
         self::assertSame(['enum' => ['1', 1]], $properties['code']);
+        self::assertArrayHasKey('anyOf', $properties['kind'], 'Not every member a literal: either of them');
         self::assertSame(['enum' => [true, 1]], $properties['flag']);
         self::assertSame(['enum' => [1]], $properties['level']);
     }

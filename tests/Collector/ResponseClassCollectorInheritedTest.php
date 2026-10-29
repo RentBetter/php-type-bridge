@@ -415,10 +415,15 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertSame('array<array-key, mixed>', self::rawTypes($response)['meta']);
         self::assertSame('string|null', self::rawTypes($response)['note']);
         self::assertSame('int|null', self::rawTypes($response)['rank']);
-        // A class is the one Reflection names, wherever the property is written.
+        // A class is the one Reflection names, wherever the property is written; `self` is the class.
         self::assertSame('\\' . NoteSummary::class . '|null', self::rawTypes($response)['summary']);
-        self::assertStringContainsString("export interface ShowNoteResponse {\n  id: string;\n  rank: number | null;\n  summary: NoteSummary | null;\n  meta: Record<string, unknown> | unknown[];\n  note: string | null;\n", $notes);
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  id: string;\n  rank: number | null;\n  summary: NoteSummary | null;\n  previous: ShowNoteResponse | null;\n  meta: Record<string, unknown> | unknown[];\n  note: string | null;\n", $notes);
         self::assertMatchesRegularExpression('~^  count: (number \\| Record<string, unknown> \\| unknown\\[\\]|Record<string, unknown> \\| unknown\\[\\] \\| number);$~m', $notes);
+    }
+
+    public function test_a_native_parent_type_is_the_parent_class(): void
+    {
+        self::assertStringContainsString("export interface ShowNoteVersionResponse {\n  previous: NoteVersion | null;\n  number: number;\n}", self::emit(self::fixtures('NativeTypedFixtures'))['Notes']);
     }
 
     public function test_a_library_base_classs_property_with_only_a_native_type_is_published_as_that_type_says(): void

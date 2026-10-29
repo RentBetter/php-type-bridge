@@ -699,7 +699,7 @@ final class TypeScriptEmitter
 
                 continue;
             }
-            $types = [...$types, ...ParsedTypes::children($type)];
+            array_push($types, ...ParsedTypes::children($type));
         }
 
         $byDomain = [];
@@ -855,21 +855,29 @@ final class TypeScriptEmitter
                     maps: $maps,
                     registrations: $registrations,
                 );
+                // Declared beside it, though nothing is typed by it: no other type may take it.
+                $was = $this->names->deprecatedResponseName($response);
+                if (null !== $was) {
+                    $this->registerSymbol(
+                        domain: $domain,
+                        logicalName: null,
+                        emittedName: $was,
+                        descriptor: 'the deprecated name of response ' . $response->className,
+                        maps: $maps,
+                        registrations: $registrations,
+                    );
+                }
             }
 
             foreach ($this->collectLocalEnums($domain) as $enumClass) {
-                $emittedName = $this->names->enumName($enumClass);
-                if (isset($registrations[$domain][$emittedName])) {
-                    throw new RuntimeException(\sprintf(
-                        'TypeScript naming collision in domain "%s": "%s" is emitted by both %s and enum %s.',
-                        $domain,
-                        $emittedName,
-                        $registrations[$domain][$emittedName],
-                        $enumClass,
-                    ));
-                }
-
-                $registrations[$domain][$emittedName] = 'enum ' . $enumClass;
+                $this->registerSymbol(
+                    domain: $domain,
+                    logicalName: null,
+                    emittedName: $this->names->enumName($enumClass),
+                    descriptor: 'enum ' . $enumClass,
+                    maps: $maps,
+                    registrations: $registrations,
+                );
             }
         }
 
@@ -877,12 +885,15 @@ final class TypeScriptEmitter
     }
 
     /**
+     * Claims an emitted name in the domain, failing on one already claimed; with a logical name, it is
+     * what that name resolves to.
+     *
      * @param array<string, array<string, string>> $maps
      * @param array<string, array<string, string>> $registrations
      */
     private function registerSymbol(
         string $domain,
-        string $logicalName,
+        ?string $logicalName,
         string $emittedName,
         string $descriptor,
         array &$maps,
@@ -898,7 +909,9 @@ final class TypeScriptEmitter
             ));
         }
 
-        $maps[$domain][$logicalName] = $emittedName;
+        if (null !== $logicalName) {
+            $maps[$domain][$logicalName] = $emittedName;
+        }
         $registrations[$domain][$emittedName] = $descriptor;
     }
 
@@ -975,6 +988,10 @@ final class TypeScriptEmitter
         }
         foreach ($responses as $response) {
             $names[$this->names->responseDeclarationName($response)] = true;
+            $was = $this->names->deprecatedResponseName($response);
+            if (null !== $was) {
+                $names[$was] = true;
+            }
         }
         foreach ($this->collectLocalEnums($domain) as $enumClass) {
             $names[$this->names->enumName($enumClass)] = true;

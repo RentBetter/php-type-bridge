@@ -15,4 +15,6 @@ final class ShowNoteResponse extends AbstractEnvelope implements HttpOk
     public ?int $rank = null;
 
     public ?NoteSummary $summary = null;
+
+    public ?self $previous = null;
 }

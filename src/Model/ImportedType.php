@@ -11,8 +11,9 @@ final readonly class ImportedType
 {
     /**
      * @param string|null $sourceAlias the alias as the target declares it — `_self`, or a named
-     *        alias that may itself be one the target imports — where the import says so; where it
-     *        names none, the one it is imported as ({@see self::sourceName()})
+     *        alias — where the import says so; where it names none, the one it is imported as
+     *        ({@see self::sourceName()}). An import read through {@see \PTGS\TypeBridge\Support\ClassFileTypes::imports()}
+     *        is followed to the class that declares it: one its target only re-imports is that one's
      */
     public function __construct(
         public string $localAlias,

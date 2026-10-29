@@ -519,13 +519,14 @@ final class McpManifestBuilder
                 return null;
             }
             $members[] = $schema;
-            if ($member instanceof LiteralType) {
+            // Each value once, told apart as JSON tells them: '1' and 1, true and 1, are two.
+            if ($member instanceof LiteralType && !\in_array($member->value, $values, true)) {
                 $values[] = $member->value;
             }
         }
 
-        if ([] !== $members && \count($values) === \count($members)) {
-            $schema = ['enum' => array_values(array_unique($values, \SORT_REGULAR))];
+        if ([] !== $members && array_all($union->types, static fn (ParsedType $member): bool => $member instanceof LiteralType || ($member instanceof ScalarType && 'null' === $member->base()))) {
+            $schema = ['enum' => $values];
         } else {
             $schema = 1 === \count($members) ? $members[0] : ['anyOf' => $members];
         }

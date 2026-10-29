@@ -667,9 +667,11 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * The name a type alias is emitted under — the one rule an import of it, an endpoint's input
-     * reference and its own declaration agree on: a named alias is its own name; a class's `_self`
-     * is the class, and an enum's its Data unless `#[ValueOfName]` gives the value union its own name.
+     * The name a type alias is collected under — the one an import of it, an endpoint's input
+     * reference and its own declaration all key it by: a named alias is its own name; a class's `_self`
+     * is the class, and an enum's as {@see ValueOfName::shapeName()} says, `{Enum}Data` beside its value
+     * union. It is declared as {@see \PTGS\TypeBridge\Emitter\EmittedNames} names it, the project's
+     * suffix and prefix applied.
      */
     public function emittedTypeName(string $alias, string $ownerClass): string
     {
@@ -678,10 +680,7 @@ final class PhpDocTypeHelper
         }
 
         $shortName = $this->shortName($ownerClass);
-        if (enum_exists($ownerClass) && null === ValueOfName::of($ownerClass)) {
-            return $shortName . 'Data';
-        }
 
-        return $shortName;
+        return enum_exists($ownerClass) ? ValueOfName::shapeName($ownerClass, $shortName, $shortName . 'Data') : $shortName;
     }
 }
