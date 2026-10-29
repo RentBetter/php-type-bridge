@@ -9,6 +9,7 @@ use PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
+use PTGS\TypeBridge\Tests\Fixture\BrokenAttributeFixtures\Notes\NoteController as BrokenAttributeController;
 use PTGS\TypeBridge\Tests\Fixture\ClassMethodsFixtures\Notes\NoteController as ClassMethodsController;
 use PTGS\TypeBridge\Tests\Fixture\OtherRouteApp\NoteController as OtherRouteController;
 use PTGS\TypeBridge\Tests\Fixture\ThrowingRouteFixtures\Notes\NoteController as ThrowingRouteController;
@@ -44,6 +45,15 @@ final class ApiMethodInspectorTest extends TestCase
         // Symfony's loader can't read it: the rules read the attribute as written, as another
         // framework's, rather than fail.
         self::assertSame('/notes/{id}', (new ApiMethodInspector())->inspect(ThrowingRouteController::class, 'deleteNoteAction')?->path);
+    }
+
+    public function testAnAttributeWhoseClassCantLoadIsNoRoute(): void
+    {
+        // Asking whether an attribute is a route must not load one whose declaration throws.
+        $method = (new ApiMethodInspector())->inspect(BrokenAttributeController::class, 'helper');
+
+        self::assertNull($method?->path);
+        self::assertSame([], $method?->httpMethods);
     }
 
     public function testAnotherFrameworksRouteIsReadAsWritten(): void

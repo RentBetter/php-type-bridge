@@ -74,6 +74,16 @@ PHP);
         self::assertStringContainsString("export const Ping: Endpoint<PingEndpointMap> = {\n  method: 'GET',\n  path: '/api/ping',\n};", $ping);
     }
 
+    public function test_a_class_this_install_cant_load_is_no_part_of_what_it_generates(): void
+    {
+        // DevOnlyRule's declaration throws without its require-dev interface: the command runs on,
+        // as the collectors do, and emits nothing of it.
+        $outputDir = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+        $tester = new CommandTester(new GenerateTypesCommand());
+
+        self::assertSame(0, $tester->execute(['source' => __DIR__ . '/../Fixture/UnloadableFixtures', 'output' => $outputDir]));
+    }
+
     /**
      * Its first #[Route] is confined to `dev`: where the application is deployed in dev, that is the
      * route it is described by; in prod, the second.

@@ -64,6 +64,19 @@ final class ShapeFieldIntersectionTest extends TestCase
         self::assertFalse(ShapeField::admitsNull(new NullableType(new ScalarType('string'), optional: true)));
     }
 
+    public function testANullOnlyTheOwnSideAdmitsIsGoneHoweverItIsWritten(): void
+    {
+        // `k?: string` intersected with `k?: ?MaybeStr` (`MaybeStr = string|null`, read through) or
+        // with `k?: mixed`: `Base & {…}` is `k?: string`, which takes no null.
+        $base = self::key('k?: string');
+        $maybe = new ShapeField('k', new NullableType(new NullableType(new ScalarType('string'), optional: false), optional: true), optional: true);
+        $mixed = new ShapeField('k', new ScalarType('mixed'), optional: true);
+
+        self::assertFalse(ShapeField::admitsNull(ShapeField::intersected($base, $maybe)->type));
+        self::assertFalse(ShapeField::admitsNull(ShapeField::intersected($base, $mixed)->type));
+        self::assertTrue(ShapeField::intersected($base, $mixed)->mayBeLeftOut());
+    }
+
     public function testAShapeHasEveryKeyOfEitherSide(): void
     {
         $shape = ShapeType::intersected(self::shape('array{a: string, k?: string}'), self::shape('array{k: string, b?: int}'));

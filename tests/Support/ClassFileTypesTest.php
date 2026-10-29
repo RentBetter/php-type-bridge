@@ -13,6 +13,8 @@ use PTGS\TypeBridge\Tests\Fixture\PhpStanOnlyImportedFixtures\Notes\Response\Sho
 use PTGS\TypeBridge\Tests\Fixture\UnloadableFixtures\DevOnly\DevOnlyRule;
 use PTGS\TypeBridge\Tests\Fixture\UnloadableImportFixtures\DevOnly\DevOnlyCodes;
 use PTGS\TypeBridge\Tests\Fixture\UnloadableImportFixtures\Notes\Input\NoteData;
+use PTGS\TypeBridge\Tests\Fixture\UnloadableSelfImportFixtures\DevOnly\DevOnlyNote;
+use PTGS\TypeBridge\Tests\Fixture\UnloadableSelfImportFixtures\Notes\NoteData as SelfImportingNoteData;
 
 /**
  * What a class's file says its types mean, as every collector reads it.
@@ -43,6 +45,17 @@ final class ClassFileTypesTest extends TestCase
         self::assertArrayNotHasKey('Code', $read['imports']);
         self::assertStringContainsString(DevOnlyCodes::class . ' cannot be loaded', $read['unresolved']['Code'] ?? '');
         self::assertNull(PhpStanOnly::of(DevOnlyRule::class));
+    }
+
+    public function test_a_self_imported_from_a_class_this_install_cannot_load_is_set_aside_with_why(): void
+    {
+        // Naming its `_self` asks whether it is an enum, which loads it: that must not throw either.
+        $src = __DIR__ . '/../Fixture/UnloadableSelfImportFixtures';
+        $classFiles = (new PhpFileClassLocator())->classesIn($src);
+        $read = (new ClassFileTypes())->imports(SelfImportingNoteData::class, $classFiles[SelfImportingNoteData::class], $src, $classFiles);
+
+        self::assertArrayNotHasKey('DevNote', $read['imports']);
+        self::assertStringContainsString(DevOnlyNote::class . ' cannot be loaded', $read['unresolved']['DevNote'] ?? '');
     }
 
     public function test_it_lists_the_classes_a_source_tree_declares(): void

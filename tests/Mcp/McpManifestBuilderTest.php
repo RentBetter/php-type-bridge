@@ -18,6 +18,7 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Model\FailedBlank;
+use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
 use PTGS\TypeBridge\Parser\NameRefType;
@@ -1415,6 +1416,46 @@ final class McpManifestBuilderTest extends TestCase
         ]))['inputSchema']['properties'];
         self::assertSame(['type' => 'string'], $properties['artefact']['anyOf'][0] ?? null);
         self::assertSame(['type' => 'boolean'], $properties['flags']['items'] ?? null);
+    }
+
+    public function testAPathParamAndABodyFieldOfOneNameAreRequiredOnce(): void
+    {
+        // `required` lists each name once: the meta-schema holds it to unique items, and Ajv refuses
+        // a schema that repeats one.
+        $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
+        $endpoint = new CollectedEndpointContract(
+            name: 'renameThing',
+            domain: 'things',
+            controllerClass: 'App\\ThingController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                body: new CollectedInputReference(null, 'App\\ThingData', 'ThingData', 'things', [$id], $this->shape('array{id?: string}')),
+                pathParams: [new CollectedPathParam('id', 'string')],
+            ),
+            mcp: new CollectedMcpTool(name: 'renameThing', description: 'Rename a thing.', httpMethod: 'POST', httpPath: '/things/{id}', destructive: false),
+        );
+
+        self::assertSame(['id'], (new McpManifestBuilder())->build(['things' => [$endpoint]])['tools'][0]['inputSchema']['required']);
+    }
+
+    public function testAnIntersectionWhoseBaseCantBeReadStillSaysItsOwnKeys(): void
+    {
+        // `address?: Base & array{line2?: string}`, Base not readable here: its own keys still say
+        // `line2` may be left out, as the top level reads them.
+        $address = new CollectedFormField(name: 'address', formTypeClass: 'App\\AddressType', required: false, mapped: true, compound: true, dataClass: 'App\\Address', children: [$this->scalarField('line2', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true)]);
+        $contract = new ShapeType([new ShapeField('address', new IntersectionType(new NameRefType('Base'), new ShapeType([new ShapeField('line2', new ScalarType('string'), optional: true)])), optional: true)]);
+
+        self::assertArrayNotHasKey('required', $this->toolWithBody('PUT', [$address], $contract)['inputSchema']['properties']['address']);
+    }
+
+    public function testAMultipleChoiceWithChoicesLoadedLaterIsAList(): void
+    {
+        // An EntityType's choices come from a loader: none are known here, but the field still takes
+        // a list of the values it reads, as strings.
+        $tags = new CollectedFormField(name: 'tags', formTypeClass: 'Symfony\\Bridge\\Doctrine\\Form\\Type\\EntityType', required: false, mapped: true, compound: false, dataClass: null, multiple: true);
+
+        self::assertSame(['type' => 'array', 'items' => ['type' => 'string']], $this->toolWithBody('PUT', [$tags], $this->shape('array{tags?: list<string>}'))['inputSchema']['properties']['tags']);
     }
 
     public function testAnEscapedBackslashIsNoControlEscape(): void

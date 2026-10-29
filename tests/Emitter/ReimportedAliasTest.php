@@ -75,6 +75,16 @@ final class ReimportedAliasTest extends TestCase
         self::assertStringContainsString("export interface Uses {\n  foo: Foo;\n  bar: Bar;\n}", $notes);
     }
 
+    public function testAGenericTraitsParamsAreWhatTheClassUsingItBindsThemTo(): void
+    {
+        // `@use HasRows<string>`, on the class or on its `use`; through a trait passing its own on;
+        // a param nothing binds its default.
+        $notes = $this->emit(__DIR__ . '/../Fixture/GenericTraitFixtures')['Notes'] ?? '';
+
+        self::assertStringContainsString("export interface NoteListResponse {\n  rows: string[];\n  total: number;\n}", $notes);
+        self::assertStringContainsString("export interface LabelListResponse {\n  rows: boolean[];\n  total: number;\n}", $notes);
+    }
+
     public function testAnImportThroughAClassBeingFollowedIsTheSameWhicheverIsReadFirst(): void
     {
         // A's `X` is B's, which B imports back from A as `V`: A's own import of `V`, from D, which has
