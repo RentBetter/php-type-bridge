@@ -104,7 +104,7 @@ final class McpManifestBuilder
         private readonly IncludeConvention $includes = new IncludeConvention(),
         private readonly ?AttributeText $paramDescriptions = null,
         private readonly array $typeAliases = [],
-        private readonly bool $clearMissing = true,
+        private readonly bool $clearMissing = false,
     ) {}
 
     /**
@@ -203,7 +203,11 @@ final class McpManifestBuilder
             $query = [];
             $body = [];
             $this->addFields($request->query, $query, $required);
-            $this->addFields($request->body, $body, $required, makes: 'POST' === strtoupper($httpMethod), json: true);
+            // A field left out is submitted blank, and so required where that is refused, on any write
+            // but a PATCH with `clearMissing` on — Symfony's request handler submits so — and on a POST,
+            // which makes something, with it off.
+            $makes = $this->clearMissing ? 'PATCH' !== strtoupper($httpMethod) : 'POST' === strtoupper($httpMethod);
+            $this->addFields($request->body, $body, $required, makes: $makes, json: true);
             // One argument of a name fills a path param and a field alike: it holds to both.
             foreach ([$query, $body] as $fields) {
                 foreach ($fields as $name => $schema) {
@@ -668,6 +672,10 @@ final class McpManifestBuilder
     {
         while ($declared instanceof NullableType) {
             $declared = $declared->inner;
+        }
+        // A project-wide alias is the JSON type its TypeScript is.
+        if ($declared instanceof NameRefType && null === $declared->class) {
+            return $this->configAliasSchema($declared->name)['type'] ?? null;
         }
         if (!$declared instanceof ScalarType) {
             return null;

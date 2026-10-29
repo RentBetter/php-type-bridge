@@ -659,9 +659,8 @@ final class EndpointContractCollector
      */
     private function readContractOf(string $class, string $srcDir, array $classFiles, bool $inQuery): ?ShapeType
     {
-        $file = $classFiles[$class] ?? null;
-        // Its own `_self`, or one it imports, read where it is declared.
-        $self = null === $file || !$this->files->readable($file) ? null : $this->aliasDefinition('_self', $class, $file, $srcDir, $classFiles);
+        // Its shape, read where it is declared ({@see self::selfOf()}).
+        $self = $this->selfOf($class, $srcDir, $classFiles);
         if (null === $self) {
             return null;
         }
@@ -895,11 +894,50 @@ final class EndpointContractCollector
             return new ValueOfType($class);
         }
 
-        // Its own `_self`, or one it imports.
-        $file = $classFiles[$class] ?? null;
-        $declared = null === $file ? null : $this->aliasDefinition('_self', $class, $file, $srcDir, $classFiles);
+        $declared = $this->selfOf($class, $srcDir, $classFiles);
 
-        return null === $declared ? $type : $this->readDeclared($type, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked, unwrapOptional: false);
+        // A `_self` of `?T` is `T`, as an alias's is.
+        return null === $declared ? $type : $this->readDeclared($type, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked, unwrapOptional: true);
+    }
+
+    /**
+     * Where the shape a class is sent as is declared, as its TypeScript finds it: its own `_self`, or
+     * one it imports — neither kept for PHPStan alone — else its nearest parent's or interface's.
+     * Null where none of the source tree declares one.
+     *
+     * @param array<string, string> $classFiles
+     *
+     * @return array{definition: string, class: string, file: string, name: string}|null
+     */
+    private function selfOf(string $class, string $srcDir, array $classFiles): ?array
+    {
+        if (!PhpFileClassLocator::loads($class)) {
+            return null;
+        }
+        $reflection = new ReflectionClass($class);
+        $lineage = [];
+        for ($current = $reflection; false !== $current; $current = $current->getParentClass()) {
+            $lineage[] = $current->getName();
+        }
+
+        foreach ([...$lineage, ...$reflection->getInterfaceNames()] as $candidate) {
+            $file = $classFiles[$candidate] ?? null;
+            if (null === $file) {
+                continue;
+            }
+            $scope = $this->files->scope($candidate, $file, $srcDir, $classFiles);
+            if (isset($scope['definitions']['_self'])) {
+                return ['definition' => $scope['definitions']['_self'], 'class' => $candidate, 'file' => $file, 'name' => '_self'];
+            }
+            $import = $scope['imports']['_self'] ?? null;
+            $target = null === $import ? null : $classFiles[$import->targetClass] ?? null;
+            $definition = null === $target ? null : $this->files->definitions($target)[$import->sourceName()] ?? null;
+            if (null !== $definition) {
+                return ['definition' => $definition, 'class' => $import->targetClass, 'file' => $target, 'name' => $import->sourceName()];
+            }
+        }
+
+        return null;
     }
 
     /**

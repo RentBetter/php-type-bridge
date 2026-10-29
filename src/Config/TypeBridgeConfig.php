@@ -68,9 +68,10 @@ final readonly class TypeBridgeConfig
      *   for one (`when@dev:`), is served there alone. `prod` unless the config says. Mirror
      *   `parameters.typeBridge.routingEnv` in phpstan.neon.
      * @param bool $clearMissing whether the application submits a request body as Symfony does by
-     *   default (`$form->submit($data)`, `clearMissing` on): a field left out is submitted blank. One
-     *   that submits with `clearMissing: false` says so: a field left out is then not submitted at
-     *   all, and keeps what its data object holds. Which fields a POST can't go without turns on it.
+     *   default (`$form->submit($data)`, `clearMissing` on): a field left out of any write but a
+     *   PATCH is submitted blank, an embedded form's fields each in turn. Off — as before the option
+     *   was — a field left out is not submitted, and a POST requires what refuses its blank. Which
+     *   fields a write can't go without turns on it.
      */
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),
@@ -88,7 +89,7 @@ final readonly class TypeBridgeConfig
         public ?string $routing = null,
         public ?string $projectDir = null,
         public string $routingEnv = 'prod',
-        public bool $clearMissing = true,
+        public bool $clearMissing = false,
     ) {}
 
     /**
@@ -170,7 +171,7 @@ final readonly class TypeBridgeConfig
         if (!\is_string($routingEnv) || '' === $routingEnv) {
             throw new RuntimeException('TypeBridge config key "routingEnv" must be the name of the env the application is deployed in (e.g. "prod").');
         }
-        $clearMissing = $config['clearMissing'] ?? true;
+        $clearMissing = $config['clearMissing'] ?? false;
         if (!\is_bool($clearMissing)) {
             throw new RuntimeException('TypeBridge config key "clearMissing" must be a boolean: whether a request body is submitted with Symfony\'s `clearMissing` on.');
         }

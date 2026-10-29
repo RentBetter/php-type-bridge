@@ -42,7 +42,7 @@ final class EmbeddedFormToolTest extends TestCase
     {
         // ShipData is #[Assert\Cascade]: PostalData's own NotBlank on `street` is validated, so a
         // new PostalData, blank, is refused — as a property's #[Assert\Valid] would have it.
-        $tool = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/CascadeFixtures', new TypeBridgeConfig())['tools'][0];
+        $tool = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/CascadeFixtures', TypeBridgeConfig::fromArray(['clearMissing' => true]))['tools'][0];
 
         self::assertSame(['postal'], $tool['inputSchema']['required'] ?? null);
     }
