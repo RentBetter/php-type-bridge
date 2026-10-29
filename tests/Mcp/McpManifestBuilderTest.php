@@ -792,10 +792,10 @@ final class McpManifestBuilderTest extends TestCase
         ], $labels);
     }
 
-    public function testAWholeValueFieldWhoseContractNamesATypeStatedElsewhereIsLeftToItsForm(): void
+    public function testAWholeValueFieldWhoseContractNamesATypeStatedElsewhereIsAnObject(): void
     {
         // An alias is resolved by the emitter, not here; publishing half a shape would refuse the
-        // half it left out.
+        // half it left out. That it is an object is still so: a string is no labels.
         $labels = new CollectedFormField(
             name: 'labels',
             formTypeClass: 'App\\LabelsType',
@@ -810,7 +810,7 @@ final class McpManifestBuilderTest extends TestCase
 
         $tool = $this->toolWithBody('PUT', [$labels], new ShapeType([]));
 
-        self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['labels']);
+        self::assertSame(['type' => 'object'], $tool['inputSchema']['properties']['labels']);
     }
 
     public function testALiteralUnionAllowsEachOfItsValues(): void
@@ -1416,6 +1416,28 @@ final class McpManifestBuilderTest extends TestCase
         ]))['inputSchema']['properties'];
         self::assertSame(['type' => 'string'], $properties['artefact']['anyOf'][0] ?? null);
         self::assertSame(['type' => 'boolean'], $properties['flags']['items'] ?? null);
+    }
+
+    public function testAProjectWideAliasIsTheJsonTypeItsTypeScriptIs(): void
+    {
+        // Through an alias it names in turn.
+        $ref = new CollectedFormField(name: 'ref', formTypeClass: 'App\\RefType', required: false, mapped: true, compound: true, dataClass: 'App\\Ref', contract: new ShapeType([
+            new ShapeField('id', new NameRefType('Id'), optional: false),
+            new ShapeField('count', new NameRefType('Num'), optional: false),
+            new ShapeField('on', new NameRefType('Flag'), optional: false),
+        ]));
+        $endpoint = new CollectedEndpointContract(
+            name: 'saveRef',
+            domain: 'refs',
+            controllerClass: 'App\\RefController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(body: new CollectedInputReference(null, 'App\\RefInput', 'RefInput', 'refs', [$ref], new ShapeType([]))),
+            mcp: new CollectedMcpTool(name: 'saveRef', description: 'Save a ref.', httpMethod: 'PUT', httpPath: '/refs', destructive: false),
+        );
+
+        $schema = (new McpManifestBuilder(typeAliases: ['Id' => 'Uuid', 'Uuid' => 'string', 'Num' => 'number', 'Flag' => 'boolean']))->build(['refs' => [$endpoint]])['tools'][0]['inputSchema']['properties']['ref'];
+        self::assertSame(['id' => ['type' => 'string'], 'count' => ['type' => 'number'], 'on' => ['type' => 'boolean']], $schema['properties'] ?? null);
     }
 
     public function testACollectionOfEntriesReadWholeIsAListOfTheShapeItDeclares(): void

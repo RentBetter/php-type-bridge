@@ -41,6 +41,6 @@ final class McpManifestGenerator
         // A tool reads of a response only what it answers with, never what it sends.
         $contracts = $collector->collect($sourceDir, (new ResponseClassCollector(files: $files, typeAliases: $config->typeAliases))->statusIndex($sourceDir));
 
-        return (new McpManifestBuilder($config->includes, $config->mcpParamDescriptions()))->build($contracts);
+        return (new McpManifestBuilder($config->includes, $config->mcpParamDescriptions(), $config->typeAliases))->build($contracts);
     }
 }

@@ -161,11 +161,7 @@ final class ClassFileTypes
 
         $content = is_file($file) ? file_get_contents($file) : false;
 
-        return $this->files[$file] = false === $content ? false : [
-            'definitions' => $this->docHelper->extractPhpStanTypes($content),
-            'classImports' => $this->docHelper->classImports($content),
-            'importTags' => $this->docHelper->importTags($content),
-        ];
+        return $this->files[$file] = false === $content ? false : $this->docHelper->readFile($content);
     }
 
     /**
@@ -229,6 +225,7 @@ final class ClassFileTypes
             $classFiles,
             $this->shortNameMaps[$srcDir] ??= $this->classLocator->shortNameMap(array_keys($classFiles)),
             $this->domainGuesser,
+            $this->classImports($file),
         );
     }
 

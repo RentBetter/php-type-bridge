@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Mcp;
 
+use BackedEnum;
 use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
@@ -14,15 +15,18 @@ use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
 use PTGS\TypeBridge\Parser\MapType;
+use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Support\AttributeText;
 use PTGS\TypeBridge\Support\ClassNames;
 use PTGS\TypeBridge\Support\HeldConstraints;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionProperty;
 use Throwable;
 use Symfony\Component\Validator\Constraint;
@@ -38,6 +42,7 @@ use Symfony\Component\Validator\Constraints\Regex;
 use Symfony\Component\Validator\Validation;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 use WeakMap;
+use stdClass;
 
 /**
  * Builds the MCP tool manifest (the `tools.json` structure) from collected endpoint contracts.
@@ -87,9 +92,14 @@ final class McpManifestBuilder
      * @param AttributeText|null $paramDescriptions the project's parameter-documentation attribute, read off
      *                                              the data-class property each argument binds
      */
+    /**
+     * @param array<string, string> $typeAliases the project-wide aliases, name => TypeScript: a key
+     *        typed with one is the JSON type its TypeScript is, where that is a primitive
+     */
     public function __construct(
         private readonly IncludeConvention $includes = new IncludeConvention(),
         private readonly ?AttributeText $paramDescriptions = null,
+        private readonly array $typeAliases = [],
     ) {}
 
     /**
@@ -179,8 +189,16 @@ final class McpManifestBuilder
                 $required[] = $param->name;
             }
 
-            $this->addFields($request->query, $properties, $required);
-            $this->addFields($request->body, $properties, $required, makes: 'POST' === strtoupper($httpMethod), json: true);
+            $query = [];
+            $body = [];
+            $this->addFields($request->query, $query, $required);
+            $this->addFields($request->body, $body, $required, makes: 'POST' === strtoupper($httpMethod), json: true);
+            // One argument of a name fills a path param and a field alike: it holds to both.
+            foreach ([$query, $body] as $fields) {
+                foreach ($fields as $name => $schema) {
+                    $properties[$name] = isset($properties[$name]) ? ['allOf' => [$properties[$name], $schema]] : $schema;
+                }
+            }
         }
 
         foreach ($this->includeQuery($contract) as $name => $description) {
@@ -191,7 +209,7 @@ final class McpManifestBuilder
         // encode as a JSON array, and JSON Schema requires `properties` to be an object.
         $schema = ['type' => 'object'];
         if ([] !== $properties) {
-            $schema['properties'] = $properties;
+            $schema['properties'] = self::properties($properties);
         }
         if ([] !== $required) {
             // Each name once: a path param and a body field may share one, and the meta-schema
@@ -207,7 +225,7 @@ final class McpManifestBuilder
      * extending a shape (`Base & array{…}`), one it inherits, read where that shape is declared, the
      * two read as the intersection reads them ({@see CollectedInputReference::keys()}).
      *
-     * @param array<string, mixed> $properties
+     * @param array<array-key, array<string, mixed>> $properties
      * @param list<string>         $required
      * @param bool                 $makes      whether the request makes something (a POST body), so a
      *                                         field its constraints refuse blank is one it can't go without
@@ -421,14 +439,17 @@ final class McpManifestBuilder
             return ['type' => 'array', 'items' => ['type' => 'string']];
         }
 
-        // A compound field with no children reads what is sent whole, so its form says nothing of
-        // what it takes: the shape its data class declares does, where every part of it can be said.
-        if (null !== $field->contract && null !== $contract = $this->shapeSchema($field->contract, $json)) {
-            return $contract;
+        // Its fields held to the keys its key's type declares — or, where that names its data class,
+        // the class's own.
+        if ($field->compound && [] !== $field->children) {
+            return $this->objectSchema($field->children, self::shapeKeys($declared) ?: self::shapeKeys($field->contract), $json, $makes);
         }
 
-        if ($field->compound && [] !== $field->children) {
-            return $this->objectSchema($field->children, self::shapeKeys($declared), $json, $makes);
+        // A compound field with no children reads what is sent whole, so its form says nothing of
+        // what it takes: the shape its data class declares does, where every part of it can be said;
+        // an object, where some can't.
+        if (null !== $field->contract) {
+            return $this->shapeSchema($field->contract, $json) ?? ['type' => 'object'];
         }
 
         return ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
@@ -465,7 +486,7 @@ final class McpManifestBuilder
      * A declared shape as JSON Schema, or null when any part of it names a type stated elsewhere
      * (an alias, a generic, a class constant) that the builder cannot read here.
      *
-     * @return array{type: 'object', properties?: array<string, array<string, mixed>>, required?: list<string>}|null
+     * @return array{type: 'object', properties?: array<array-key, array<string, mixed>>|stdClass, required?: list<string>}|null
      */
     private function shapeSchema(ShapeType $shape, bool $json = false): ?array
     {
@@ -485,7 +506,7 @@ final class McpManifestBuilder
 
         $schema = ['type' => 'object'];
         if ([] !== $properties) {
-            $schema['properties'] = $properties;
+            $schema['properties'] = self::properties($properties);
         }
         if ([] !== $required) {
             $schema['required'] = $required;
@@ -529,6 +550,32 @@ final class McpManifestBuilder
             $type instanceof LiteralType => ['enum' => [$type->value]],
             // An enum's ids are its own to say and can't be read statically; that it is a string can.
             $type instanceof IdOfType => ['type' => 'string'],
+            // A backed enum's values are what it takes.
+            $type instanceof ValueOfType => PhpFileClassLocator::loadsEnum($type->enumClass) && is_subclass_of($type->enumClass, BackedEnum::class)
+                ? ['enum' => array_map(static fn (BackedEnum $case): int|string => $case->value, $type->enumClass::cases())]
+                : null,
+            $type instanceof NameRefType && null === $type->class => $this->configAliasSchema($type->name),
+            default => null,
+        };
+    }
+
+    /**
+     * A project-wide alias as the JSON type its TypeScript is, through any alias it names in turn:
+     * `string`, `number` or `boolean`; null where it is anything else, or no such alias.
+     *
+     * @return array{type: string}|null
+     */
+    private function configAliasSchema(string $name): ?array
+    {
+        $type = $this->typeAliases[$name] ?? null;
+        for ($depth = 0; null !== $type && isset($this->typeAliases[trim($type)]) && $depth < 8; ++$depth) {
+            $type = $this->typeAliases[trim($type)];
+        }
+
+        return match (null === $type ? null : trim($type)) {
+            'string' => ['type' => 'string'],
+            'number' => ['type' => 'number'],
+            'boolean' => ['type' => 'boolean'],
             default => null,
         };
     }
@@ -605,6 +652,13 @@ final class McpManifestBuilder
      */
     private function entrySchema(CollectedFormField $field, ?ParsedType $item = null, bool $json = false, bool $makes = false): array
     {
+        // An entry its type reads whole is the shape the list declares of it — an object, where its
+        // class's shape can't be said here.
+        $shape = ShapeType::declaredBy(self::soleMember($item, ShapeType::class) ?? self::soleMember($item, IntersectionType::class));
+        if ([] === $field->entryChildren && (null !== $shape || null !== $field->entryDataClass)) {
+            return (null === $shape ? null : $this->shapeSchema($shape, $json)) ?? ['type' => 'object'];
+        }
+
         if ([] === $field->entryChildren) {
             \assert(null !== $field->entryTypeClass);
             $schema = ['type' => $this->declaredScalar($item) ?? $this->scalarTypeOf($field->entryTypeClass)];
@@ -628,7 +682,7 @@ final class McpManifestBuilder
      * @param list<CollectedFormField> $children
      * @param array<string, ShapeField> $keys the keys the compound's declared shape names
      *
-     * @return array{type: 'object', properties: array<string, array<string, mixed>>, required?: list<string>}
+     * @return array{type: 'object', properties: array<array-key, array<string, mixed>>|stdClass, required?: list<string>}
      */
     private function objectSchema(array $children, array $keys, bool $json, bool $makes): array
     {
@@ -643,12 +697,25 @@ final class McpManifestBuilder
             }
         }
 
-        $schema = ['type' => 'object', 'properties' => $properties];
+        $schema = ['type' => 'object', 'properties' => self::properties($properties)];
         if ([] !== $required) {
             $schema['required'] = $required;
         }
 
         return $schema;
+    }
+
+    /**
+     * Properties by name, as JSON reads them: keys PHP holds as 0, 1, … — named by numbers — would be
+     * written as a list, which `properties` can't be.
+     *
+     * @param array<array-key, array<string, mixed>> $properties
+     *
+     * @return array<array-key, array<string, mixed>>|stdClass
+     */
+    private static function properties(array $properties): array|stdClass
+    {
+        return array_is_list($properties) && [] !== $properties ? (object) $properties : $properties;
     }
 
     /**

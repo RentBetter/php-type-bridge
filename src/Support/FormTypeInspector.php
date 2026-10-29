@@ -178,7 +178,20 @@ final class FormTypeInspector
                 }
             }
 
-            return $this->isMultipleChoice($config) ? [] : null;
+            if ($this->isMultipleChoice($config)) {
+                return [];
+            }
+
+            // An embedded form with a data class is what its `empty_data` makes of nothing: a new
+            // object of the class where the form is required, null where it isn't.
+            try {
+                $value = null === $config->getDataClass() ? null : $config->getEmptyData();
+                $value = $value instanceof Closure ? $value(new Form($config), null) : $value;
+
+                return \is_object($value) ? $value : null;
+            } catch (Throwable) {
+                return null;
+            }
         }
         if (null !== $this->resolveOption($config, 'choice_loader')) {
             return $this->isMultipleChoice($config) ? [] : null;

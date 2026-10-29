@@ -142,7 +142,7 @@ final class PhpDocTypeHelper
         array $shortNameMap,
         DomainGuesser $domainGuesser,
     ): array {
-        $read = $this->extractImportedTypesLeniently($content, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
+        $read = $this->importedTypes($this->importTags($content), $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser, $this->classImports($content));
         foreach ($read['unresolved'] as $why) {
             throw new RuntimeException($why);
         }
@@ -151,34 +151,17 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * A file's `@phpstan-import-type` tags, by the alias each is known by locally. An import whose
-     * target is not in the source tree is set aside, with why, rather than thrown: a file is read
-     * for some of its types only — a response's base class, whose protected properties may name
-     * anything — and such an import matters only if what is read uses it
-     * ({@see self::unresolvedImportUsedIn()}).
-     *
-     * @param array<string, string> $classFiles
-     * @param array<string, list<string>> $shortNameMap
-     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>} `unresolved` is local alias => why
-     */
-    public function extractImportedTypesLeniently(
-        string $content,
-        string $ownerClass,
-        string $srcDir,
-        array $classFiles,
-        array $shortNameMap,
-        DomainGuesser $domainGuesser,
-    ): array {
-        return $this->importedTypes($this->importTags($content), $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
-    }
-
-    /**
-     * The types `@phpstan-import-type` tags already read off a file import, as
-     * {@see self::extractImportedTypesLeniently()} reads them.
+     * The types a file's `@phpstan-import-type` tags (read with {@see self::importTags()}) import, by
+     * the alias each is known by locally. An import whose target is not in the source tree is set
+     * aside, with why, rather than thrown: a file is read for some of its types only — a response's
+     * base class, whose protected properties may name anything — and such an import matters only if
+     * what is read uses it ({@see self::unresolvedImportUsedIn()}).
      *
      * @param list<TypeAliasImportTagValueNode> $tags
      * @param array<string, string> $classFiles
      * @param array<string, list<string>> $shortNameMap
+     * @param array<string, string> $classImports the file's `use` statements ({@see self::classImports()}),
+     *        which name the class an import is from as they name any
      * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>} `unresolved` is local alias => why
      */
     public function importedTypes(
@@ -188,12 +171,13 @@ final class PhpDocTypeHelper
         array $classFiles,
         array $shortNameMap,
         DomainGuesser $domainGuesser,
+        array $classImports = [],
     ): array {
         $imports = [];
         $unresolved = [];
         foreach ($tags as $tag) {
             try {
-                $import = $this->importedType($tag, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser);
+                $import = $this->importedType($tag, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser, $classImports);
                 $imports[$import->localAlias] = $import;
             } catch (RuntimeException $e) {
                 $unresolved[$tag->importedAs ?? $tag->importedAlias] = $e->getMessage();
@@ -205,7 +189,7 @@ final class PhpDocTypeHelper
 
     /**
      * An import whose target was set aside as unresolved by
-     * {@see self::extractImportedTypesLeniently()}, if the type uses it — names it as a type, which
+     * {@see self::importedTypes()}, if the type uses it — names it as a type, which
      * a shape key or a string literal spelt the same does not: the error it would have thrown, with
      * where it is used — so a file is failed only over an import something read from it needs.
      *
@@ -222,6 +206,7 @@ final class PhpDocTypeHelper
     /**
      * @param array<string, string> $classFiles
      * @param array<string, list<string>> $shortNameMap
+     * @param array<string, string> $classImports
      */
     private function importedType(
         TypeAliasImportTagValueNode $tag,
@@ -230,9 +215,10 @@ final class PhpDocTypeHelper
         array $classFiles,
         array $shortNameMap,
         DomainGuesser $domainGuesser,
+        array $classImports,
     ): ImportedType {
         $sourceAlias = $tag->importedAlias;
-        $targetClass = $this->resolveClassReference($tag->importedFrom->name, $ownerClass, $classFiles, $shortNameMap);
+        $targetClass = $this->resolveClassReference($tag->importedFrom->name, $ownerClass, $classFiles, $shortNameMap, $classImports);
         $targetFile = $classFiles[$targetClass] ?? null;
         if (null === $targetFile) {
             throw new RuntimeException(\sprintf('Imported type target "%s" for "%s" was not found.', $targetClass, $ownerClass));
@@ -353,8 +339,46 @@ final class PhpDocTypeHelper
      */
     public function classImports(string $content): array
     {
-        $imports = [];
+        return $this->classImportsIn(\PhpToken::tokenize($content));
+    }
+
+    /**
+     * What a file says, read out of it in one pass: the aliases it declares
+     * ({@see self::extractPhpStanTypes()}), the classes its `use` statements name
+     * ({@see self::classImports()}) and its import tags ({@see self::importTags()}) — the file
+     * tokenised once, each docblock parsed once.
+     *
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>}
+     */
+    public function readFile(string $content): array
+    {
         $tokens = \PhpToken::tokenize($content);
+        $definitions = [];
+        $importTags = [];
+        foreach ($tokens as $token) {
+            if (!$token->is(\T_DOC_COMMENT)) {
+                continue;
+            }
+            $node = $this->parse($token->text);
+            foreach ($node->getTypeAliasTagValues() as $tag) {
+                $definitions[$tag->alias] = (string) $tag->type;
+            }
+            foreach ($node->getTypeAliasImportTagValues() as $tag) {
+                $importTags[] = $tag;
+            }
+        }
+
+        return ['definitions' => $definitions, 'classImports' => $this->classImportsIn($tokens), 'importTags' => $importTags];
+    }
+
+    /**
+     * @param array<\PhpToken> $tokens
+     *
+     * @return array<string, string>
+     */
+    private function classImportsIn(array $tokens): array
+    {
+        $imports = [];
         $count = \count($tokens);
 
         for ($i = 0; $i < $count; $i++) {
@@ -516,6 +540,19 @@ final class PhpDocTypeHelper
         $literals = array_map(static fn(string|int|float|bool $value): LiteralType => new LiteralType($value), $values);
 
         return 1 === \count($literals) ? $literals[0] : new UnionType($literals);
+    }
+
+    /**
+     * The class a name written in a file means, as PHP resolves it there ({@see self::resolveClassName()}):
+     * null where it is no class this install loads.
+     *
+     * @param array<string, string> $classImports the file's `use` statements
+     *
+     * @return ?class-string
+     */
+    public function className(string $name, string $ownerClass, array $classImports): ?string
+    {
+        return $this->resolveClassName($name, $ownerClass, $classImports);
     }
 
     /**
@@ -736,14 +773,22 @@ final class PhpDocTypeHelper
     /**
      * @param array<string, string> $classFiles
      * @param array<string, list<string>> $shortNameMap
+     * @param array<string, string> $classImports
      */
     private function resolveClassReference(
         string $classRef,
         string $ownerClass,
         array $classFiles,
         array $shortNameMap,
+        array $classImports = [],
     ): string {
         $trimmed = ltrim($classRef, '\\');
+        // As PHP and PHPStan resolve it: a name the file's `use` statements give is that class, ahead
+        // of one of the same short name in its namespace.
+        $first = explode('\\', $trimmed, 2);
+        if (!str_starts_with($classRef, '\\') && isset($classImports[$first[0]])) {
+            return $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
+        }
         if (isset($classFiles[$trimmed])) {
             return $trimmed;
         }

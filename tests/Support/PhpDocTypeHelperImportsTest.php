@@ -44,7 +44,7 @@ final class PhpDocTypeHelperImportsTest extends TestCase
 
     public function test_each_import_is_known_by_its_local_alias(): void
     {
-        $read = (new PhpDocTypeHelper())->extractImportedTypesLeniently(self::RESOLVED, 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser());
+        $read = $this->readLeniently(self::RESOLVED);
 
         self::assertSame(['Page', 'Cursor'], array_keys($read['imports']));
         self::assertSame('PageView', $read['imports']['Page']->targetTypeName);
@@ -56,7 +56,7 @@ final class PhpDocTypeHelperImportsTest extends TestCase
 
     public function test_read_leniently_it_is_set_aside_by_its_local_alias_with_why(): void
     {
-        $read = (new PhpDocTypeHelper())->extractImportedTypesLeniently(self::ONE_UNRESOLVED, 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser());
+        $read = $this->readLeniently(self::ONE_UNRESOLVED);
 
         self::assertSame(['Page'], array_keys($read['imports']));
         self::assertSame(['Amount' => 'Class reference "\\Vendor\\Library\\Money" from "App\\Billing\\View\\InvoiceView" could not be resolved.'], $read['unresolved']);
@@ -78,10 +78,12 @@ final class PhpDocTypeHelperImportsTest extends TestCase
 
             use App\Common\Shape\Other;
             use App\Common\Shape\Shapes as CommonShapes;
+            use App\Common;
 
             /**
              * @phpstan-import-type Tag from Other
              * @phpstan-import-type Label from CommonShapes
+             * @phpstan-import-type Badge from Common\Shape\Shapes
              */
             final class NoteView {}
             PHP;
@@ -90,6 +92,7 @@ final class PhpDocTypeHelperImportsTest extends TestCase
 
         self::assertSame('App\\Common\\Shape\\Other', $imports['Tag']->targetClass);
         self::assertSame('App\\Common\\Shape\\Shapes', $imports['Label']->targetClass);
+        self::assertSame('App\\Common\\Shape\\Shapes', $imports['Badge']->targetClass, 'A namespace `use` names the rest of it');
     }
 
     public function test_read_strictly_an_import_from_outside_the_tree_fails(): void
@@ -122,5 +125,15 @@ final class PhpDocTypeHelperImportsTest extends TestCase
         $failure = (new PhpDocTypeHelper())->unresolvedImportUsedIn((new PhpDocShapeParser())->parse($type), ['Amount' => 'Amount is not found.'], 'This alias');
 
         self::assertSame($used, null !== $failure);
+    }
+
+    /**
+     * @return array{imports: array<string, \PTGS\TypeBridge\Model\ImportedType>, unresolved: array<string, string>}
+     */
+    private function readLeniently(string $content): array
+    {
+        $helper = new PhpDocTypeHelper();
+
+        return $helper->importedTypes($helper->importTags($content), 'App\\Billing\\View\\InvoiceView', self::SRC, self::CLASS_FILES, [], new DomainGuesser());
     }
 }

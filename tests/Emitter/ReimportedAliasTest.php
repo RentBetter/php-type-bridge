@@ -46,7 +46,8 @@ final class ReimportedAliasTest extends TestCase
         // NoteItems re-imports a library's `_self`; NoteData imports it from there. Why NoteItems' import
         // can't be emitted is why NoteData's can't.
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/Class reference "Item" from "[^"]*NoteItems" could not be resolved\. The @phpstan-type _self on [^ ]*NoteData is typed with it\./');
+        // Its `use` names the library's Item, which is outside the source tree.
+        $this->expectExceptionMessageMatches('/Imported type target "[^"]*LibraryBaseLib\\\\Item" for "[^"]*NoteItems" was not found\. The @phpstan-type _self on [^ ]*NoteData is typed with it\./');
 
         $this->emit(__DIR__ . '/../Fixture/ReimportedLibraryFixtures');
     }
@@ -95,6 +96,15 @@ final class ReimportedAliasTest extends TestCase
         $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": "AsQuery"');
 
         $this->emit(__DIR__ . '/../Fixture/QueryHelperNameFixtures');
+    }
+
+    public function testAnImportNamedAsTheModulesQueryHelperIsImportedUnderAnother(): void
+    {
+        // Common's `AsQuery`, used in a module that declares its own for its query endpoints.
+        $notes = $this->emit(__DIR__ . '/../Fixture/QueryHelperImportFixtures')['Notes'] ?? '';
+
+        self::assertStringContainsString('AsQuery as CommonAsQuery', $notes);
+        self::assertStringContainsString("export interface Uses {\n  x: CommonAsQuery;\n}", $notes);
     }
 
     public function testAnImportThroughAClassBeingFollowedIsTheSameWhicheverIsReadFirst(): void

@@ -228,7 +228,7 @@ final class TypeScriptEmitter
     {
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->enumsByDomain = $this->referencedEnums($domains, $responses);
-        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses), array_keys($this->typeAliases));
+        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses, $contracts), array_keys($this->typeAliases));
         $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
 
@@ -824,15 +824,16 @@ final class TypeScriptEmitter
     /**
      * @param array<string, CollectedDomain> $domains
      * @param array<string, list<CollectedApiResponseClass>> $responses
+     * @param array<string, list<CollectedEndpointContract>> $contracts
      * @return array<string, array<string, string>>
      */
-    private function buildSymbolMaps(array $domains, array $responses): array
+    private function buildSymbolMaps(array $domains, array $responses, array $contracts): array
     {
         $maps = [];
         $registrations = [];
         // Every module written, one written only for an enum named from elsewhere included: its
         // names collide as any other's.
-        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($this->enumsByDomain)));
+        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts), array_keys($this->enumsByDomain)));
 
         foreach ($allDomains as $domain) {
             $maps[$domain] = [];
@@ -889,6 +890,18 @@ final class TypeScriptEmitter
                     logicalName: null,
                     emittedName: $this->names->enumName($enumClass),
                     descriptor: 'enum ' . $enumClass,
+                    maps: $maps,
+                    registrations: $registrations,
+                );
+            }
+
+            // The helper a module with query endpoints declares beside them.
+            if (EndpointContractEmitter::anyTakesQueryForm($contracts[$domain] ?? [])) {
+                $this->registerSymbol(
+                    domain: $domain,
+                    logicalName: null,
+                    emittedName: 'AsQuery',
+                    descriptor: 'the AsQuery helper of its query endpoints',
                     maps: $maps,
                     registrations: $registrations,
                 );
@@ -1009,6 +1022,9 @@ final class TypeScriptEmitter
         }
         foreach ($this->collectLocalEnums($domain) as $enumClass) {
             $names[$this->names->enumName($enumClass)] = true;
+        }
+        if (EndpointContractEmitter::anyTakesQueryForm($contracts)) {
+            $names['AsQuery'] = true;
         }
         foreach ($contracts as $contract) {
             $request = $contract->request;

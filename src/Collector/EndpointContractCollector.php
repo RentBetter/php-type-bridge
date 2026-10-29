@@ -26,6 +26,7 @@ use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Routing\ControllerAttributeClassLoader;
 use PTGS\TypeBridge\Routing\DeclaredRoutes;
 use PTGS\TypeBridge\Routing\RequirementType;
@@ -612,7 +613,7 @@ final class EndpointContractCollector
             fn (CollectedFormField $field): CollectedFormField => $field->withDeclared(
                 children: $this->withDeclaredContracts($field->children, $srcDir, $classFiles, $inQuery),
                 entryChildren: $this->withDeclaredContracts($field->entryChildren, $srcDir, $classFiles, $inQuery),
-                contract: $field->compound && [] === $field->children && null !== $field->dataClass
+                contract: $field->compound && null !== $field->dataClass
                     ? $this->contractOf($field->dataClass, $srcDir, $classFiles, $inQuery)
                     : null,
             ),
@@ -787,8 +788,8 @@ final class EndpointContractCollector
      * Whether a null is asked of a project-wide alias read here ({@see self::configAliasAdmitsNull()})
      * is whether anything turns on it: in a body every key's, which may be sent null to clear it; in a
      * query only a key that can't be left out already — a query string sends a null by leaving the key
-     * out, and no item of a list sends one; in a path none; and never beside an explicit null
-     * (`Alias|null`), which settles it.
+     * out, and no item of a list sends one; in a path none, nor of a map's values; and never beside an
+     * explicit null (`Alias|null`), which settles it.
      *
      * @param array<string, string> $classFiles
      * @param array<string, true>   $reading the aliases being read, by file and name: one that names
@@ -806,12 +807,15 @@ final class EndpointContractCollector
             $type instanceof NullableType => new NullableType($read($type->inner, $type->optional && $nullAsked), $type->optional),
             $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member, $nullAsked && !$type->hasNull()), $type->types)),
             $type instanceof ListType => new ListType($read($type->inner, $nullAsked && !$inQuery)),
-            $type instanceof MapType => new MapType($type->key, $read($type->value, $nullAsked && !$inQuery)),
+            // A map's values are never sent null on their own: nothing reads a value's null.
+            $type instanceof MapType => new MapType($type->key, $read($type->value, false)),
             $type instanceof ShapeType => new ShapeType(array_map(
                 fn (ShapeField $key): ShapeField => new ShapeField($key->name, $read($key->type, $inQuery ? $nullAsked && !$key->mayBeLeftOut(inQuery: true) : $nullAsked), $key->optional),
                 $type->fields,
             ), $type->unsealed),
             $type instanceof IntersectionType => self::intersection($type, $read($type->base), $read($type->extra)),
+            // The enum the file names, spelt in full, so a reader elsewhere can ask for its values.
+            $type instanceof ValueOfType => new ValueOfType($this->docHelper->className($type->enumClass, $class, $this->files->classImports($file)) ?? $type->enumClass),
             default => $type,
         };
     }
