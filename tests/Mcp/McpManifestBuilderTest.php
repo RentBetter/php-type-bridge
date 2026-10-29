@@ -1137,6 +1137,21 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'number'], $properties['any']);
     }
 
+    public function testANumberSegmentWhoseRequirementIsNoUnboundedIntegerIsItsPattern(): void
+    {
+        // `\\d{1,4}` takes no 10000, `[2-9]\\d*` no 1: as the string the router matches, which says
+        // so; a `%…%` placeholder, which the router resolves, can't be read here at all.
+        $properties = $this->pathTool([
+            new CollectedPathParam('short', 'number', '\\d{1,4}', false),
+            new CollectedPathParam('from2', 'number', '[2-9]\\d*', false),
+            new CollectedPathParam('placeholder', 'number', '%app.id%'),
+        ]);
+
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:\\d{1,4})$'], $properties['short']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[2-9]\\d*)$'], $properties['from2']);
+        self::assertSame(['type' => 'number'], $properties['placeholder']);
+    }
+
     /**
      * @return iterable<string, array{list<Constraint>, ?string}>
      */

@@ -15,6 +15,9 @@ use Symfony\Component\Validator\Constraints as Assert;
  *     phones?: list<PhoneData>,
  *     refs?: list<RefData>,
  *     tree?: NodeData,
+ *     shipping?: PostalData,
+ *     memo?: MemoData,
+ *     meta?: array{a?: string},
  * }
  */
 final class ContactData
@@ -27,7 +30,9 @@ final class ContactData
 
     public ?RefData $ref = null;
 
+    // Cascades: PostalData's own constraints are validated.
     #[Assert\NotNull]
+    #[Assert\Valid]
     public ?PostalData $postal = null;
 
     /** @var list<PhoneData> */
@@ -37,4 +42,14 @@ final class ContactData
     public array $refs = [];
 
     public ?NodeData $tree = null;
+
+    // No cascade: PostalData's own constraints are never validated here.
+    #[Assert\NotNull]
+    public ?PostalData $shipping = null;
+
+    public ?MemoData $memo = null;
+
+    /** @var array<string, mixed>|null */
+    #[Assert\NotNull]
+    public ?array $meta = null;
 }

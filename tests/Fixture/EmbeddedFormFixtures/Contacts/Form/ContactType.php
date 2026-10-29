@@ -7,6 +7,8 @@ namespace PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Form;
 use PTGS\TypeBridge\Form\AbstractFormType;
 use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Input\ContactData;
 use Symfony\Component\Form\Extension\Core\Type\CollectionType;
+use Symfony\Component\Form\Extension\Core\Type\FormType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
@@ -27,7 +29,13 @@ final class ContactType extends AbstractFormType
             ->add('postal', PostalType::class)
             ->add('phones', CollectionType::class, ['entry_type' => PhoneType::class, 'allow_add' => true])
             ->add('refs', CollectionType::class, ['entry_type' => RefType::class, 'allow_add' => true])
-            ->add('tree', NodeType::class, ['required' => false]);
+            ->add('tree', NodeType::class, ['required' => false])
+            ->add('shipping', PostalType::class)
+            ->add('memo', MemoType::class, ['required' => false])
+            // A plain FormType holding fields, no data class: left out it is `[]` with each field
+            // written in, `['a' => null]`.
+            ->add('meta', FormType::class);
+        $builder->get('meta')->add('a', TextType::class);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

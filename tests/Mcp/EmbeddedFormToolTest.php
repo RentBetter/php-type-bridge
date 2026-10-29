@@ -25,8 +25,11 @@ final class EmbeddedFormToolTest extends TestCase
     {
         // Symfony makes a required embedded form left out a new AddressData, which `address`'s
         // NotNull takes; `billing` is not required, so it is null, which its NotNull refuses. A new
-        // PostalData has its `street` blank, which its NotBlank refuses: `postal` can't be left out.
-        self::assertSame(['billing', 'postal'], $this->schema()['required'] ?? null);
+        // PostalData has its `street` blank, which its NotBlank refuses where `postal` cascades
+        // (#[Assert\Valid]) — not where `shipping` doesn't. `memo`'s field's own `constraints`
+        // hold left out, the form not required as it is; and `meta`, with no data class, is the
+        // array its field is written into, which its NotNull takes.
+        self::assertSame(['billing', 'postal', 'memo'], $this->schema()['required'] ?? null);
     }
 
     public function test_a_whole_value_field_is_its_shape_an_enums_values_and_an_aliass_type_included(): void
@@ -54,6 +57,16 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame(['number'], $properties['phones']['items']['required'] ?? null);
         self::assertSame(['type' => ['string', 'null']], $properties['phones']['items']['properties']['label'] ?? null);
         self::assertSame($properties['ref'], $properties['refs']['items'] ?? null);
+    }
+
+    public function test_classes_naming_each_other_are_read_in_bounded_time(): void
+    {
+        // Nine input classes each keyed by every other: unrolled on every path, that is 9! reads.
+        $started = microtime(true);
+        $tools = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/CliqueFixtures', new TypeBridgeConfig())['tools'];
+
+        self::assertCount(1, $tools);
+        self::assertLessThan(10.0, microtime(true) - $started);
     }
 
     public function test_a_class_naming_itself_is_read_once_round(): void

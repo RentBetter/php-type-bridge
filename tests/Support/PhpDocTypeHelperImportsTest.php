@@ -76,8 +76,7 @@ final class PhpDocTypeHelperImportsTest extends TestCase
             <?php
             namespace App\Notes;
 
-            use App\Common\Shape\Other;
-            use App\Common\Shape\Shapes as CommonShapes;
+            use App\Common\Shape\Other, App\Common\Shape\Shapes as CommonShapes;
             use App\Common;
 
             /**
@@ -91,7 +90,7 @@ final class PhpDocTypeHelperImportsTest extends TestCase
         $imports = (new PhpDocTypeHelper())->extractImportedTypes($content, 'App\\Notes\\NoteView', self::SRC, $classFiles, ['Other' => ['App\\Notes\\Other', 'App\\Common\\Shape\\Other'], 'Shapes' => ['App\\Common\\Shape\\Shapes']], new DomainGuesser());
 
         self::assertSame('App\\Common\\Shape\\Other', $imports['Tag']->targetClass);
-        self::assertSame('App\\Common\\Shape\\Shapes', $imports['Label']->targetClass);
+        self::assertSame('App\\Common\\Shape\\Shapes', $imports['Label']->targetClass, 'Two in one `use`, by a comma');
         self::assertSame('App\\Common\\Shape\\Shapes', $imports['Badge']->targetClass, 'A namespace `use` names the rest of it');
     }
 
