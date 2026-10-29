@@ -19,7 +19,8 @@ final class PriceType extends AbstractFilterType
     {
         $builder->add('title', TextType::class)->add('price', TextType::class, ['required' => false])
             ->add('bands', CollectionType::class, ['entry_type' => TextType::class, 'allow_add' => true])
-            ->add('byCurrency', CollectionType::class, ['entry_type' => TextType::class, 'allow_add' => true]);
+            ->add('byCurrency', CollectionType::class, ['entry_type' => TextType::class, 'allow_add' => true])
+            ->add('floor', TextType::class, ['required' => false]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

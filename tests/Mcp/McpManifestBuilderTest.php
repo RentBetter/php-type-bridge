@@ -19,6 +19,7 @@ use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Model\FailedBlank;
 use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\LiteralType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
@@ -1348,6 +1349,51 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['name', 'code'], $tool['inputSchema']['required']);
         self::assertSame(['type' => 'string', 'maxLength' => 40], $tool['inputSchema']['properties']['name']);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['code']);
+    }
+
+    public function testARefusedBlankIsRefusedThoughTheRuleMatchesIt(): void
+    {
+        // NotBlank refuses '', which `^[A-Z]*$` matches: the pattern refuses it as the server does.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $code = new CollectedFormField(name: 'code', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^[A-Z]*$/D')]);
+        $raw = new CollectedFormField(name: 'raw', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^[A-Z]*$/')], trim: false);
+
+        $properties = $this->toolWithBody('POST', [$code, $raw], $this->shape('array{code?: string, raw?: string}'))['inputSchema']['properties'];
+        self::assertSame(['type' => 'string', 'pattern' => '^(?!$)(?:[A-Z]*)$'], $properties['code']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?!$)(?:[A-Z]*)\\n?$'], $properties['raw']);
+    }
+
+    public function testABlankTheServerTakesIsTakenThoughALengthBoundsTheRest(): void
+    {
+        // '' is submitted null, which Length skips: a minimum holds the values that aren't blank.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $code = new CollectedFormField(name: 'code', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new Length(min: 3), new Regex('/^[A-Z]+$/D')]);
+        $named = new CollectedFormField(name: 'named', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Length(min: 3)]);
+
+        $properties = $this->toolWithBody('PUT', [$code, $named], $this->shape('array{code?: string, named?: string}'))['inputSchema']['properties'];
+        self::assertSame(['type' => 'string', 'anyOf' => [['maxLength' => 0], ['minLength' => 3]], 'pattern' => '^(?:[A-Z]+)?$'], $properties['code']);
+        self::assertSame(['type' => 'string', 'minLength' => 3], $properties['named'], 'Its blank refused, a minimum plain');
+    }
+
+    public function testANullTheUnionHasIsAllowedOnce(): void
+    {
+        // `Status|null`, Status a union with null among its members: one null in the enum.
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: new ShapeType([
+            new ShapeField('status', new NullableType(new UnionType([new LiteralType('open'), new LiteralType('closed'), new ScalarType('null')]), optional: false), optional: false),
+        ]));
+
+        $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
+        self::assertSame(['enum' => ['open', 'closed', null]], $properties['status']);
+    }
+
+    public function testAnEscapedBackslashIsNoControlEscape(): void
+    {
+        // `\\\\n` is a backslash, then `n`: no padding a trimmed value could carry.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $path = new CollectedFormField(name: 'path', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^\\\\n[A-Z]$/D')]);
+
+        $properties = $this->toolWithBody('POST', [$path], $this->shape('array{path?: string}'))['inputSchema']['properties'];
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:\\\\n[A-Z])$'], $properties['path']);
     }
 
     public function testAWordBoundaryCannotMatchPaddingAClassBackspaceCan(): void

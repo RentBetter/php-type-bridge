@@ -214,9 +214,19 @@ final class EndpointQueryTest extends TestCase
         $contracts = (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
         $keys = $contracts['Prices'][0]->request?->query?->keys();
 
-        self::assertSame(['title', 'price', 'bands', 'byCurrency'], array_map(static fn(ShapeField $key): string => $key->name, $keys->fields ?? []));
+        self::assertSame(['title', 'price', 'bands', 'byCurrency', 'floor'], array_map(static fn(ShapeField $key): string => $key->name, $keys->fields ?? []));
+        self::assertTrue($keys?->fields[4]->mayBeLeftOut(inQuery: true), '`floor: Money|null`, left out by its explicit null');
         self::assertFalse($keys?->fields[0]->mayBeLeftOut(inQuery: true));
         self::assertTrue($keys?->fields[1]->mayBeLeftOut(inQuery: true));
+    }
+
+    public function test_an_alias_whose_null_cant_be_read_is_no_matter_beside_an_explicit_null(): void
+    {
+        // `price: Money|null` in a body: clearable by its own null, whatever Money admits.
+        $src = __DIR__ . '/../Fixture/OpaqueNullableBodyFixtures';
+        $contracts = (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
+
+        self::assertTrue(ShapeField::admitsNull($contracts['Prices'][0]->request?->body?->keys()?->fields[0]->type ?? new ShapeType([])));
     }
 
     public function test_an_alias_whose_null_cant_be_read_is_refused_where_a_body_may_clear_it(): void

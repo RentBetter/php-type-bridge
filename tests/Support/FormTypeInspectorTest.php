@@ -10,6 +10,7 @@ use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\AliasListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\YearlyTotalsType;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\UppercasedCodeType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectNoteType;
@@ -184,6 +185,16 @@ final class FormTypeInspectorTest extends TestCase
         $fields = array_column((new FormTypeInspector())->inspect(AliasListType::class)['fields'], null, 'name');
 
         self::assertSame([NotBlank::class], array_map(static fn(object $constraint): string => $constraint::class, $fields['aliases']->entryConstraints));
+    }
+
+    public function test_a_listener_of_the_form_holding_a_field_may_rewrite_it(): void
+    {
+        // The form's own PRE_SUBMIT listener rewrites its children's values before they are
+        // validated: which it touches it doesn't say, so none is read as sent.
+        $fields = array_column((new FormTypeInspector())->inspect(UppercasedCodeType::class)['fields'], null, 'name');
+
+        self::assertTrue($fields['code']->transformsValue);
+        self::assertTrue($fields['label']->transformsValue);
     }
 
     public function test_a_listener_that_rewrites_what_is_sent_transforms_it_too(): void

@@ -12,6 +12,7 @@ use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Mcp\McpManifestGenerator;
+use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
@@ -141,15 +142,43 @@ final class ClassLevelRouteTest extends TestCase
 
         $tools = array_column((new McpManifestGenerator())->generate($app, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $app))['tools'], null, 'name');
         self::assertSame('/api/notes/{id}', $tools['ShowNote']['path'] ?? null);
+
+        // The dev-only endpoint is still described by the route it is in dev, for its TypeScript.
+        $responses = new ResponseClassCollector();
+        $debug = array_column((new EndpointContractCollector(routePathResolver: $resolver))->collect($app, $responses->collectIndex($app))['Notes'], null, 'methodName')['debugNoteAction'] ?? null;
+        self::assertSame(['GET', '/debug/notes/{id}', ['id']], [$debug?->httpMethod, $debug?->httpPath, array_map(static fn(CollectedPathParam $param): string => $param->name, $debug?->request?->pathParams ?? [])]);
     }
 
-    public function testAToolOnARouteOfAnEnvWhoseRoutingCantBeReadSaysWhy(): void
+    /**
+     * @return iterable<string, array{string, TypeBridgeConfig|null}>
+     */
+    public static function devOnlyTools(): iterable
     {
-        $app = __DIR__ . '/../Fixture/EnvBrokenToolApp';
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/serves no route for it\. Read for dev, the routing configuration could not be: Cannot load resource "@WebProfilerBundle/');
+        $routed = __DIR__ . '/../Fixture/DevRoutedApp';
+        $imported = __DIR__ . '/../Fixture/DevImportedApp';
+        yield 'confined to dev, routed' => [$routed, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $routed)];
+        yield 'confined to dev, not routed' => [$routed, null];
+        yield 'imported in dev alone' => [$imported, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $imported)];
+        yield 'a dev route of a broken dev config' => [__DIR__ . '/../Fixture/EnvBrokenToolApp', TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], __DIR__ . '/../Fixture/EnvBrokenToolApp')];
+    }
 
-        (new McpManifestGenerator())->generate($app, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $app));
+    #[DataProvider('devOnlyTools')]
+    public function testAToolProductionDoesNotServeIsNoTool(string $app, ?TypeBridgeConfig $config): void
+    {
+        // Production answers 404 at it: a tool there is worse than none.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('serves no route for it in prod');
+
+        (new McpManifestGenerator())->generate($app, $config ?? new TypeBridgeConfig());
+    }
+
+    public function testTheServedEnvIsTheConfigs(): void
+    {
+        // A project whose deployed env is `dev` serves its dev tools.
+        $app = __DIR__ . '/../Fixture/DevRoutedApp';
+        $tools = array_column((new McpManifestGenerator())->generate($app, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml', 'routingEnv' => 'dev'], $app))['tools'], null, 'name');
+
+        self::assertSame('/api/debug/notes/{id}', $tools['WipeNote']['path'] ?? null);
     }
 
     public function testAClassWhoseRoutesSymfonyRefusesIsNoRouteToGuess(): void
