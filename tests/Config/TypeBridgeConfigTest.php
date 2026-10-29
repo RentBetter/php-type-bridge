@@ -262,10 +262,12 @@ PHP);
         self::assertSame('staging', $config->routePathResolver()?->env);
     }
 
-    public function test_a_body_is_submitted_with_clear_missing_unless_the_config_says(): void
+    public function test_a_body_is_submitted_without_clear_missing_unless_the_config_says(): void
     {
-        self::assertTrue(TypeBridgeConfig::fromArray([])->clearMissing);
-        self::assertFalse(TypeBridgeConfig::fromArray(['clearMissing' => false])->clearMissing);
+        // Off, a field left out is held to what refuses its blank, as before the option was: an
+        // application that submits with Symfony's default turns it on.
+        self::assertFalse(TypeBridgeConfig::fromArray([])->clearMissing);
+        self::assertTrue(TypeBridgeConfig::fromArray(['clearMissing' => true])->clearMissing);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('clearMissing');

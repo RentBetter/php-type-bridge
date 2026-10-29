@@ -1527,6 +1527,56 @@ final class McpManifestBuilderTest extends TestCase
         );
     }
 
+    public function testAFieldLeftOutOfAnyWriteButAPatchIsSubmittedBlankWithClearMissing(): void
+    {
+        // Symfony's request handler submits every method but PATCH with `clearMissing` on: a PUT
+        // without `name` submits it blank, which its NotBlank refuses. Without it, a POST alone
+        // makes something, and requires it.
+        $name = new CollectedFormField(name: 'name', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
+        $required = static function (string $method, bool $clearMissing) use ($name): ?array {
+            $endpoint = new CollectedEndpointContract(
+                name: 'saveProduct',
+                domain: 'products',
+                controllerClass: 'App\\ProductController',
+                methodName: '__invoke',
+                responses: [],
+                request: new CollectedEndpointRequest(body: new CollectedInputReference(null, 'App\\ProductData', 'ProductData', 'products', [$name], new ShapeType([new ShapeField('name', new ScalarType('string'), optional: true)]))),
+                mcp: new CollectedMcpTool(name: 'saveProduct', description: 'Save a product.', httpMethod: $method, httpPath: '/products', destructive: false),
+            );
+
+            return (new McpManifestBuilder(clearMissing: $clearMissing))->build(['products' => [$endpoint]])['tools'][0]['inputSchema']['required'] ?? null;
+        };
+
+        self::assertSame(['name'], $required('PUT', true));
+        self::assertNull($required('PATCH', true));
+        self::assertNull($required('PUT', false));
+        self::assertSame(['name'], $required('POST', false));
+    }
+
+    public function testAProjectWideAliasIsAScalarTheContractDeclares(): void
+    {
+        // `owner: UuidStr|array{name: string}` takes the id as `string|array{…}` does; a checkbox's
+        // `on: Flag`, Flag a boolean, is a boolean whatever its form type's name guesses.
+        $owner = new CollectedFormField(name: 'owner', formTypeClass: 'App\\OwnerType', required: false, mapped: true, compound: true, dataClass: 'App\\Owner', children: [$this->scalarField('name', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true)]);
+        $on = new CollectedFormField(name: 'on', formTypeClass: 'App\\ToggleType', required: false, mapped: true, compound: false, dataClass: null);
+        $endpoint = new CollectedEndpointContract(
+            name: 'saveThing',
+            domain: 'things',
+            controllerClass: 'App\\ThingController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(body: new CollectedInputReference(null, 'App\\ThingData', 'ThingData', 'things', [$owner, $on], new ShapeType([
+                new ShapeField('owner', new UnionType([new NameRefType('UuidStr'), new ShapeType([new ShapeField('name', new ScalarType('string'), optional: false)])]), optional: true),
+                new ShapeField('on', new NameRefType('Flag'), optional: true),
+            ]))),
+            mcp: new CollectedMcpTool(name: 'saveThing', description: 'Save a thing.', httpMethod: 'PUT', httpPath: '/things', destructive: false),
+        );
+
+        $properties = (new McpManifestBuilder(typeAliases: ['UuidStr' => 'string', 'Flag' => 'boolean']))->build(['things' => [$endpoint]])['tools'][0]['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $properties['owner']['anyOf'][0] ?? null);
+        self::assertSame(['type' => 'boolean'], $properties['on']);
+    }
+
     public function testAPathParamAndABodyFieldOfOneNameAreRequiredOnce(): void
     {
         // `required` lists each name once: the meta-schema holds it to unique items, and Ajv refuses

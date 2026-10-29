@@ -90,6 +90,19 @@ final class EmbeddedFormToolTest extends TestCase
         (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->statusIndex($src));
     }
 
+    public function test_a_classs_self_is_found_as_its_typescript_finds_it(): void
+    {
+        // ShippingAddress declares none: its parent's, where `street` may be left out. Hidden's is
+        // PHPStan's alone: no shape, so its field is held to its form's `required`. Maybe's `?T` is
+        // `T`, as an alias's is: `maybe` can't be left out.
+        $src = __DIR__ . '/../Fixture/InheritedSelfFixtures';
+        $schema = (new McpManifestGenerator())->generate($src, new TypeBridgeConfig())['tools'][0]['inputSchema'];
+
+        self::assertArrayNotHasKey('required', $schema['properties']['address']);
+        self::assertSame(['secret'], $schema['properties']['hidden']['required'] ?? null);
+        self::assertSame(['maybe'], $schema['required'] ?? null);
+    }
+
     public function test_a_field_left_out_without_clear_missing_is_its_propertys_none(): void
     {
         // Submitted with `clearMissing: false`, a field left out isn't submitted: no form check runs,
