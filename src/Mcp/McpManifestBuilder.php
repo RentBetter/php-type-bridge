@@ -758,8 +758,9 @@ final class McpManifestBuilder
             // refused — costing a caller nothing — rather than allowed with `\p{…}` padding, which
             // only Unicode-mode regex reads. Where the rule could match the padding itself (a space,
             // a control character, a negated class), a padded value it accepts may trim to one it
-            // doesn't, so there is no pattern.
-            if (1 === preg_match('/ |\\\\[nrtfb]|\[\^/', $inner)) {
+            // doesn't, so there is no pattern. `\b` is a backspace only in a class: outside one it is
+            // a word boundary, which matches no character at all.
+            if (1 === preg_match('/ |\\\\[nrtf]|\[\^|\[(?:[^\]\\\\]|\\\\.)*\\\\b/', $inner)) {
                 return null;
             }
 

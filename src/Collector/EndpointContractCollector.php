@@ -176,7 +176,8 @@ final class EndpointContractCollector
                         ));
                     }
                     $seenNames[$endpointName] = $claimant;
-                    $route = $this->routeOf($className, $method->getName());
+                    $served = $this->routePathResolver?->routeFor($className, $method->getName());
+                    $route = $served ?? $this->declaredRoute($className, $method->getName());
                     $httpMethod = self::httpMethodOf($route);
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
@@ -186,7 +187,7 @@ final class EndpointContractCollector
                         methodName: $method->getName(),
                         responses: $responses,
                         request: $this->resolveRequestContract($method, $route, $srcDir, $classFiles),
-                        mcp: $this->resolveMcpTool($method, $className, $endpointName, $httpMethod, $route),
+                        mcp: $this->resolveMcpTool($method, $className, $endpointName, $httpMethod, $route, $served),
                         httpMethod: $httpMethod,
                         httpPath: RoutePathResolver::clientPath($route?->getPath() ?? ''),
                     );
@@ -217,7 +218,7 @@ final class EndpointContractCollector
         return ucfirst('' !== $base ? $base : $methodName);
     }
 
-    private function resolveMcpTool(ReflectionMethod $method, string $className, string $endpointName, string $httpMethod, ?Route $route): ?CollectedMcpTool
+    private function resolveMcpTool(ReflectionMethod $method, string $className, string $endpointName, string $httpMethod, ?Route $route, ?Route $served): ?CollectedMcpTool
     {
         $attributes = $method->getAttributes(McpTool::class);
         if ([] === $attributes) {
@@ -231,7 +232,7 @@ final class EndpointContractCollector
             name: $tool->name ?? $endpointName,
             description: $this->resolveMcpDescription($method, $tool),
             httpMethod: $httpMethod,
-            httpPath: $this->servedPath($className, $method->getName(), $route),
+            httpPath: $this->servedPath($className, $method->getName(), $route, $served),
             destructive: $tool->destructive ?? ('GET' !== $httpMethod),
             scopes: $this->resolveMcpScopes($method),
         );
@@ -406,20 +407,14 @@ final class EndpointContractCollector
     }
 
     /**
-     * The route a method is described by — its HTTP method, its path and its params: the one Symfony
-     * serves it at when the routing config is given and serves it, its prefixes and an import's
-     * overrides included; otherwise the one its class's attributes declare, a class-level #[Route]
-     * merged in as the router merges it ({@see DeclaredRoutes}). Unlike an MCP tool's, an endpoint the
+     * The route a method's class's attributes declare, a class-level #[Route] merged in as the
+     * router merges it ({@see DeclaredRoutes}): what a method is described by — its HTTP method, its
+     * path and its params — where no routing config serves it. Unlike an MCP tool's, an endpoint the
      * router does not know keeps its declared route rather than failing generation. Null when nothing
      * routes it.
      */
-    private function routeOf(string $className, string $methodName): ?Route
+    private function declaredRoute(string $className, string $methodName): ?Route
     {
-        $served = $this->routePathResolver?->routeFor($className, $methodName);
-        if (null !== $served) {
-            return $served;
-        }
-
         $declared = $this->declaredRoutes->routeFor($className, $methodName);
         if (null === $declared && null !== $error = $this->declaredRoutes->loadError($className)) {
             throw new RuntimeException(\sprintf('The #[Route]s of %s cannot be read as Symfony reads them: %s', $className, $error));
@@ -454,26 +449,31 @@ final class EndpointContractCollector
      * would otherwise publish the declared path as if it were served, and a tool pointing at a
      * path the application answers 404 to is worse than no tool.
      */
-    private function servedPath(string $className, string $methodName, ?Route $route): string
+    private function servedPath(string $className, string $methodName, ?Route $route, ?Route $served): string
     {
         if (null === $this->routePathResolver) {
             return RoutePathResolver::clientPath($route?->getPath() ?? '');
         }
 
-        $served = $this->routePathResolver->pathFor($className, $methodName);
         if (null !== $error = $this->routePathResolver->loadError()) {
             throw new RuntimeException(\sprintf('Cannot resolve served route paths for MCP tools: %s', $error));
         }
 
         if (null === $served) {
+            $unread = [];
+            foreach ($this->routePathResolver->envLoadErrors() as $env => $error) {
+                $unread[] = \sprintf(' Read for %s, the routing configuration could not be: %s', $env, $error);
+            }
+
             throw new RuntimeException(\sprintf(
-                'Endpoint "%s::%s" is exposed as an MCP tool but the routing configuration serves no route for it.',
+                'Endpoint "%s::%s" is exposed as an MCP tool but the routing configuration serves no route for it.%s',
                 $className,
                 $methodName,
+                implode('', $unread),
             ));
         }
 
-        return RoutePathResolver::clientPath($served);
+        return RoutePathResolver::clientPath($served->getPath());
     }
 
     /**
@@ -504,7 +504,7 @@ final class EndpointContractCollector
 
     /**
      * Derives path parameters from the placeholders of the route a method is described by
-     * ({@see self::routeOf()}): a class-level #[Route]'s, and a routing prefix's, as much as its own.
+     * ({@see self::declaredRoute()}): a class-level #[Route]'s, and a routing prefix's, as much as its own.
      * Each segment types as a plain string unless its requirement — the route's, an import's
      * overriding the attribute's — matches a known {@see PathParam} pattern. Null when there is no
      * route or it has no placeholders.
@@ -513,8 +513,16 @@ final class EndpointContractCollector
      */
     private function derivePathParamsFromRoute(?Route $route): ?array
     {
-        // Named as Symfony's RouteCompiler reads a placeholder: `{!slug}` is `slug` too.
-        if (null === $route || 0 === preg_match_all('/\{!?([\w\x80-\xFF]+)\}/', $route->getPath(), $matches)) {
+        if (null === $route) {
+            return null;
+        }
+        // Named as Symfony's compiler names them: `{!slug}` is `slug` too.
+        try {
+            $names = array_values(array_filter($route->compile()->getPathVariables(), \is_string(...)));
+        } catch (Throwable $exception) {
+            throw new RuntimeException(\sprintf('The route %s cannot be compiled as Symfony compiles it: %s', $route->getPath(), $exception->getMessage()), previous: $exception);
+        }
+        if ([] === $names) {
             return null;
         }
 
@@ -525,7 +533,7 @@ final class EndpointContractCollector
         $utf8 = \is_bool($utf8) ? $utf8 : null;
 
         $params = [];
-        foreach ($matches[1] as $name) {
+        foreach ($names as $name) {
             $requirement = $route->getRequirement($name);
             $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
             $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8, $this->configAliasStandsFor($tsType));

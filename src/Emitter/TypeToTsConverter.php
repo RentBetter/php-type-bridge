@@ -65,6 +65,44 @@ final readonly class TypeToTsConverter
     }
 
     /**
+     * What a name refers to in a scope — the one choice converting a type and collecting what its
+     * module imports both make. A name used bare that the file imports is that import, under the name
+     * it is imported as (no module: it is named already). Otherwise, written where it means a class,
+     * the JSON the class serialises to — unless an alias of the same name in the module it is written
+     * in wins: the module's, or for an inherited property its base's, whichever module emits it — or
+     * that module's alias. A config alias is every module's, declared by each that uses it: this one's.
+     * A name resolved to a class is never an import's, whatever its short name.
+     *
+     * @return array{0: string|null, 1: string} the module the symbol is declared in, null for an
+     *         import's local name; and the symbol
+     */
+    public function referenceOf(NameRefType $type, ConversionScope $scope): array
+    {
+        if (null === $type->class && isset($scope->importedSymbols[$type->name])) {
+            return [null, $scope->importedSymbols[$type->name]];
+        }
+
+        $aliasDomain = $this->symbols->isShared($type->name) ? $scope->domain : $scope->aliasDomain ?? $scope->domain;
+        $symbol = $this->classSymbol($type, $aliasDomain);
+
+        return null !== $symbol ? [$symbol->targetDomain, $symbol->canonicalName] : [$aliasDomain, $this->symbols->resolve($aliasDomain, $type->name)];
+    }
+
+    /**
+     * The scope a type written in another file is read in ({@see ScopedType}): that file's imports,
+     * under the names this module imports their types as, and its module's aliases for its bare names.
+     */
+    public function scopeOf(ScopedType $type, ConversionScope $scope): ConversionScope
+    {
+        $symbols = [];
+        foreach (ImportedType::usedIn($type->imports, $type->inner) as $import) {
+            $symbols[$import->localAlias] = self::localName($import->targetDomain, $this->symbols->resolve($import->targetDomain, $import->targetTypeName), $scope);
+        }
+
+        return new ConversionScope($scope->domain, $symbols, $scope->foreignAliases, null === $type->domain || $type->domain === $scope->domain ? null : $type->domain);
+    }
+
+    /**
      * A shape key as a TypeScript property name: as written when it can be (`id`, `$type`), and
      * quoted when it cannot (`'my-key'`). The parser hands keys over unquoted, whatever the
      * PHPDoc spelling, so this is the only place that decides.
@@ -182,30 +220,13 @@ final readonly class TypeToTsConverter
 
         // Written in another file: read with that file's imports, its bare names that module's.
         if ($type instanceof ScopedType) {
-            $symbols = [];
-            foreach (ImportedType::usedIn($type->imports, $type->inner) as $import) {
-                $symbols[$import->localAlias] = self::localName($import->targetDomain, $this->symbols->resolve($import->targetDomain, $import->targetTypeName), $scope);
-            }
-
-            return $this->convert($type->inner, new ConversionScope($scope->domain, $symbols, $scope->foreignAliases, null === $type->domain || $type->domain === $scope->domain ? null : $type->domain));
+            return $this->convert($type->inner, $this->scopeOf($type, $scope));
         }
 
         if ($type instanceof NameRefType) {
-            if (isset($scope->importedSymbols[$type->name])) {
-                return $scope->importedSymbols[$type->name];
-            }
+            [$domain, $symbol] = $this->referenceOf($type, $scope);
 
-            // A name no alias answers to, written where it means a class: the JSON the class
-            // serialises to. An alias of the same name in the module it is written in always wins —
-            // the module's, or for an inherited property its base's, whichever module emits it. A
-            // config alias is every module's, declared by each that uses it: this one's.
-            $aliasDomain = $this->symbols->isShared($type->name) ? $scope->domain : $scope->aliasDomain ?? $scope->domain;
-            $symbol = $this->classSymbol($type, $aliasDomain);
-            if (null !== $symbol) {
-                return self::localName($symbol->targetDomain, $symbol->canonicalName, $scope);
-            }
-
-            return self::localName($aliasDomain, $this->symbols->resolve($aliasDomain, $type->name), $scope);
+            return null === $domain ? $symbol : self::localName($domain, $symbol, $scope);
         }
 
         if ($type instanceof TupleType) {

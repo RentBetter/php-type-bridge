@@ -616,7 +616,7 @@ final class TypeScriptEmitter
         foreach ($collected->types as $type) {
             $this->appendImportedTypes($domain, ImportedType::usedIn($type->imports, $type->parsed), $imports);
             $this->appendExternalEnums($domain, $type->parsed, $imports);
-            $this->appendClassTypes($domain, $type->parsed, $imports);
+            $this->appendClassTypes($domain, $type->parsed, $imports, $type->imports);
         }
 
         foreach ($responses as $response) {
@@ -625,8 +625,7 @@ final class TypeScriptEmitter
                 // that file's module it names bare.
                 $this->appendImportedTypes($domain, ImportedType::usedIn($property->imports, $property->parsed), $imports);
                 $this->appendExternalEnums($domain, $property->parsed, $imports);
-                $imported = array_fill_keys(array_map(static fn(ImportedType $import): string => $import->localAlias, $property->imports), true);
-                $this->appendClassTypes($domain, $property->parsed, $imports, $property->writtenInDomain ?? $domain, $imported);
+                $this->appendClassTypes($domain, $property->parsed, $imports, $property->imports, $property->writtenInDomain);
             }
         }
 
@@ -777,44 +776,48 @@ final class TypeScriptEmitter
     }
 
     /**
-     * Imports for the names a type uses bare that no import answers to: the classes it names where
-     * no alias of the module it is written in does — see {@see ClassTypeResolver} — and that
-     * module's aliases, where it is not this one. A config alias is never imported: this module
-     * declares its own. The same choice the converter makes, so what is imported is what is
+     * Imports for the names a type uses that no import of its file answers to: what each refers to
+     * as the converter reads it ({@see TypeToTsConverter::referenceOf()}) — a class's type, an alias of
+     * the module it is written in, a type another file writes ({@see ScopedType}) — from the module
+     * that declares it, where that is not this one. One choice, so what is imported is what is
      * referenced.
      *
      * @param array<string, list<string>> $imports
-     * @param string|null $aliasDomain the module the type is written in, where it is not this one
-     * @param array<string, true> $imported the names the file's imports answer to
+     * @param list<ImportedType>          $fileImports the imports of the file the type is written in
+     * @param string|null                 $aliasDomain the module the type is written in, where it is not this one
      */
-    private function appendClassTypes(string $domain, ParsedType $type, array &$imports, ?string $aliasDomain = null, array $imported = []): void
+    private function appendClassTypes(string $domain, ParsedType $type, array &$imports, array $fileImports = [], ?string $aliasDomain = null): void
     {
-        $aliasDomain ??= $domain;
-        // Written in another file: what that file imports, and its module's aliases and classes.
+        $this->appendReferences($domain, $type, $imports, new ConversionScope(
+            $domain,
+            array_fill_keys(array_map(static fn(ImportedType $import): string => $import->localAlias, $fileImports), ''),
+            [],
+            null === $aliasDomain || $aliasDomain === $domain ? null : $aliasDomain,
+        ));
+    }
+
+    /**
+     * @param array<string, list<string>> $imports
+     */
+    private function appendReferences(string $domain, ParsedType $type, array &$imports, ConversionScope $scope): void
+    {
         if ($type instanceof ScopedType) {
             $this->appendImportedTypes($domain, ImportedType::usedIn($type->imports, $type->inner), $imports);
-            $this->appendClassTypes($domain, $type->inner, $imports, $type->domain ?? $domain, array_fill_keys(array_map(static fn(ImportedType $import): string => $import->localAlias, $type->imports), true));
+            $this->appendReferences($domain, $type->inner, $imports, $this->converter->scopeOf($type, $scope));
 
             return;
         }
         if ($type instanceof NameRefType) {
-            if (isset($imported[$type->name]) || $this->symbols->isShared($type->name)) {
-                return;
-            }
-
-            $symbol = $this->converter->classSymbol($type, $aliasDomain);
-            if (null !== $symbol && $symbol->targetDomain !== $domain) {
-                $imports[$symbol->targetDomain][] = $symbol->canonicalName;
-            }
-            if (null === $symbol && $aliasDomain !== $domain) {
-                $imports[$aliasDomain][] = $this->symbolFor($aliasDomain, $type->name);
+            [$target, $symbol] = $this->converter->referenceOf($type, $scope);
+            if (null !== $target && $target !== $domain) {
+                $imports[$target][] = $symbol;
             }
 
             return;
         }
 
         foreach (ParsedTypes::children($type) as $child) {
-            $this->appendClassTypes($domain, $child, $imports, $aliasDomain, $imported);
+            $this->appendReferences($domain, $child, $imports, $scope);
         }
     }
 

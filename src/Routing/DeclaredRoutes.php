@@ -28,6 +28,9 @@ final class DeclaredRoutes
     /** @var array<string, string> by class: why its routes could not be read */
     private array $errors = [];
 
+    /** @var array<string, list<string>> by `Class::method`: the envs its routes are confined to, read once */
+    private static array $envs = [];
+
     /**
      * The route the class's attributes declare for the method — the one its first #[Route]
      * declares, as {@see RoutePathResolver::routeFor()} picks a served one — or null when they
@@ -53,6 +56,14 @@ final class DeclaredRoutes
      * @return list<string>
      */
     public static function envsOf(string $className, string $methodName): array
+    {
+        return self::$envs[$className . '::' . $methodName] ??= self::readEnvs($className, $methodName);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function readEnvs(string $className, string $methodName): array
     {
         if (!class_exists($className) || !method_exists($className, $methodName)) {
             return [];

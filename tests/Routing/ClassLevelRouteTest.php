@@ -143,6 +143,15 @@ final class ClassLevelRouteTest extends TestCase
         self::assertSame('/api/notes/{id}', $tools['ShowNote']['path'] ?? null);
     }
 
+    public function testAToolOnARouteOfAnEnvWhoseRoutingCantBeReadSaysWhy(): void
+    {
+        $app = __DIR__ . '/../Fixture/EnvBrokenToolApp';
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/serves no route for it\. Read for dev, the routing configuration could not be: Cannot load resource "@WebProfilerBundle/');
+
+        (new McpManifestGenerator())->generate($app, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $app));
+    }
+
     public function testAClassWhoseRoutesSymfonyRefusesIsNoRouteToGuess(): void
     {
         // A requirement with no placeholder name: the router would refuse it, so no method or path is

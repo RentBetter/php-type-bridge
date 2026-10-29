@@ -12,7 +12,6 @@ use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
-use PTGS\TypeBridge\Parser\ScopedType;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
 use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainGuesser;
@@ -29,6 +28,9 @@ final class ResponseClassCollector
 {
     /** @var array<string, array<class-string, CollectedApiResponseClass>> by source directory */
     private array $indexes = [];
+
+    /** @var array<string, array<class-string, CollectedApiResponseClass>> by source directory: with their status alone */
+    private array $statusIndexes = [];
 
     /** @var array<string, array{imports: array<string, ImportedType>, unresolved: array<string, string>, classImports: array<string, string>, domain: string|null}|null> by source directory and class */
     private array $typeContexts = [];
@@ -84,13 +86,25 @@ final class ResponseClassCollector
      */
     public function collectIndex(string $srcDir): array
     {
-        return $this->indexes[$srcDir] ??= $this->readIndex($srcDir);
+        return $this->indexes[$srcDir] ??= $this->readIndex($srcDir, withProperties: true);
+    }
+
+    /**
+     * The responses by what an endpoint answers with alone — each one's status, and whether it is an
+     * error — none of what any of them sends read: what a tool needs, which a response it never
+     * answers with, typed with what TypeBridge can't read, has no say in.
+     *
+     * @return array<class-string, CollectedApiResponseClass>
+     */
+    public function statusIndex(string $srcDir): array
+    {
+        return $this->statusIndexes[$srcDir] ??= $this->readIndex($srcDir, withProperties: false);
     }
 
     /**
      * @return array<class-string, CollectedApiResponseClass>
      */
-    private function readIndex(string $srcDir): array
+    private function readIndex(string $srcDir, bool $withProperties): array
     {
         $classFiles = $this->files->classesIn($srcDir);
         $responses = [];
@@ -106,15 +120,15 @@ final class ResponseClassCollector
             }
 
             $this->statusCodeResolver->assertResponseClass($reflection);
-            $context = $this->typeContext($className, $file, $srcDir, $classFiles);
-            if (null === $context) {
+            $context = $withProperties ? $this->typeContext($className, $file, $srcDir, $classFiles) : ['imports' => []];
+            if (null === $context || !$this->files->readable($file)) {
                 continue;
             }
 
             $status = $this->statusCodeResolver->resolve($reflection);
             $properties = [];
             // A 204 is sent with no body at all: nothing it declares or inherits is published.
-            foreach (204 === $status ? [] : $reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            foreach (204 === $status || !$withProperties ? [] : $reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
                 if ($property->isStatic()) {
                     continue;
                 }
@@ -345,8 +359,9 @@ final class ResponseClassCollector
 
     /**
      * A type a template param is bound to, as the file that writes it means it — its own template
-     * params what they are bound to in turn — kept in that file's scope ({@see ScopedType}): put in
-     * the base's property, it is still read where it is written.
+     * params what they are bound to in turn — each name it uses kept in that file's scope
+     * ({@see PhpDocTypeHelper::scoped()}): put in the base's property, it is still read where it is
+     * written, its `?` and its brackets the base's property's to see.
      *
      * @param array<string, ParsedType> $bindings the writing class's own params
      * @param array<string, string>     $classFiles
@@ -365,7 +380,8 @@ final class ResponseClassCollector
             throw $unresolved;
         }
 
-        return new ScopedType(
+        // Its own params first: what they are bound to is scoped where that is written.
+        return $this->docHelper->scoped(
             $this->docHelper->substituted($this->readInFile($type, $class, $context, $classFiles, array_keys($bindings), $where), $bindings),
             array_values($context['imports']),
             $context['domain'],

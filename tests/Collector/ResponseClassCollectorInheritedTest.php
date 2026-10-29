@@ -134,10 +134,12 @@ final class ResponseClassCollectorInheritedTest extends TestCase
     public function test_a_param_bound_to_a_type_left_out_when_null_is_that(): void
     {
         // `@extends AbstractBoxResponse<?NoteView>`: `item` is `?NoteView`, a key left out when null;
-        // in a list, an item that may be null.
+        // `items` is `list<?NoteView>`, as it would be written there.
         $notes = self::emit(self::fixtures('GenericBaseFixtures'))['Notes'];
 
-        self::assertStringContainsString("export interface BoxedNoteResponse {\n  item?: NoteView;\n  items: (NoteView | null)[];\n}", $notes);
+        self::assertStringContainsString("export interface BoxedNoteResponse {\n  item?: NoteView;\n  items: NoteView[];\n}", $notes);
+        // An intersection is a name and a shape by syntax: read whole where it is written.
+        self::assertStringContainsString("export interface ListPinnedViewsResponse {\n  items: (NoteView & { pinned: boolean })[];\n", $notes);
     }
 
     public function test_a_template_param_is_read_as_phpstan_ranks_its_spellings(): void

@@ -28,6 +28,7 @@ use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\ParsedTypes;
+use PTGS\TypeBridge\Parser\ScopedType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
@@ -653,6 +654,28 @@ final class PhpDocTypeHelper
         }
 
         return null;
+    }
+
+    /**
+     * The type with each name it uses read in the scope of the file that writes it ({@see ScopedType}),
+     * its shape — a `?T`, a list, a union, an `included<…>` — as it is. An intersection, whose base
+     * is a name by syntax, is scoped whole.
+     *
+     * @param list<ImportedType> $imports the writing file's
+     */
+    public function scoped(ParsedType $type, array $imports, ?string $domain): ParsedType
+    {
+        $intersects = false;
+        for ($types = [$type]; [] !== $types && !$intersects;) {
+            $part = array_pop($types);
+            $intersects = $part instanceof IntersectionType;
+            array_push($types, ...ParsedTypes::children($part));
+        }
+        if ($intersects) {
+            return new ScopedType($type, $imports, $domain);
+        }
+
+        return $this->mapLeaves($type, static fn (ParsedType $leaf): ParsedType => $leaf instanceof NameRefType ? new ScopedType($leaf, $imports, $domain) : $leaf);
     }
 
     /**
