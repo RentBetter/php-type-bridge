@@ -87,6 +87,8 @@ final class ReimportedAliasTest extends TestCase
         // A generic base's own param passed on to its trait; and `@phpstan-use` over `@use`.
         self::assertStringContainsString("export interface FlagListResponse {\n  rows: boolean[];\n  total: number;\n}", $notes);
         self::assertStringContainsString("export interface RankedListResponse {\n  rows: string[];\n  total: string;\n}", $notes);
+        // A trait imported under another name is bound by that name.
+        self::assertStringContainsString("export interface AliasedListResponse {\n  rows: string[];\n  total: number;\n}", $notes);
     }
 
     public function testATypeNamedAsTheModulesQueryHelperIsANamingCollision(): void

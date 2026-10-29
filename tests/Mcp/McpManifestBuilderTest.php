@@ -1145,11 +1145,13 @@ final class McpManifestBuilderTest extends TestCase
             new CollectedPathParam('short', 'number', '\\d{1,4}', false),
             new CollectedPathParam('from2', 'number', '[2-9]\\d*', false),
             new CollectedPathParam('placeholder', 'number', '%app.id%'),
+            new CollectedPathParam('capped', 'number', '[0-9]{1,15}', false),
         ]);
 
         self::assertSame(['type' => 'string', 'pattern' => '^(?:\\d{1,4})$'], $properties['short']);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[2-9]\\d*)$'], $properties['from2']);
         self::assertSame(['type' => 'number'], $properties['placeholder']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-9]{1,15})$'], $properties['capped'], 'A ceiling past twelve digits is a ceiling');
     }
 
     /**

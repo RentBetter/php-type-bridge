@@ -10,6 +10,7 @@ use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Mcp\McpManifestGenerator;
 use PTGS\TypeBridge\Parser\NameRefType;
+use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 
 /**
@@ -35,6 +36,36 @@ final class EmbeddedFormToolTest extends TestCase
         // and `meta`, with no data class, is the array its field is written into, which its
         // NotBlank takes.
         self::assertSame(['billing', 'postal', 'memo'], $this->schema()['required'] ?? null);
+    }
+
+    public function test_a_class_level_cascade_cascades_into_what_it_holds(): void
+    {
+        // ShipData is #[Assert\Cascade]: PostalData's own NotBlank on `street` is validated, so a
+        // new PostalData, blank, is refused — as a property's #[Assert\Valid] would have it.
+        $tool = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/CascadeFixtures', new TypeBridgeConfig())['tools'][0];
+
+        self::assertSame(['postal'], $tool['inputSchema']['required'] ?? null);
+    }
+
+    public function test_a_self_its_class_imports_is_its_shape(): void
+    {
+        // PostalData and RefData import their `_self` from Shapes: `postal`'s `street` may be left
+        // out, and `ref`, read whole, is the shape.
+        $properties = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/ImportedSelfFixtures', new TypeBridgeConfig())['tools'][0]['inputSchema']['properties'];
+
+        self::assertArrayNotHasKey('required', $properties['postal']);
+        self::assertSame(['type' => 'object', 'properties' => ['code' => ['type' => 'string']]], $properties['ref']);
+    }
+
+    public function test_a_large_contract_with_no_cycle_is_read_through_in_full(): void
+    {
+        // Sixty keys of a class with twenty alias-typed keys: what each read makes is read once.
+        $src = __DIR__ . '/../Fixture/LargeInputFixtures';
+        $keys = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Items'][0]->request?->body?->keys()?->fields ?? [];
+
+        self::assertCount(61, $keys);
+        self::assertInstanceOf(ShapeType::class, $keys[59]->type);
+        self::assertTrue(ShapeField::admitsNull($keys[60]->type), 'memo, last, is still read');
     }
 
     public function test_a_field_left_out_without_clear_missing_is_its_propertys_none(): void

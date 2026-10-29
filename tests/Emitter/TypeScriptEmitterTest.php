@@ -194,6 +194,24 @@ final class TypeScriptEmitterTest extends TestCase
             ->emit($typeDomains, $responseDomains);
     }
 
+    public function test_an_enums_shape_is_kept_in_preserve_null_by_its_collected_name(): void
+    {
+        // Emitted `NoteStatusShape` under its suffix, it is `NoteStatusData` to preserveNull, as the
+        // PHPStan rule, which knows no suffix, names it.
+        $srcDir = __DIR__ . '/../Fixture/EnumShapeNullFixtures';
+        $enumResolver = new EnumResolver();
+        $enumResolver->scanDirectory($srcDir);
+
+        $notes = (new TypeScriptEmitter(
+            enumResolver: $enumResolver,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            naming: new TypeScriptNaming(enumShapeSuffix: 'Shape'),
+            preserveNull: ['NoteStatusData.hint'],
+        ))->emit((new PhpDocTypeCollector())->collect($srcDir))['Notes'];
+
+        self::assertStringContainsString("export interface NoteStatusShape {\n  id: string;\n  hint: string | null;\n}", $notes);
+    }
+
     public function test_it_fails_when_custom_names_collide(): void
     {
         $srcDir = FixtureProject::srcDir();
