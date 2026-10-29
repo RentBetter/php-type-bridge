@@ -234,6 +234,17 @@ final class EndpointQueryTest extends TestCase
         }
     }
 
+    public function test_an_alias_imported_under_a_name_its_own_file_declares_is_read_through(): void
+    {
+        // ListFilterData's `Code` is Shapes' `Filter`, whose `code: Code` is Shapes' own `Code`,
+        // `string|null`: no alias naming itself, so read, and left out of a query.
+        $src = __DIR__ . '/../Fixture/ImportedAliasNameFixtures';
+        $filter = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src))['Lists'][0]->request?->query?->keys()?->fields[0] ?? null;
+
+        self::assertInstanceOf(ShapeType::class, $filter?->type);
+        self::assertTrue($filter->type->fields[0]->mayBeLeftOut(inQuery: true));
+    }
+
     public function test_an_alias_whose_null_cant_be_read_is_refused_where_a_body_may_clear_it(): void
     {
         // In a body the same key may be sent null to clear it, or not: that does turn on Money.

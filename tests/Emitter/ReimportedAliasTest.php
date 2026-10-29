@@ -12,6 +12,9 @@ use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainMapper;
+use PTGS\TypeBridge\Tests\Fixture\ReimportCycleFixtures\Common\E as CycleE;
+use PTGS\TypeBridge\Tests\Fixture\ReimportCycleFixtures\Notes\A as CycleA;
+use PTGS\TypeBridge\Tests\Fixture\ReimportCycleFixtures\Notes\B as CycleB;
 use PTGS\TypeBridge\Tests\Fixture\ReimportOrderFixtures\Common\D;
 use PTGS\TypeBridge\Tests\Fixture\ReimportOrderFixtures\Notes\A;
 use PTGS\TypeBridge\Tests\Fixture\ReimportOrderFixtures\Notes\B;
@@ -70,6 +73,23 @@ final class ReimportedAliasTest extends TestCase
         $notes = $this->emit($src)['Notes'];
         self::assertStringContainsString("export interface BUses {\n  bar: Bar;\n}", $notes);
         self::assertStringContainsString("export interface Uses {\n  foo: Foo;\n  bar: Bar;\n}", $notes);
+    }
+
+    public function testAnImportThroughAClassBeingFollowedIsTheSameWhicheverIsReadFirst(): void
+    {
+        // A's `X` is B's, which B imports back from A as `V`: A's own import of `V`, from D, which has
+        // it from E. Followed alias by alias, it is E's however the two are first read.
+        $src = __DIR__ . '/../Fixture/ReimportCycleFixtures';
+        foreach ([[CycleA::class, CycleB::class], [CycleB::class, CycleA::class]] as $order) {
+            $files = new ClassFileTypes();
+            $classes = $files->classesIn($src);
+            foreach ($order as $class) {
+                $files->imports($class, $classes[$class], $src, $classes);
+            }
+
+            self::assertSame(CycleE::class, $files->imports(CycleA::class, $classes[CycleA::class], $src, $classes)['imports']['X']->targetClass, implode(' then ', $order));
+            self::assertSame(CycleE::class, $files->imports(CycleB::class, $classes[CycleB::class], $src, $classes)['imports']['X']->targetClass, implode(' then ', $order));
+        }
     }
 
     /**

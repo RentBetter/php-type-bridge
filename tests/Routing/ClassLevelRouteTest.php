@@ -196,6 +196,28 @@ final class ClassLevelRouteTest extends TestCase
         (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
     }
 
+    public function testARouteLeftToTheRoutersUtf8DefaultIsReadAsTheRouterCompilesIt(): void
+    {
+        // A Unicode requirement needs `utf8`, which FrameworkBundle's router turns on by default: the
+        // route's params are its params either way, and the mode stays unknown.
+        $src = __DIR__ . '/../Fixture/Utf8RouteFixtures';
+        $contract = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src))['Tags'][0];
+
+        self::assertSame(['name'], array_map(static fn(CollectedPathParam $param): string => $param->name, $contract->request?->pathParams ?? []));
+        self::assertNull($contract->request?->pathParams[0]->utf8 ?? false);
+    }
+
+    public function testARouteAttributeThatThrowsIsNoRouteToGuess(): void
+    {
+        // A project's #[Route] that refuses its arguments: Symfony's loader can't read the class, and
+        // why is said as for any route it refuses, not thrown again as it was.
+        $src = __DIR__ . '/../Fixture/ThrowingRouteFixtures';
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('The #[Route]s of PTGS\\TypeBridge\\Tests\\Fixture\\ThrowingRouteFixtures\\Notes\\NoteController cannot be read as Symfony reads them: No route for "/notes/{id}".');
+
+        (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
+    }
+
     public function testTheControllerRulesReadTheRouteTheGeneratorPublishes(): void
     {
         foreach (['/api' => new ApiMethodInspector(new RoutePathResolver(self::APP, 'config/routes.yaml')), '' => new ApiMethodInspector()] as $prefix => $inspector) {

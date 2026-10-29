@@ -10,6 +10,7 @@ use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\AliasListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\CodeBatchType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\TagListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\YearlyTotalsType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\UppercasedCodeType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
@@ -196,6 +197,14 @@ final class FormTypeInspectorTest extends TestCase
 
         self::assertTrue($fields['code']->transformsValue);
         self::assertTrue($fields['label']->transformsValue);
+    }
+
+    public function test_an_expanded_choice_entry_reads_what_it_is_sent_itself(): void
+    {
+        // Its radio buttons, named 0, 1, …, are no fields an entry is sent: each entry is a value.
+        $fields = array_column((new FormTypeInspector())->inspect(TagListType::class)['fields'], null, 'name');
+
+        self::assertSame([], $fields['tags']->entryChildren);
     }
 
     public function test_a_listener_rewrites_the_fields_of_the_form_it_is_on_alone(): void
