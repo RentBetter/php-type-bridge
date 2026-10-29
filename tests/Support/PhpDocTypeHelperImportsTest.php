@@ -62,6 +62,36 @@ final class PhpDocTypeHelperImportsTest extends TestCase
         self::assertSame(['Amount' => 'Class reference "\\Vendor\\Library\\Money" from "App\\Billing\\View\\InvoiceView" could not be resolved.'], $read['unresolved']);
     }
 
+    public function test_the_class_an_import_names_is_the_one_the_files_use_statements_name(): void
+    {
+        // As PHP and PHPStan resolve it: through `use`, before the file's namespace — a class of the
+        // same short name there is not the one meant — and under the alias `use … as` gives it.
+        $classFiles = [
+            'App\\Notes\\NoteView' => '/src/Notes/NoteView.php',
+            'App\\Notes\\Other' => '/src/Notes/Other.php',
+            'App\\Common\\Shape\\Other' => '/src/Common/Shape/Other.php',
+            'App\\Common\\Shape\\Shapes' => '/src/Common/Shape/Shapes.php',
+        ];
+        $content = <<<'PHP'
+            <?php
+            namespace App\Notes;
+
+            use App\Common\Shape\Other;
+            use App\Common\Shape\Shapes as CommonShapes;
+
+            /**
+             * @phpstan-import-type Tag from Other
+             * @phpstan-import-type Label from CommonShapes
+             */
+            final class NoteView {}
+            PHP;
+
+        $imports = (new PhpDocTypeHelper())->extractImportedTypes($content, 'App\\Notes\\NoteView', self::SRC, $classFiles, ['Other' => ['App\\Notes\\Other', 'App\\Common\\Shape\\Other'], 'Shapes' => ['App\\Common\\Shape\\Shapes']], new DomainGuesser());
+
+        self::assertSame('App\\Common\\Shape\\Other', $imports['Tag']->targetClass);
+        self::assertSame('App\\Common\\Shape\\Shapes', $imports['Label']->targetClass);
+    }
+
     public function test_read_strictly_an_import_from_outside_the_tree_fails(): void
     {
         // The reader every release before took: still there, for a caller that wants each import.

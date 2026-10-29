@@ -11,6 +11,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\OpaqueNullableBodyFixtures\Prices;
  * @phpstan-type _self = array{
  *     price: Money|null,
  *     discount: Money|int|null,
+ *     extras?: array<string, Money>,
  * }
  */
 final class PriceData
@@ -20,4 +21,7 @@ final class PriceData
     public ?string $price = null;
 
     public ?string $discount = null;
+
+    /** @var array<string, string> */
+    public array $extras = [];
 }

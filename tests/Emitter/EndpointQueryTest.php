@@ -223,13 +223,14 @@ final class EndpointQueryTest extends TestCase
     public function test_an_alias_whose_null_cant_be_read_is_no_matter_beside_an_explicit_null(): void
     {
         // `price: Money|null` in a body: clearable by its own null, whatever Money admits — and so is
-        // `discount: Money|int|null`, a null among the union's members.
+        // `discount: Money|int|null`, a null among the union's members. A map's values are never
+        // sent null on their own: `extras?: array<string, Money>` asks nothing of Money.
         $src = __DIR__ . '/../Fixture/OpaqueNullableBodyFixtures';
         $contracts = (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
 
         $keys = $contracts['Prices'][0]->request?->body?->keys()?->fields ?? [];
-        self::assertSame(['price', 'discount'], array_map(static fn(ShapeField $key): string => $key->name, $keys));
-        foreach ($keys as $key) {
+        self::assertSame(['price', 'discount', 'extras'], array_map(static fn(ShapeField $key): string => $key->name, $keys));
+        foreach (\array_slice($keys, 0, 2) as $key) {
             self::assertTrue(ShapeField::admitsNull($key->type), $key->name);
         }
     }

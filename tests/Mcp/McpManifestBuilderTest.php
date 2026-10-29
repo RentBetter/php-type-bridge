@@ -1418,6 +1418,57 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'boolean'], $properties['flags']['items'] ?? null);
     }
 
+    public function testACollectionOfEntriesReadWholeIsAListOfTheShapeItDeclares(): void
+    {
+        // `items?: list<array{a: int}>`, each entry read whole by its type: objects of that shape —
+        // and of an entry class whose shape can't be said here, objects.
+        $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
+        $items = new CollectedFormField(name: 'items', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: 'App\\ItemType');
+        $refs = new CollectedFormField(name: 'refs', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: 'App\\RefType', entryDataClass: 'App\\RefData');
+
+        $properties = $this->toolWithBody('PUT', [$items, $refs], new ShapeType([
+            new ShapeField('items', new ListType(new ShapeType([new ShapeField('a', new ScalarType('int'), optional: false)])), optional: true),
+            new ShapeField('refs', new ListType(new NameRefType('RefData', 'App\\RefData')), optional: true),
+        ]))['inputSchema']['properties'];
+        self::assertSame(['type' => 'array', 'items' => ['type' => 'object', 'properties' => ['a' => ['type' => 'integer']], 'required' => ['a']]], $properties['items']);
+        self::assertSame(['type' => 'array', 'items' => ['type' => 'object']], $properties['refs']);
+    }
+
+    public function testKeysNamedByNumbersAreAnObjectsProperties(): void
+    {
+        // `array{0: int, 1: string}`: PHP keys its properties 0 and 1, which JSON would write as a list.
+        $pair = new CollectedFormField(name: 'pair', formTypeClass: 'App\\PairType', required: false, mapped: true, compound: true, dataClass: 'App\\Pair', contract: new ShapeType([
+            new ShapeField('0', new ScalarType('int'), optional: false),
+            new ShapeField('1', new ScalarType('string'), optional: false),
+        ]));
+
+        $json = json_encode($this->toolWithBody('PUT', [$pair], new ShapeType([]))['inputSchema']['properties']['pair'], \JSON_THROW_ON_ERROR);
+        self::assertSame('{"type":"object","properties":{"0":{"type":"integer"},"1":{"type":"string"}},"required":["0","1"]}', $json);
+    }
+
+    public function testAPathParamAndAFieldOfOneNameHoldToBoth(): void
+    {
+        // One argument fills both: it is held to the route's requirement and to the field's rules.
+        $code = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Length(max: 20)]);
+        $endpoint = new CollectedEndpointContract(
+            name: 'renameNote',
+            domain: 'notes',
+            controllerClass: 'App\\NoteController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                body: new CollectedInputReference(null, 'App\\NoteData', 'NoteData', 'notes', [$code], $this->shape('array{code?: string}')),
+                pathParams: [new CollectedPathParam('code', 'string', '[A-Z]+-[0-9]+', false)],
+            ),
+            mcp: new CollectedMcpTool(name: 'renameNote', description: 'Rename a note.', httpMethod: 'PUT', httpPath: '/notes/{code}', destructive: false),
+        );
+
+        self::assertSame(
+            ['allOf' => [['type' => 'string', 'pattern' => '^(?:[A-Z]+-[0-9]+)$'], ['type' => 'string', 'maxLength' => 20]]],
+            (new McpManifestBuilder())->build(['notes' => [$endpoint]])['tools'][0]['inputSchema']['properties']['code'],
+        );
+    }
+
     public function testAPathParamAndABodyFieldOfOneNameAreRequiredOnce(): void
     {
         // `required` lists each name once: the meta-schema holds it to unique items, and Ajv refuses

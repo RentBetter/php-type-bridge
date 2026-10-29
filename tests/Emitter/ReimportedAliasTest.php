@@ -88,6 +88,15 @@ final class ReimportedAliasTest extends TestCase
         self::assertStringContainsString("export interface RankedListResponse {\n  rows: string[];\n  total: string;\n}", $notes);
     }
 
+    public function testATypeNamedAsTheModulesQueryHelperIsANamingCollision(): void
+    {
+        // The module declares `AsQuery` for its query endpoints: a type of that name is two.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": "AsQuery"');
+
+        $this->emit(__DIR__ . '/../Fixture/QueryHelperNameFixtures');
+    }
+
     public function testAnImportThroughAClassBeingFollowedIsTheSameWhicheverIsReadFirst(): void
     {
         // A's `X` is B's, which B imports back from A as `V`: A's own import of `V`, from D, which has
