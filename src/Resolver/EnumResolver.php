@@ -34,7 +34,7 @@ final class EnumResolver
     public function scanDirectory(string $srcDir, ?array $classFiles = null): void
     {
         foreach ($classFiles ?? $this->classLocator->classesIn($srcDir) as $className => $file) {
-            if (!enum_exists($className)) {
+            if (!PhpFileClassLocator::loadsEnum($className)) {
                 continue;
             }
 
@@ -71,7 +71,7 @@ final class EnumResolver
             return $this->cache[$fqcn];
         }
 
-        if (!enum_exists($fqcn)) {
+        if (!PhpFileClassLocator::loadsEnum($fqcn)) {
             throw new RuntimeException(\sprintf('Enum class "%s" was not found.', $className));
         }
 

@@ -9,6 +9,7 @@ use PTGS\TypeBridge\Emitter\Builtin\EndpointContractEmitter;
 use PTGS\TypeBridge\Emitter\Builtin\ResponseClassEmitter;
 use PTGS\TypeBridge\Emitter\Builtin\SelfShapeEmitter;
 use PTGS\TypeBridge\Emitter\Builtin\ValueOfEnumEmitter;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionClass;
 use RuntimeException;
 
@@ -49,7 +50,8 @@ final readonly class EmitterRegistry
         $emitters = $base->emitters;
 
         foreach ($candidateClasses as $candidate) {
-            if (!class_exists($candidate)) {
+            // One this install can't load is no part of the application, nor an emitter of it.
+            if (!PhpFileClassLocator::loads($candidate)) {
                 continue;
             }
 

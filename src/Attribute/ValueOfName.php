@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Attribute;
 
 use Attribute;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionClass;
 
 /**
@@ -35,7 +36,7 @@ final readonly class ValueOfName
      */
     public static function of(string $enumClass): ?self
     {
-        if (!enum_exists($enumClass)) {
+        if (!PhpFileClassLocator::loadsEnum($enumClass)) {
             return null;
         }
 

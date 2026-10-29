@@ -658,6 +658,32 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * The types a file binds a trait's template params to where a class or trait in it uses the
+     * trait — `@use Trait<…>` on the `use` statement (or the class), ranked as PHPStan ranks them:
+     * `@phpstan-use`, `@template-use`, `@use` — or null where it binds none. The trait is named as
+     * it is written, its short name compared.
+     *
+     * @return list<string>|null
+     */
+    public function usesArgs(string $content, string $traitShortName): ?array
+    {
+        $found = [];
+        foreach ($this->docComments($content) as $docComment) {
+            $node = $this->parse($docComment);
+            foreach (['@phpstan-use', '@template-use', '@use'] as $rank => $tagName) {
+                foreach ($node->getUsesTagValues($tagName) as $uses) {
+                    if (ClassNames::short(ltrim($uses->type->type->name, '\\')) === $traitShortName) {
+                        $found[$rank] ??= array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $uses->type->genericTypes));
+                    }
+                }
+            }
+        }
+        ksort($found);
+
+        return [] === $found ? null : $found[array_key_first($found)];
+    }
+
+    /**
      * The type with each name it uses read in the scope of the file that writes it ({@see ScopedType}),
      * its shape — a `?T`, a list, a union, an `included<…>` — as it is. An intersection, whose base
      * is a name by syntax, is scoped whole — inside the `?` and beside the null of a type that has
@@ -763,7 +789,8 @@ final class PhpDocTypeHelper
             return $alias;
         }
 
-        return self::selfTypeName(ClassNames::short($ownerClass), enum_exists($ownerClass), null !== ValueOfName::of($ownerClass));
+        // An import's target may be one this install can't load: no enum, and set aside where it is read.
+        return self::selfTypeName(ClassNames::short($ownerClass), PhpFileClassLocator::loadsEnum($ownerClass), null !== ValueOfName::of($ownerClass));
     }
 
     /**

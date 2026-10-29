@@ -83,6 +83,9 @@ final class ReimportedAliasTest extends TestCase
 
         self::assertStringContainsString("export interface NoteListResponse {\n  rows: string[];\n  total: number;\n}", $notes);
         self::assertStringContainsString("export interface LabelListResponse {\n  rows: boolean[];\n  total: number;\n}", $notes);
+        // A generic base's own param passed on to its trait; and `@phpstan-use` over `@use`.
+        self::assertStringContainsString("export interface FlagListResponse {\n  rows: boolean[];\n  total: number;\n}", $notes);
+        self::assertStringContainsString("export interface RankedListResponse {\n  rows: string[];\n  total: string;\n}", $notes);
     }
 
     public function testAnImportThroughAClassBeingFollowedIsTheSameWhicheverIsReadFirst(): void

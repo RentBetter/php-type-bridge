@@ -153,8 +153,13 @@ final class ResponseClassCollector
                 }
 
                 // Names are the file's; `self::` is the class, which for a trait is the one using it.
-                // A generic base's template params are what the response binds them to.
-                $templates = $declaringClass === $className ? [] : $this->templateBindings($reflection, $declaringClass, $srcDir, $classFiles);
+                // A generic base's template params are what the response binds them to, and a generic
+                // trait's what the class using it does.
+                $templates = match (true) {
+                    $declaringClass === $className => [],
+                    $declaringClass !== $property->getDeclaringClass()->getName() => $this->traitBindings($reflection, $property, $srcDir, $classFiles),
+                    default => $this->templateBindings($reflection, $declaringClass, $srcDir, $classFiles),
+                };
                 $parsed = $this->docHelper->substituted(
                     $this->readInFile($type, $declaringClass, $declared, $classFiles, array_keys($templates), $where, $property->getDeclaringClass()->getName()),
                     $templates,
@@ -341,20 +346,66 @@ final class ResponseClassCollector
             if (false === $parent) {
                 return [];
             }
-            $args = $this->docHelper->extendsArgs((string) $class->getDocComment()) ?? [];
-            $next = [];
-            foreach ($this->docHelper->templateParams((string) $parent->getDocComment()) as $i => $param) {
-                $unbound = $param['default'] ?? $param['bound'];
-                $next[$param['name']] = match (true) {
-                    isset($args[$i]) => $this->boundType($args[$i], $class->getName(), $bindings, $srcDir, $classFiles),
-                    null !== $unbound => $this->boundType($unbound, $parent->getName(), [], $srcDir, $classFiles),
-                    default => new ScalarType('mixed'),
-                };
-            }
-            $bindings = $next;
+            $bindings = $this->paramsBound($parent, $this->docHelper->extendsArgs((string) $class->getDocComment()) ?? [], $class->getName(), $bindings, $srcDir, $classFiles);
         }
 
         return $bindings;
+    }
+
+    /**
+     * What a generic trait's template params are bound to where a property it writes is used: by the
+     * class using it — its `@use Trait<…>`, read in that class's file, its own params what the
+     * response binds them to — and through a trait that uses another, by that one in turn.
+     *
+     * @param ReflectionClass<object> $response
+     * @param array<string, string>   $classFiles
+     *
+     * @return array<string, ParsedType>
+     */
+    private function traitBindings(ReflectionClass $response, ReflectionProperty $property, string $srcDir, array $classFiles): array
+    {
+        $user = $property->getDeclaringClass();
+        $key = $srcDir . "\0" . $response->getName() . "\0" . $user->getName() . "\0" . self::writtenIn($property);
+        if (isset($this->templateBindings[$key])) {
+            return $this->templateBindings[$key];
+        }
+
+        $bindings = $user->getName() === $response->getName() ? [] : $this->templateBindings($response, $user->getName(), $srcDir, $classFiles);
+        foreach (self::traitPath($property) as $trait) {
+            $file = $classFiles[$user->getName()] ?? $this->fileOf($user->getName());
+            $content = '' !== $file && is_file($file) ? (string) file_get_contents($file) : '';
+            $bindings = $this->paramsBound($trait, $this->docHelper->usesArgs($content, $trait->getShortName()) ?? [], $user->getName(), $bindings, $srcDir, $classFiles);
+            $user = $trait;
+        }
+
+        return $this->templateBindings[$key] = $bindings;
+    }
+
+    /**
+     * The generic class or trait's template params as `$writer` binds them (`$args`, in order): what
+     * is written read in its file, its own params `$bindings`; one it doesn't bind its default, else
+     * its bound, else mixed.
+     *
+     * @param ReflectionClass<object>    $generic
+     * @param list<string>               $args
+     * @param array<string, ParsedType>  $bindings
+     * @param array<string, string>      $classFiles
+     *
+     * @return array<string, ParsedType>
+     */
+    private function paramsBound(ReflectionClass $generic, array $args, string $writer, array $bindings, string $srcDir, array $classFiles): array
+    {
+        $bound = [];
+        foreach ($this->docHelper->templateParams((string) $generic->getDocComment()) as $i => $param) {
+            $unbound = $param['default'] ?? $param['bound'];
+            $bound[$param['name']] = match (true) {
+                isset($args[$i]) => $this->boundType($args[$i], $writer, $bindings, $srcDir, $classFiles),
+                null !== $unbound => $this->boundType($unbound, $generic->getName(), [], $srcDir, $classFiles),
+                default => new ScalarType('mixed'),
+            };
+        }
+
+        return $bound;
     }
 
     /**
@@ -396,17 +447,30 @@ final class ResponseClassCollector
      */
     private static function writtenIn(ReflectionProperty $property): string
     {
-        $class = $property->getDeclaringClass();
-        $traits = $class->getTraits();
+        $path = self::traitPath($property);
+
+        return ([] === $path ? $property->getDeclaringClass() : $path[array_key_last($path)])->getName();
+    }
+
+    /**
+     * The traits on the way from the class a property is used in to the one that writes it, each
+     * used by the one before: none where the class writes it itself.
+     *
+     * @return list<ReflectionClass<object>>
+     */
+    private static function traitPath(ReflectionProperty $property): array
+    {
+        $path = [];
+        $traits = $property->getDeclaringClass()->getTraits();
         while ([] !== $traits) {
             $trait = array_shift($traits);
             if ($trait->hasProperty($property->getName()) && $trait->getProperty($property->getName())->getDocComment() === $property->getDocComment()) {
-                $class = $trait;
+                $path[] = $trait;
                 $traits = $trait->getTraits();
             }
         }
 
-        return $class->getName();
+        return $path;
     }
 
     /**

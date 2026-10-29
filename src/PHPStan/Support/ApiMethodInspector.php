@@ -9,6 +9,7 @@ use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Routing\ControllerAttributeClassLoader;
 use PTGS\TypeBridge\Routing\DeclaredRoutes;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
@@ -51,8 +52,8 @@ final class ApiMethodInspector
         // framework's attribute, say — is read off the method's attributes as written.
         // Symfony's loader is asked only of a method a #[Route] routes — its own, or for __invoke its
         // class's: the rules inspect every method of every class.
-        $routed = [] !== $method->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF)
-            || ('__invoke' === $methodName && [] !== new ReflectionClass($className)->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF));
+        $routed = self::hasSymfonyRoute($method->getAttributes())
+            || ('__invoke' === $methodName && self::hasSymfonyRoute(new ReflectionClass($className)->getAttributes()));
         $route = $this->routePathResolver?->routeFor($className, $methodName) ?? ($routed ? $this->declaredRoutes->routeFor($className, $methodName) : null);
         [$path, $httpMethods] = null !== $route ? [RoutePathResolver::clientPath($route->getPath()), ControllerAttributeClassLoader::methodsFor($route)] : $this->writtenRoute($method);
 
@@ -109,13 +110,31 @@ final class ApiMethodInspector
     }
 
     /**
+     * @param list<ReflectionAttribute<object>> $attributes
+     */
+    private static function hasSymfonyRoute(array $attributes): bool
+    {
+        return array_any($attributes, static fn (ReflectionAttribute $attribute): bool => self::isSymfonyRoute($attribute->getName()));
+    }
+
+    /**
+     * Whether the attribute is Symfony's #[Route] or a subclass of it: asked of its name, without
+     * loading one whose declaration throws in this install ({@see PhpFileClassLocator::loads()}) —
+     * the rules inspect every method, whatever it carries.
+     */
+    private static function isSymfonyRoute(string $name): bool
+    {
+        return RouteAttribute::class === $name || (PhpFileClassLocator::loads($name) && is_a($name, RouteAttribute::class, true));
+    }
+
+    /**
      * @param ReflectionAttribute<object> $attribute
      */
     private function isRouteAttribute(ReflectionAttribute $attribute): bool
     {
         $name = $attribute->getName();
 
-        return is_a($name, RouteAttribute::class, true)
+        return self::isSymfonyRoute($name)
             || str_ends_with($name, '\\Route')
             || 'Route' === $name;
     }

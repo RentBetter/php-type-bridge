@@ -10,6 +10,7 @@ use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\FailedBlank;
 use PTGS\TypeBridge\Parser\IdOfType;
+use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
 use PTGS\TypeBridge\Parser\MapType;
@@ -193,7 +194,9 @@ final class McpManifestBuilder
             $schema['properties'] = $properties;
         }
         if ([] !== $required) {
-            $schema['required'] = $required;
+            // Each name once: a path param and a body field may share one, and the meta-schema
+            // holds `required` to unique items.
+            $schema['required'] = array_values(array_unique($required));
         }
 
         return $schema;
@@ -411,6 +414,11 @@ final class McpManifestBuilder
             $leaf = ['type' => 'string', 'enum' => $field->choiceValues];
 
             return $field->multiple ? ['type' => 'array', 'items' => $leaf] : $leaf;
+        }
+        // One whose choices are loaded later — an EntityType's — still takes a list of the values it
+        // reads, strings as the form reads them.
+        if ($field->multiple) {
+            return ['type' => 'array', 'items' => ['type' => 'string']];
         }
 
         // A compound field with no children reads what is sent whole, so its form says nothing of
@@ -645,14 +653,15 @@ final class McpManifestBuilder
 
     /**
      * The keys of the shape a type declares, by name — itself, or the one shape of a nullable or a
-     * union.
+     * union; an intersection's own, where what it extends can't be read, as the top level reads them
+     * ({@see ShapeType::declaredBy()}).
      *
      * @return array<string, ShapeField>
      */
     private static function shapeKeys(?ParsedType $type): array
     {
         $keys = [];
-        foreach (self::soleMember($type, ShapeType::class)->fields ?? [] as $key) {
+        foreach (ShapeType::declaredBy(self::soleMember($type, ShapeType::class) ?? self::soleMember($type, IntersectionType::class))->fields ?? [] as $key) {
             $keys[$key->name] = $key;
         }
 

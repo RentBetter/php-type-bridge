@@ -71,8 +71,11 @@ final class ShapeFieldIntersectionTest extends TestCase
         $base = self::key('k?: string');
         $maybe = new ShapeField('k', new NullableType(new NullableType(new ScalarType('string'), optional: false), optional: true), optional: true);
         $mixed = new ShapeField('k', new ScalarType('mixed'), optional: true);
+        // `k?: MaybeStr|null`, read through: a null on a null.
+        $twice = new ShapeField('k', new NullableType(new NullableType(new ScalarType('string'), optional: false), optional: false), optional: true);
 
         self::assertFalse(ShapeField::admitsNull(ShapeField::intersected($base, $maybe)->type));
+        self::assertFalse(ShapeField::admitsNull(ShapeField::intersected($base, $twice)->type));
         self::assertFalse(ShapeField::admitsNull(ShapeField::intersected($base, $mixed)->type));
         self::assertTrue(ShapeField::intersected($base, $mixed)->mayBeLeftOut());
     }

@@ -55,7 +55,9 @@ final readonly class ShapeField
      */
     public static function intersected(self $base, self $own): self
     {
-        $type = self::admitsNull($base->type) ? $own->type : self::withoutNull($own->type);
+        // `mixed` narrows nothing: `T & unknown` is T.
+        $ownType = $own->type instanceof ScalarType && 'mixed' === $own->type->base() ? $base->type : $own->type;
+        $type = self::admitsNull($base->type) ? $ownType : self::withoutNull($ownType);
         $baseShape = self::withoutNull(self::declared($base->type));
         $ownShape = self::withoutNull(self::declared($type));
         if ($baseShape instanceof ShapeType && $ownShape instanceof ShapeType) {
@@ -87,8 +89,10 @@ final readonly class ShapeField
      */
     private static function withoutNull(ParsedType $type): ParsedType
     {
-        if ($type instanceof NullableType && !$type->optional) {
-            return $type->inner;
+        // A `?T` stays a key left out when null, its T without a null of its own: `?Alias` of an
+        // alias of `string|null` is `?string`.
+        if ($type instanceof NullableType) {
+            return $type->optional ? new NullableType(self::withoutNull($type->inner), optional: true) : self::withoutNull($type->inner);
         }
         if (!$type instanceof UnionType) {
             return $type;

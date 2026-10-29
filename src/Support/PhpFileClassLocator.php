@@ -95,6 +95,17 @@ final class PhpFileClassLocator
     }
 
     /**
+     * Whether the name is an enum this install can load: asked without loading one whose
+     * declaration throws ({@see self::loads()}).
+     *
+     * @phpstan-assert-if-true class-string<\UnitEnum> $className
+     */
+    public static function loadsEnum(string $className): bool
+    {
+        return self::loads($className) && enum_exists($className);
+    }
+
+    /**
      * Extracts the first declared class-like's fully-qualified name via the PHP
      * tokenizer, so keywords appearing in comments, docblocks, or strings (e.g.
      * "the enum Foo convention") never get misread as a declaration.
