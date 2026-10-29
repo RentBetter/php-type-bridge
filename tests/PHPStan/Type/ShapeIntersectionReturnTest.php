@@ -26,7 +26,7 @@ final class ShapeIntersectionReturnTest extends RuleTestCase
      */
     public static function getAdditionalConfigFiles(): array
     {
-        return [__DIR__ . '/../../../extension.neon'];
+        return [\dirname(__DIR__, 3) . '/extension.neon'];
     }
 
     public function testAReturnIsCheckedAgainstTheBaseAndTheExtension(): void

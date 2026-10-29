@@ -7,6 +7,10 @@
     failOnRisky="true"
     failOnWarning="true"
 >
+    <php>
+        <!-- Each PHPStan config the tests run under builds and keeps a container of its own -->
+        <ini name="memory_limit" value="512M"/>
+    </php>
     <testsuites>
         <testsuite name="TypeBridge">
             <directory>tests</directory>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Support;
 
+use BackedEnum;
 use Closure;
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocNode;
 use PHPStan\PhpDocParser\Ast\PhpDoc\TypeAliasImportTagValueNode;
@@ -23,6 +24,7 @@ use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
+use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
@@ -30,6 +32,7 @@ use PTGS\TypeBridge\Parser\UnionType;
 use ReflectionClass;
 use ReflectionProperty;
 use RuntimeException;
+use UnitEnum;
 
 /**
  * Reads the PHPDoc tags TypeBridge is built on.
@@ -325,8 +328,8 @@ final class PhpDocTypeHelper
 
     /**
      * The literal values of the constants a `Class::PATTERN` names, as one literal or a union of
-     * them. `value-of<…>` takes an array constant's elements instead, and of any other constant is
-     * an error, as PHPStan reads it.
+     * them, read as PHPStan reads them. `value-of<…>` takes what PHPStan's own value-of takes of
+     * each constant ({@see self::valueOf()}), and is an error where PHPStan reads an invalid type.
      *
      * @param array<string, string> $classImports
      */
@@ -344,51 +347,86 @@ final class PhpDocTypeHelper
             ));
         }
         $pattern = '/^' . str_replace('\\*', '.*', preg_quote($type->pattern, '/')) . '$/';
+        $bare = \sprintf('`%s::%s`', $type->class, $type->pattern);
+        $written = $type->valueOf ? \sprintf('`value-of<%s::%s>`', $type->class, $type->pattern) : $bare;
+
+        $matched = [];
+        foreach ((new ReflectionClass($class))->getReflectionConstants() as $constant) {
+            if (1 === preg_match($pattern, $constant->getName())) {
+                $matched[$class . '::' . $constant->getName()] = $constant->getValue();
+            }
+        }
+        if ([] === $matched) {
+            throw new RuntimeException(\sprintf('%s matches no constant of %s.', $written, $class));
+        }
 
         $values = [];
-        foreach ((new ReflectionClass($class))->getReflectionConstants() as $constant) {
-            if (1 !== preg_match($pattern, $constant->getName())) {
-                continue;
-            }
+        foreach ($matched as $name => $value) {
+            $members = $type->valueOf ? self::valueOf($value) : [$value];
+            if (null === $members) {
+                // The bare form is only somewhere to go when every constant it matches has a literal type
+                $instead = [] === array_filter($matched, static fn(mixed $other): bool => !self::isLiteral($other))
+                    ? \sprintf(' Write %s for the constants\' own values.', $bare)
+                    : '';
 
-            $value = $constant->getValue();
-            if (!$type->valueOf) {
-                $constantValues = [$value];
-            } elseif (\is_array($value)) {
-                $constantValues = array_values($value);
-            } else {
                 throw new RuntimeException(\sprintf(
-                    '`value-of<%1$s::%2$s>` matches %3$s::%4$s, which is not an array: value-of<> takes the elements of an array constant, and PHPStan reads it of any other as an invalid type. Write `%1$s::%2$s` for the constants\' own values.',
-                    $type->class,
-                    $type->pattern,
-                    $class,
-                    $constant->getName(),
+                    '%s matches %s, which is neither an array nor an enum case: value-of<> takes an array\'s elements or a case\'s backing value, and PHPStan reads it of anything else as an invalid type.%s',
+                    $written,
+                    $name,
+                    $instead,
                 ));
             }
 
-            foreach ($constantValues as $literal) {
-                if (!\is_string($literal) && !\is_int($literal) && !\is_float($literal) && !\is_bool($literal)) {
-                    throw new RuntimeException(\sprintf(
-                        '`%s::%s` matches %s::%s, whose value is not a string, number or bool, so it has no literal type.',
-                        $type->class,
-                        $type->pattern,
-                        $class,
-                        $constant->getName(),
-                    ));
+            foreach ($members as $key => $member) {
+                if (!self::isLiteral($member)) {
+                    throw new RuntimeException($type->valueOf
+                        ? \sprintf('%s matches %s, whose element %s is not a string, number, bool or null, so it has no literal type.', $written, $name, var_export($key, true))
+                        : \sprintf('%s matches %s, whose value is not a string, number, bool or null, so it has no literal type.', $written, $name));
                 }
-                if (!\in_array($literal, $values, true)) {
-                    $values[] = $literal;
+                if (!\in_array($member, $values, true)) {
+                    $values[] = $member;
                 }
             }
         }
 
         if ([] === $values) {
-            throw new RuntimeException(\sprintf('`%s::%s` matches no constant of %s.', $type->class, $type->pattern, $class));
+            throw new RuntimeException(\sprintf(
+                '%s matches %s, which hold no values, so PHPStan reads it as never.',
+                $written,
+                implode(', ', array_keys($matched)),
+            ));
         }
 
-        $literals = array_map(static fn(string|int|float|bool $value): LiteralType => new LiteralType($value), $values);
+        $literals = array_map(
+            static fn(string|int|float|bool|null $value): ParsedType => null === $value ? new ScalarType('null') : new LiteralType($value),
+            $values,
+        );
 
         return 1 === \count($literals) ? $literals[0] : new UnionType($literals);
+    }
+
+    /**
+     * What PHPStan's value-of<> takes of one constant: a backed enum case's backing value, nothing
+     * of a pure case, an array's elements; null where it reads an invalid type.
+     *
+     * @return array<mixed>|null
+     */
+    private static function valueOf(mixed $value): ?array
+    {
+        return match (true) {
+            $value instanceof BackedEnum => [$value->value],
+            $value instanceof UnitEnum => [],
+            \is_array($value) => $value,
+            default => null,
+        };
+    }
+
+    /**
+     * @phpstan-assert-if-true string|int|float|bool|null $value
+     */
+    private static function isLiteral(mixed $value): bool
+    {
+        return null === $value || \is_scalar($value);
     }
 
     /**

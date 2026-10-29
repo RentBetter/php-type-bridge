@@ -7,9 +7,7 @@ namespace PTGS\TypeBridge\Tests\PHPStan;
 use PHPStan\Rules\Classes\LocalTypeAliasesCheck;
 use PHPStan\Rules\Classes\LocalTypeAliasesRule;
 use PHPStan\Testing\RuleTestCase;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
-use SplFileInfo;
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 
 /**
  * The grammar fixtures are the PHPStan syntax a real codebase writes, so PHPStan has to read
@@ -29,17 +27,12 @@ final class GrammarFixtureAliasesTest extends RuleTestCase
      */
     public static function getAdditionalConfigFiles(): array
     {
-        return [__DIR__ . '/../../extension.neon'];
+        return [\dirname(__DIR__, 2) . '/extension.neon'];
     }
 
     public function testPhpStanReadsEveryGrammarFixtureAlias(): void
     {
-        $files = [];
-        /** @var SplFileInfo $file */
-        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__ . '/../Fixture/GrammarFixtures', RecursiveDirectoryIterator::SKIP_DOTS)) as $file) {
-            $files[] = $file->getPathname();
-        }
-        sort($files);
+        $files = array_values((new PhpFileClassLocator())->classesIn(__DIR__ . '/../Fixture/GrammarFixtures'));
 
         self::assertNotEmpty($files);
         $this->analyse($files, []);

@@ -356,7 +356,7 @@ final class PhpDocShapeParser
             return new MapType($key, $value);
         }
 
-        // value-of<ClassName>, or value-of<self::OPTIONS> — the elements of an array constant
+        // value-of<ClassName>, or value-of<self::OPTIONS> — an array constant's elements, or a case's backing value
         if ($this->lookAhead('value-of<')) {
             $this->expect('value-of<');
             $className = $this->parseClassName();
