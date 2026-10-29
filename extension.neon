@@ -3,17 +3,17 @@
 # Holds only rules that are safe for any consumer of TypeBridge regardless of
 # whether they have adopted the V2 contract conventions. The EnumIdSource rule
 # fires solely on classes carrying #[EnumIdSource], so it never touches code that
-# does not opt in. The shape-intersection reading only changes a type PHPStan
-# would otherwise resolve to never. The V2 contract-enforcement rules live in
-# rules.neon (opt-in).
+# does not opt in. The shape-intersection reading touches only `Alias & array{…}`
+# with both sides closed, which PHPStan alone reads as never or reads without the
+# optional keys. The V2 contract-enforcement rules live in rules.neon (opt-in).
 services:
     -
         class: PTGS\TypeBridge\PHPStan\Rules\Enum\EnumIdSourceReturnTypeRule
         tags:
             - phpstan.rules.rule
 
-    # `Base & array{…}` as one shape with the keys of both — the `interface … extends Base` the
-    # emitter writes — where PHPStan alone would read it as never.
+    # `Base & array{…}` as one shape with the keys of both, the `interface … extends Base` the
+    # emitter writes.
     -
         class: PTGS\TypeBridge\PHPStan\Type\ShapeIntersectionTypeNodeResolverExtension
         tags:

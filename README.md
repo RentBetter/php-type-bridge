@@ -231,7 +231,7 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 
 A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written.
 
-PHPStan reads `Base & array{...}` the same way: one shape holding the keys of both, which a normaliser returns as `[...$base, 'extra' => …]` (`ShapeIntersectionTypeNodeResolverExtension`, auto-loaded through `extension.neon`). On its own PHPStan reads the intersection of two closed shapes as `never`. A key both parts declare is still an error.
+PHPStan reads `Base & array{...}` the same way: one shape holding the keys of both, which a normaliser returns as `[...$base, 'extra' => …]` (`ShapeIntersectionTypeNodeResolverExtension`, auto-loaded through `extension.neon`). On its own PHPStan reads the intersection of two closed shapes as a set of values: `never` when they share no required key, and without the keys of a part whose keys are all optional. The extension reads only that form, a type alias naming one closed shape and then a closed, keyed `array{...}`, and a key both declare is an invalid type. An open shape, and any other form, is PHPStan's own reading.
 
 ### Keys sent only when asked for
 
