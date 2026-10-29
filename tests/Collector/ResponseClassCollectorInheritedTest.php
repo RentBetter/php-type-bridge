@@ -111,8 +111,10 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
         self::assertStringContainsString("export interface ListNotesResponse {\n  items: NoteView[];\n  first: NoteView | null;\n  labels: string[];\n}", $notes);
         self::assertStringContainsString("export interface ListPinnedNotesResponse {\n  items: number[];\n  first: number | null;\n  labels: ('pinned' | 'archived')[];\n}", $notes);
-        self::assertStringContainsString("export interface ListAnythingResponse {\n  items: unknown[];\n  first: unknown;\n  labels: string[];\n}", $notes);
+        self::assertStringContainsString("export interface ListAnythingResponse {\n  items: unknown[];\n  first: unknown | null;\n  labels: string[];\n}", $notes);
         self::assertStringContainsString("export interface NotePageResponse {\n  rows: number[];\n}", $notes);
+        // `@phpstan-template`, `@template-covariant`, and `@phpstan-extends` over `@extends`.
+        self::assertStringContainsString("export interface NotePairResponse {\n  key: string;\n  value: boolean;\n}", $notes);
     }
 
     public function test_an_alias_the_base_class_declares_itself_is_imported_where_the_child_is_emitted(): void

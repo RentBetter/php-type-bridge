@@ -31,8 +31,9 @@ final class ParsedTypes
     }
 
     /**
-     * The names the types use as types, at any depth: aliases and classes, not a shape's keys or a
-     * literal's text spelt the same.
+     * The names the types use bare as types, at any depth — an alias's, or a class's not yet resolved
+     * — not a name qualified or resolved as a class's, a shape's keys, or a literal's text spelt the
+     * same: those an import or an alias of the file answers to.
      *
      * @return array<string, true>
      */
@@ -41,7 +42,7 @@ final class ParsedTypes
         $names = [];
         while ([] !== $types) {
             $type = array_pop($types);
-            if ($type instanceof NameRefType) {
+            if ($type instanceof NameRefType && null === $type->class) {
                 $names[$type->name] = true;
             }
             array_push($types, ...self::children($type));

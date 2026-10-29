@@ -52,6 +52,10 @@ final class EndpointContractCollector
     /** A base's file, read once however many queries inherit from it. */
     private readonly ClassFileTypes $files;
 
+    private readonly DomainGuesser $domainGuesser;
+
+    private readonly PhpDocTypeHelper $docHelper;
+
     private readonly ?AttributeText $toolDescriptions;
 
     /** What each controller's attributes route it at, read once per class. */
@@ -89,9 +93,9 @@ final class EndpointContractCollector
      *        typed with one that admits null takes null, as one its file declares does
      */
     public function __construct(
-        PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
-        private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
-        private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
+        ?PhpFileClassLocator $classLocator = null,
+        ?DomainGuesser $domainGuesser = null,
+        ?PhpDocTypeHelper $docHelper = null,
         private readonly FormTypeInspector $formTypeInspector = new FormTypeInspector(),
         array $requirementTypes = [],
         private readonly ?string $mcpScopeAttribute = null,
@@ -103,7 +107,9 @@ final class EndpointContractCollector
         ?ClassFileTypes $files = null,
         private readonly array $typeAliases = [],
     ) {
-        $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
+        $this->files = ClassFileTypes::sharedBy($files, $docHelper, $domainGuesser, $classLocator);
+        $this->domainGuesser = $this->files->domainGuesser;
+        $this->docHelper = $this->files->docHelper;
         $this->declaredRoutes = new DeclaredRoutes();
         // Keyed as the router holds a requirement, anchors off, so a project keying one `^\\d+$` as
         // its attribute writes it finds the `\\d+` the router serves.
@@ -184,7 +190,7 @@ final class EndpointContractCollector
                         request: $this->resolveRequestContract($method, $route, $srcDir, $classFiles),
                         mcp: $this->resolveMcpTool($method, $className, $endpointName, $httpMethod, $route),
                         httpMethod: $httpMethod,
-                        httpPath: $route?->getPath() ?? '',
+                        httpPath: RoutePathResolver::clientPath($route?->getPath() ?? ''),
                     );
                 }
             }
@@ -453,7 +459,7 @@ final class EndpointContractCollector
     private function servedPath(string $className, string $methodName, ?Route $route): string
     {
         if (null === $this->routePathResolver) {
-            return $route?->getPath() ?? '';
+            return RoutePathResolver::clientPath($route?->getPath() ?? '');
         }
 
         $served = $this->routePathResolver->pathFor($className, $methodName);
@@ -469,7 +475,7 @@ final class EndpointContractCollector
             ));
         }
 
-        return $served;
+        return RoutePathResolver::clientPath($served);
     }
 
     /**
@@ -485,12 +491,12 @@ final class EndpointContractCollector
         // derived from the route's placeholders (each a string unless its requirement
         // refines the type — see PathParam).
         $path = null !== $request && null !== $request->path
-            ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles)
+            ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles, inQuery: false, nullAsked: false)
             : null;
 
         $collected = new CollectedEndpointRequest(
-            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles) : null,
-            body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles) : null,
+            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles, inQuery: true) : null,
+            body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles, inQuery: false) : null,
             path: $path,
             pathParams: null === $path ? $this->derivePathParamsFromRoute($route) : null,
         );
@@ -534,7 +540,7 @@ final class EndpointContractCollector
      * @param array<string, string> $classFiles
      * @param class-string $formClass
      */
-    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles): CollectedInputReference
+    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles, bool $inQuery): CollectedInputReference
     {
         if (!isset($classFiles[$formClass])) {
             throw new RuntimeException(\sprintf(
@@ -557,7 +563,9 @@ final class EndpointContractCollector
             ownerClass: $resolvedForm['dataClass'],
             srcDir: $srcDir,
             classFiles: $classFiles,
-            fields: $this->withDeclaredContracts($resolvedForm['fields'], $srcDir, $classFiles),
+            fields: $this->withDeclaredContracts($resolvedForm['fields'], $srcDir, $classFiles, $inQuery),
+            inQuery: $inQuery,
+            nullAsked: true,
         );
     }
 
@@ -572,14 +580,14 @@ final class EndpointContractCollector
      *
      * @return list<CollectedFormField>
      */
-    private function withDeclaredContracts(array $fields, string $srcDir, array $classFiles): array
+    private function withDeclaredContracts(array $fields, string $srcDir, array $classFiles, bool $inQuery): array
     {
         return array_map(
             fn (CollectedFormField $field): CollectedFormField => $field->withDeclared(
-                children: $this->withDeclaredContracts($field->children, $srcDir, $classFiles),
-                entryChildren: $this->withDeclaredContracts($field->entryChildren, $srcDir, $classFiles),
+                children: $this->withDeclaredContracts($field->children, $srcDir, $classFiles, $inQuery),
+                entryChildren: $this->withDeclaredContracts($field->entryChildren, $srcDir, $classFiles, $inQuery),
                 contract: $field->compound && [] === $field->children && null !== $field->dataClass
-                    ? $this->contractOf($field->dataClass, $srcDir, $classFiles)
+                    ? $this->contractOf($field->dataClass, $srcDir, $classFiles, $inQuery)
                     : null,
             ),
             $fields,
@@ -593,20 +601,20 @@ final class EndpointContractCollector
      *
      * @param array<string, string> $classFiles
      */
-    private function contractOf(string $class, string $srcDir, array $classFiles): ?ShapeType
+    private function contractOf(string $class, string $srcDir, array $classFiles, bool $inQuery): ?ShapeType
     {
-        $key = $srcDir . "\0" . $class;
+        $key = $srcDir . "\0" . $class . "\0" . ($inQuery ? 'query' : 'body');
         if (\array_key_exists($key, $this->contracts)) {
             return $this->contracts[$key];
         }
 
-        return $this->contracts[$key] = $this->readContractOf($class, $srcDir, $classFiles);
+        return $this->contracts[$key] = $this->readContractOf($class, $srcDir, $classFiles, $inQuery);
     }
 
     /**
      * @param array<string, string> $classFiles
      */
-    private function readContractOf(string $class, string $srcDir, array $classFiles): ?ShapeType
+    private function readContractOf(string $class, string $srcDir, array $classFiles, bool $inQuery): ?ShapeType
     {
         $file = $classFiles[$class] ?? null;
         $self = null === $file || !$this->files->readable($file) ? null : $this->files->definitions($file)['_self'] ?? null;
@@ -614,7 +622,7 @@ final class EndpointContractCollector
             return null;
         }
 
-        [$own, $inherited] = $this->selfContract($self, $class, $file, $srcDir, $classFiles);
+        [$own, $inherited] = $this->selfContract($self, $class, $file, $srcDir, $classFiles, $inQuery, nullAsked: true);
 
         return null === $own || null === $inherited ? $own : ShapeType::intersected($inherited, $own);
     }
@@ -627,19 +635,21 @@ final class EndpointContractCollector
      *
      * @param string                $class      the class whose file declares it
      * @param array<string, string> $classFiles
+     * @param bool                  $inQuery    whether it is a query's, sent as a query string
+     * @param bool                  $nullAsked  whether its keys' null decides anything: not for a path's
      *
      * @return array{0: ShapeType|null, 1: ShapeType|null} its own keys, and those it inherits
      */
-    private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles): array
+    private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): array
     {
         $self = $this->parseType($definition);
         if ($self instanceof NameRefType && null === $self->class) {
-            return [ShapeType::declaredBy($this->readAliases($self, $class, $file, $srcDir, $classFiles, [])), null];
+            return [ShapeType::declaredBy($this->readAliases($self, $class, $file, $srcDir, $classFiles, [], $inQuery, $nullAsked)), null];
         }
 
         return [
-            $this->withAliasesRead(ShapeType::declaredBy($self), $class, $file, $srcDir, $classFiles),
-            $self instanceof IntersectionType ? $this->inheritedShape($self, $class, $file, $srcDir, $classFiles) : null,
+            $this->withAliasesRead(ShapeType::declaredBy($self), $class, $file, $srcDir, $classFiles, $inQuery, $nullAsked),
+            $self instanceof IntersectionType ? $this->inheritedShape($self, $class, $file, $srcDir, $classFiles, $inQuery, $nullAsked) : null,
         ];
     }
 
@@ -649,7 +659,7 @@ final class EndpointContractCollector
      * @param class-string $ownerClass
      * @param list<\PTGS\TypeBridge\Model\CollectedFormField> $fields
      */
-    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = []): CollectedInputReference
+    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = [], bool $inQuery = false, bool $nullAsked = true): CollectedInputReference
     {
         $file = $classFiles[$ownerClass] ?? null;
         if (null === $file) {
@@ -678,7 +688,7 @@ final class EndpointContractCollector
 
         // The keys it inherits are as much its contract as its own: whether a query may be left out,
         // and whether a body key is required or may be cleared, is theirs to say too.
-        [$contract, $inherited] = $this->selfContract($definitions['_self'], $ownerClass, $file, $srcDir, $classFiles);
+        [$contract, $inherited] = $this->selfContract($definitions['_self'], $ownerClass, $file, $srcDir, $classFiles, $inQuery, $nullAsked);
 
         return new CollectedInputReference(
             formClass: $formClass,
@@ -692,56 +702,41 @@ final class EndpointContractCollector
     }
 
     /**
-     * The keys an intersection (`Base & array{…}`) takes from the shape it extends, read where that
-     * shape is declared — the same file, or the class it is imported from, following an alias the
-     * target only re-imports to where it is declared — and through that shape's own base in turn.
-     * Null when its base can't be read as a shape.
+     * The keys an intersection (`Base & array{…}`) takes from the shape it extends, read as any alias
+     * is ({@see self::readAliases()}): where it is declared, through an alias of it, and through that
+     * shape's own base in turn. Null when its base can't be read as a shape — one further down that
+     * can't be read leaves what is inherited unknown, not the part read.
      *
      * @param string                $class the class whose file the intersection is written in
      * @param array<string, string> $classFiles
      */
-    private function inheritedShape(IntersectionType $self, string $class, string $file, string $srcDir, array $classFiles, int $depth = 0): ?ShapeType
+    private function inheritedShape(IntersectionType $self, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): ?ShapeType
     {
-        $base = $depth > 8 ? null : $this->aliasDefinition($self->base->name, $class, $file, $srcDir, $classFiles);
-        $parsed = null === $base ? null : $this->parseType($base['definition']);
-        $own = null === $base ? null : $this->withAliasesRead(ShapeType::declaredBy($parsed), $base['class'], $base['file'], $srcDir, $classFiles);
-        if (null === $base || null === $own) {
-            return null;
-        }
+        $base = $this->readAliases($self->base, $class, $file, $srcDir, $classFiles, [], $inQuery, $nullAsked);
 
-        $further = $parsed instanceof IntersectionType
-            ? $this->inheritedShape($parsed, $base['class'], $base['file'], $srcDir, $classFiles, $depth + 1)
-            : null;
-        // A base further down that can't be read leaves what is inherited unknown, not the part read.
-        if ($parsed instanceof IntersectionType && null === $further) {
-            return null;
-        }
-
-        return null === $further ? $own : ShapeType::intersected($further, $own);
+        return $base instanceof ShapeType ? $base : null;
     }
 
     /**
-     * Where an alias a file uses is declared: in the file, or in the class it is imported from —
-     * as that class names it (its `_self`, or a named alias it may itself only import).
+     * Where an alias a file uses is declared: in the file, or in the class that declares the one it
+     * imports — its imports are followed there already ({@see ClassFileTypes::imports()}).
      *
      * @param array<string, string> $classFiles
      *
      * @return array{definition: string, class: string, file: string}|null
      */
-    private function aliasDefinition(string $alias, string $class, string $file, string $srcDir, array $classFiles, int $depth = 0): ?array
+    private function aliasDefinition(string $alias, string $class, string $file, string $srcDir, array $classFiles): ?array
     {
         $definition = $this->files->definitions($file)[$alias] ?? null;
         if (null !== $definition) {
             return ['definition' => $definition, 'class' => $class, 'file' => $file];
         }
 
-        $import = $depth > 8 ? null : $this->files->imports($class, $file, $srcDir, $classFiles)['imports'][$alias] ?? null;
+        $import = $this->files->imports($class, $file, $srcDir, $classFiles)['imports'][$alias] ?? null;
         $target = null === $import ? null : $classFiles[$import->targetClass] ?? null;
-        if (null === $import || null === $target || !$this->files->readable($target)) {
-            return null;
-        }
+        $definition = null === $target ? null : $this->files->definitions($target)[$import->sourceName()] ?? null;
 
-        return $this->aliasDefinition($import->sourceName(), $import->targetClass, $target, $srcDir, $classFiles, $depth + 1);
+        return null === $import || null === $target || null === $definition ? null : ['definition' => $definition, 'class' => $import->targetClass, 'file' => $target];
     }
 
     /**
@@ -755,30 +750,37 @@ final class EndpointContractCollector
      * @param string                $class the class whose file the shape is written in
      * @param array<string, string> $classFiles
      */
-    private function withAliasesRead(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles): ?ShapeType
+    private function withAliasesRead(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): ?ShapeType
     {
-        $read = null === $shape ? null : $this->readAliases($shape, $class, $file, $srcDir, $classFiles, []);
+        $read = null === $shape ? null : $this->readAliases($shape, $class, $file, $srcDir, $classFiles, [], $inQuery, $nullAsked);
 
         return $read instanceof ShapeType ? $read : $shape;
     }
 
     /**
+     * Whether a null is asked of a project-wide alias read here ({@see self::configAliasAdmitsNull()})
+     * is whether anything turns on it: in a body every key's, which may be sent null to clear it; in a
+     * query only a key that can't be left out already — a query string sends a null by leaving the key
+     * out, and no item of a list sends one; in a path none.
+     *
      * @param array<string, string> $classFiles
      * @param array<string, true>   $reading the aliases being read, by file and name: one that names
      *        itself, at any remove, stays named there
+     * @param bool                  $inQuery whether the type is sent as a query string
+     * @param bool                  $nullAsked whether its null decides anything
      */
-    private function readAliases(ParsedType $type, string $class, string $file, string $srcDir, array $classFiles, array $reading): ParsedType
+    private function readAliases(ParsedType $type, string $class, string $file, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
-        $read = fn (ParsedType $part): ParsedType => $this->readAliases($part, $class, $file, $srcDir, $classFiles, $reading);
+        $read = fn (ParsedType $part, ?bool $asked = null): ParsedType => $this->readAliases($part, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $asked ?? $nullAsked);
 
         return match (true) {
-            $type instanceof NameRefType => null === $type->class ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading) : $type,
+            $type instanceof NameRefType => null === $type->class ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked) : $type,
             $type instanceof NullableType => new NullableType($read($type->inner), $type->optional),
-            $type instanceof UnionType => self::union(array_map($read, $type->types)),
-            $type instanceof ListType => new ListType($read($type->inner)),
-            $type instanceof MapType => new MapType($type->key, $read($type->value)),
+            $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member), $type->types)),
+            $type instanceof ListType => new ListType($read($type->inner, $nullAsked && !$inQuery)),
+            $type instanceof MapType => new MapType($type->key, $read($type->value, $nullAsked && !$inQuery)),
             $type instanceof ShapeType => new ShapeType(array_map(
-                fn (ShapeField $key): ShapeField => new ShapeField($key->name, $read($key->type), $key->optional),
+                fn (ShapeField $key): ShapeField => new ShapeField($key->name, $read($key->type, $inQuery ? $nullAsked && !$key->mayBeLeftOut() : $nullAsked), $key->optional),
                 $type->fields,
             ), $type->unsealed),
             $type instanceof IntersectionType => self::intersection($type, $read($type->base), $read($type->extra)),
@@ -792,13 +794,15 @@ final class EndpointContractCollector
      * @param array<string, string> $classFiles
      * @param array<string, true>   $reading
      */
-    private function readAlias(NameRefType $alias, string $class, string $file, string $srcDir, array $classFiles, array $reading): ParsedType
+    private function readAlias(NameRefType $alias, string $class, string $file, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
         $declared = $this->aliasDefinition($alias->name, $class, $file, $srcDir, $classFiles);
         if (null === $declared) {
-            return isset($this->typeAliases[$alias->name]) && $this->configAliasAdmitsNull($alias->name)
-                ? new NullableType($alias, optional: false)
-                : $alias;
+            // Asked only where it decides something; otherwise read as far as its text says.
+            $admitsNull = isset($this->typeAliases[$alias->name])
+                && ($nullAsked ? $this->configAliasAdmitsNull($alias->name) : true === TypeScriptTypes::admitsNull($this->typeAliases[$alias->name], $this->typeAliases));
+
+            return $admitsNull ? new NullableType($alias, optional: false) : $alias;
         }
 
         $key = $declared['file'] . "\0" . $alias->name;
@@ -810,7 +814,7 @@ final class EndpointContractCollector
         // An alias of `?T` is emitted `T`: a key typed with it is no key left out when null.
         $parsed = $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
 
-        return $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true]);
+        return $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true], $inQuery, $nullAsked);
     }
 
     /**

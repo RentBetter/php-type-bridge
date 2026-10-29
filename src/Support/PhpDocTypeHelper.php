@@ -6,7 +6,9 @@ namespace PTGS\TypeBridge\Support;
 
 use Closure;
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocNode;
+use PHPStan\PhpDocParser\Ast\PhpDoc\TemplateTagValueNode;
 use PHPStan\PhpDocParser\Ast\PhpDoc\TypeAliasImportTagValueNode;
+use PHPStan\PhpDocParser\Ast\Type\TypeNode;
 use PHPStan\PhpDocParser\Lexer\Lexer;
 use PHPStan\PhpDocParser\Parser\ConstExprParser;
 use PHPStan\PhpDocParser\Parser\PhpDocParser;
@@ -25,6 +27,7 @@ use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
+use PTGS\TypeBridge\Parser\ParsedTypes;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
@@ -210,14 +213,7 @@ final class PhpDocTypeHelper
      */
     public function unresolvedImportUsedIn(ParsedType $type, array $unresolved, string $where): ?RuntimeException
     {
-        $used = null;
-        $this->mapLeaves($type, static function (ParsedType $leaf) use ($unresolved, &$used): ParsedType {
-            if ($leaf instanceof NameRefType && null === $leaf->class && isset($unresolved[$leaf->name])) {
-                $used ??= $leaf->name;
-            }
-
-            return $leaf;
-        });
+        $used = array_key_first(array_intersect_key($unresolved, ParsedTypes::names($type)));
 
         return null === $used ? null : new RuntimeException(\sprintf('%s %s is typed with it.', $unresolved[$used], $where));
     }
@@ -393,7 +389,7 @@ final class PhpDocTypeHelper
                     continue;
                 }
                 $class = ltrim($prefix . trim($parts[0]), '\\');
-                $alias = isset($parts[1]) ? trim($parts[1]) : substr((string) strrchr('\\' . $class, '\\'), 1);
+                $alias = isset($parts[1]) ? trim($parts[1]) : ClassNames::short($class);
                 $imports[$alias] = $class;
             }
         }
@@ -596,6 +592,67 @@ final class PhpDocTypeHelper
         }
 
         return $tags;
+    }
+
+    /**
+     * The template params a class's docblock declares, in order — each `@template`, or its
+     * `@phpstan-`, `-covariant` and `-contravariant` spellings, once — with its bound (`of …`) as
+     * written.
+     *
+     * @return list<array{name: string, bound: string|null}>
+     */
+    public function templateParams(string $docComment): array
+    {
+        if ('' === $docComment) {
+            return [];
+        }
+
+        $params = [];
+        foreach ($this->parse($docComment)->getTags() as $tag) {
+            if ($tag->value instanceof TemplateTagValueNode && 1 === preg_match('/^@(phpstan-)?template(-covariant|-contravariant)?$/', $tag->name)) {
+                $params[$tag->value->name] ??= ['name' => $tag->value->name, 'bound' => null === $tag->value->bound ? null : (string) $tag->value->bound];
+            }
+        }
+
+        return array_values($params);
+    }
+
+    /**
+     * The types a class's docblock binds its parent's template params to, as written —
+     * `@extends Parent<A, B>`, or its `@phpstan-` or `@template-` spelling, PHPStan's own first — or
+     * null where it binds none.
+     *
+     * @return list<string>|null
+     */
+    public function extendsArgs(string $docComment): ?array
+    {
+        if ('' === $docComment) {
+            return null;
+        }
+
+        $node = $this->parse($docComment);
+        foreach (['@phpstan-extends', '@template-extends', '@extends'] as $tagName) {
+            foreach ($node->getExtendsTagValues($tagName) as $extends) {
+                return array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $extends->type->genericTypes));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The type with each name used bare that `$by` has replaced by what it maps it to: a template
+     * param by the type it is bound to, an alias by the name it is read under elsewhere.
+     *
+     * @param array<string, ParsedType> $by
+     */
+    public function substituted(ParsedType $type, array $by): ParsedType
+    {
+        if ([] === $by) {
+            return $type;
+        }
+
+        return $this->mapLeaves($type, static fn (ParsedType $leaf): ParsedType => $leaf instanceof NameRefType && null === $leaf->class && isset($by[$leaf->name]) ? $by[$leaf->name] : $leaf);
     }
 
     private function parse(string $docComment): PhpDocNode

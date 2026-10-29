@@ -76,13 +76,16 @@ final readonly class EmitContext
         return new ConversionScope($this->domain, $symbols, $this->foreignAliases, $aliasDomain === $this->domain ? null : $aliasDomain);
     }
 
+    /**
+     * The name a type of a module is referred to by here: the symbol it is declared as, under the
+     * name this module imports it as where that clashes with one of its own — imports are aliased
+     * by the symbol, so the symbol is resolved first, the interface prefix and all.
+     */
     public function localReferenceFor(string $foreignDomain, string $name): string
     {
-        if ($foreignDomain === $this->domain) {
-            return $this->symbols->resolve($foreignDomain, $name);
-        }
+        $symbol = $this->symbols->resolve($foreignDomain, $name);
 
-        return $this->foreignAliases[$foreignDomain][$name] ?? $this->symbols->resolve($foreignDomain, $name);
+        return $foreignDomain === $this->domain ? $symbol : $this->foreignAliases[$foreignDomain][$symbol] ?? $symbol;
     }
 
     public function symbolForInputReference(CollectedInputReference $input): string

@@ -17,14 +17,20 @@ final class PhpDocTypeCollector
 {
     private readonly ClassFileTypes $files;
 
+    private readonly DomainGuesser $domainGuesser;
+
+    private readonly PhpDocTypeHelper $docHelper;
+
     public function __construct(
         private readonly PhpDocShapeParser $parser = new PhpDocShapeParser(),
-        PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
-        private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
-        private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
+        ?PhpFileClassLocator $classLocator = null,
+        ?DomainGuesser $domainGuesser = null,
+        ?PhpDocTypeHelper $docHelper = null,
         ?ClassFileTypes $files = null,
     ) {
-        $this->files = $files ?? new ClassFileTypes($docHelper, $domainGuesser, $classLocator);
+        $this->files = ClassFileTypes::sharedBy($files, $docHelper, $domainGuesser, $classLocator);
+        $this->domainGuesser = $this->files->domainGuesser;
+        $this->docHelper = $this->files->docHelper;
     }
 
     /**

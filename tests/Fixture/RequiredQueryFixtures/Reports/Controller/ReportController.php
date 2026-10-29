@@ -13,6 +13,7 @@ use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedRegi
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedScopeFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AnyRegionFilterType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ClearableNoteFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ConfigProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ImportedProductFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\LayeredNoteType;
@@ -237,6 +238,14 @@ final class ReportController
     #[ApiRequest(query: SortedReportFilterType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function listSortedReports(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/clearable-note', methods: ['GET'])]
+    #[ApiRequest(query: ClearableNoteFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listClearableNoteReports(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }

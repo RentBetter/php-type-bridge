@@ -17,4 +17,12 @@ final class PriceController
     {
         throw new \LogicException('Fixture only.');
     }
+
+    #[Route('/api/prices/{id}', methods: ['GET'])]
+    #[ApiRequest(path: PricePath::class)]
+    #[ApiResponses([PriceResponse::class])]
+    public function showPrice(): PriceResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
 }

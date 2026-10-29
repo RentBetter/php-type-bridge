@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Support;
 use PHPStan\PhpDocParser\Ast\PhpDoc\TypeAliasImportTagValueNode;
 use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Model\ImportedType;
+use InvalidArgumentException;
 
 /**
  * What a class's file says its types mean — the aliases it declares, the types it imports, the
@@ -46,10 +47,30 @@ final class ClassFileTypes
     private array $cutShort = [];
 
     public function __construct(
-        private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
-        private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
-        private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
+        public readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
+        public readonly DomainGuesser $domainGuesser = new DomainGuesser(),
+        public readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
     ) {}
+
+    /**
+     * The reader a collector reads with: the one it is given, or one made of the helpers it is given.
+     * A helper given beside a reader must be the reader's own — a collector placing a type in one
+     * module while the reader places its imports in another is a mistake made silently otherwise.
+     */
+    public static function sharedBy(?self $files, ?PhpDocTypeHelper $docHelper, ?DomainGuesser $domainGuesser, ?PhpFileClassLocator $classLocator): self
+    {
+        if (null === $files) {
+            return new self($docHelper ?? new PhpDocTypeHelper(), $domainGuesser ?? new DomainGuesser(), $classLocator ?? new PhpFileClassLocator());
+        }
+
+        foreach (['docHelper' => [$docHelper, $files->docHelper], 'domainGuesser' => [$domainGuesser, $files->domainGuesser], 'classLocator' => [$classLocator, $files->classLocator]] as $name => [$given, $own]) {
+            if (null !== $given && $given !== $own) {
+                throw new InvalidArgumentException(\sprintf('A %s given beside a ClassFileTypes must be the one it reads with: give it to the ClassFileTypes, and the collector takes it from there.', $name));
+            }
+        }
+
+        return $files;
+    }
 
     /**
      * The classes a source tree declares, class => file, scanned once however many collectors ask.

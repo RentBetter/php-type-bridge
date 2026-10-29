@@ -63,6 +63,14 @@ final readonly class EmittedNames
         return 204 === $response->status && [] === $response->properties && $response->declaresProperties && $was !== $response->name ? $was : null;
     }
 
+    /**
+     * The module an enum is declared in.
+     */
+    public function enumDomain(string $enumClass): string
+    {
+        return $this->enumResolver->getDomain($enumClass);
+    }
+
     public function enumName(string $enumClass): string
     {
         return ValueOfName::of($this->enumResolver->resolveFqcn($enumClass))->name

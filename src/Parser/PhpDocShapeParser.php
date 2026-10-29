@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Parser;
 
+use PTGS\TypeBridge\Support\ClassNames;
 use RuntimeException;
 
 /**
@@ -445,7 +446,7 @@ final class PhpDocShapeParser
                 return $this->parseClassConstant($className, valueOf: false);
             }
 
-            return new NameRefType(substr((string) strrchr('\\' . $className, '\\'), 1), class: $className);
+            return new NameRefType(ClassNames::short($className), class: $className);
         }
 
         throw new RuntimeException(\sprintf(

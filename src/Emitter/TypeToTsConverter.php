@@ -158,8 +158,9 @@ final readonly class TypeToTsConverter
             );
         }
 
+        // Under the name this module imports it as, where that clashes with one of its own.
         if ($type instanceof ValueOfType) {
-            return $this->enumName($type->enumClass);
+            return self::localName($this->names->enumDomain($type->enumClass), $this->enumName($type->enumClass), $scope);
         }
 
         if ($type instanceof IdOfType) {
@@ -171,7 +172,9 @@ final readonly class TypeToTsConverter
                 ));
             }
 
-            return $this->enumIds->resolve($type->enumClass)->canonicalName;
+            $ids = $this->enumIds->resolve($type->enumClass);
+
+            return self::localName($ids->targetDomain, $ids->canonicalName, $scope);
         }
 
         if ($type instanceof NameRefType) {

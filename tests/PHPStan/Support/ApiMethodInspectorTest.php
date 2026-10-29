@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Tests\PHPStan\Support;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
+use PTGS\TypeBridge\Tests\Fixture\OtherRouteApp\NoteController as OtherRouteController;
 use PTGS\TypeBridge\Tests\Fixture\TwiceRoutedApp\Notes\NoteController;
 
 /**
@@ -21,5 +22,15 @@ final class ApiMethodInspectorTest extends TestCase
 
         self::assertSame('/api/notes/{id}', $inspector->inspect(NoteController::class, 'showNoteAction')?->path);
         self::assertSame('/api/pages/{page}/{slug}', $inspector->inspect(NoteController::class, 'showPageAction')?->path);
+    }
+
+    public function testAnotherFrameworksRouteIsReadAsWritten(): void
+    {
+        // Symfony's loader reads none of it: its path and methods are the attribute's own, its path
+        // as a client fills it, as the generator publishes one.
+        $method = (new ApiMethodInspector())->inspect(OtherRouteController::class, 'exportNoteAction');
+
+        self::assertSame('/notes/{id}.{_format}', $method?->path);
+        self::assertSame(['GET'], $method?->httpMethods);
     }
 }

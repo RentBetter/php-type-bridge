@@ -194,15 +194,27 @@ final class EndpointQueryTest extends TestCase
         }
     }
 
+    public function test_a_key_both_sides_type_with_an_alias_that_admits_null_may_be_left_out(): void
+    {
+        // The base's `note?: MaybeText` and the input's own `note: MaybeText`: required by one side,
+        // but admitting null on both, so a query may leave it out — the base's read as its alias
+        // says, though nothing asked it alone.
+        $contracts = (new EndpointContractCollector(typeAliases: self::TYPE_ALIASES))->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'listClearableNoteReports'), 'GET')]])['tools'][0];
+
+        self::assertSame([], $tool['inputSchema']['required'] ?? []);
+    }
+
     public function test_an_alias_whose_null_cant_be_read_is_no_matter_where_its_null_decides_nothing(): void
     {
-        // `price?: Money` in a query: left out already, whatever Money admits. Nothing turns on what
-        // tsc would make of `Dinero`.
+        // `price?: Money` in a query: left out already, whatever Money admits; a list's items and a
+        // map's values, which a query string never sends null; a path's segment. Nothing turns on
+        // what tsc would make of `Dinero`.
         $src = __DIR__ . '/../Fixture/OpaqueQueryAliasFixtures';
         $contracts = (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
         $keys = $contracts['Prices'][0]->request?->query?->keys();
 
-        self::assertSame(['title', 'price'], array_map(static fn(ShapeField $key): string => $key->name, $keys->fields ?? []));
+        self::assertSame(['title', 'price', 'bands', 'byCurrency'], array_map(static fn(ShapeField $key): string => $key->name, $keys->fields ?? []));
         self::assertFalse($keys?->fields[0]->mayBeLeftOut(inQuery: true));
         self::assertTrue($keys?->fields[1]->mayBeLeftOut(inQuery: true));
     }

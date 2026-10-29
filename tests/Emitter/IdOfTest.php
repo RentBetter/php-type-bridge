@@ -47,6 +47,15 @@ final class IdOfTest extends TestCase
         self::assertStringContainsString("GammaStatusId } from '../Marked/genTypes';", $output['Widgets']);
     }
 
+    public function test_it_is_referred_to_by_the_name_it_is_imported_as(): void
+    {
+        // The module declares a `GammaStatusId` of its own: the union is imported under another name.
+        $widgets = $this->emit(src: __DIR__ . '/../Fixture/IdOfClashFixtures')['Widgets'];
+
+        self::assertStringContainsString("GammaStatusId as MarkedGammaStatusId } from '../Marked/genTypes';", $widgets);
+        self::assertStringContainsString("  status: MarkedGammaStatusId;\n  legacy: GammaStatusId;", $widgets);
+    }
+
     /**
      * The union is emitted by the Discovered pass, so referencing it must not produce a
      * second declaration here for the two to drift apart.
@@ -151,7 +160,7 @@ final class IdOfTest extends TestCase
     /**
      * @return array<string, string>
      */
-    private function emit(?EmitterRegistry $registry = null): array
+    private function emit(?EmitterRegistry $registry = null, string $src = self::SRC): array
     {
         $enumResolver = new EnumResolver();
         $enumResolver->scanDirectory(self::ENUMS);
@@ -160,6 +169,6 @@ final class IdOfTest extends TestCase
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             registry: $registry ?? EmitterRegistry::fromAttributeScan([MarkedEmitter::class]),
-        ))->emit((new PhpDocTypeCollector())->collect(self::SRC));
+        ))->emit((new PhpDocTypeCollector())->collect($src));
     }
 }

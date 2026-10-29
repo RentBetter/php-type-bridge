@@ -130,6 +130,16 @@ final class RoutePathResolver
     }
 
     /**
+     * A route path as a client fills it in: an important param, `{!_format}`, is `{_format}` — the
+     * `!` says only that every URL the router generates carries it, and a client substituting a
+     * param by its name finds it so.
+     */
+    public static function clientPath(string $path): string
+    {
+        return preg_replace('/\{!([\w\x80-\xFF]+)\}/', '{$1}', $path) ?? $path;
+    }
+
+    /**
      * A route requirement as the router holds it: Symfony's own Route takes off a leading `^` or
      * `\\A` and a trailing `$` or `\\z`. Null for one it refuses.
      */

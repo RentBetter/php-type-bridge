@@ -18,6 +18,9 @@ namespace PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Input;
  *     sort: string,
  * }
  * @phpstan-type ListInput = PagedInput
+ * @phpstan-type NoteBase = array{
+ *     note?: MaybeText,
+ * }
  * @phpstan-type MaybeNote = string|null
  * @phpstan-type LayeredNoteInput = ConfigBase & array{
  *     title: string,

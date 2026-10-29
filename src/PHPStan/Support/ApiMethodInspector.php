@@ -47,7 +47,7 @@ final class ApiMethodInspector
         // an invokable class's its __invoke's. One Symfony's loader reads none of — another
         // framework's attribute, say — is read off the method's attributes as written.
         $route = $this->routePathResolver?->routeFor($className, $methodName) ?? $this->declaredRoutes->routeFor($className, $methodName);
-        [$path, $httpMethods] = null !== $route ? [$route->getPath(), array_values($route->getMethods())] : $this->writtenRoute($method);
+        [$path, $httpMethods] = null !== $route ? [RoutePathResolver::clientPath($route->getPath()), array_values($route->getMethods())] : $this->writtenRoute($method);
 
         $declaredResponses = [];
         $responsesAttributes = $method->getAttributes(ApiResponses::class);
@@ -90,7 +90,7 @@ final class ApiMethodInspector
             $methods = $arguments['methods'] ?? [];
 
             return [
-                \is_string($path) ? RoutePathResolver::declaredPath($path) : null,
+                \is_string($path) ? RoutePathResolver::clientPath(RoutePathResolver::declaredPath($path)) : null,
                 \is_array($methods) ? array_values(array_unique(array_map(
                     static fn (mixed $value): string => strtoupper((string) $value),
                     array_filter($methods, static fn (mixed $value): bool => \is_string($value) && '' !== $value),
