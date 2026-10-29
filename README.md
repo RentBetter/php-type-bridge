@@ -222,7 +222,8 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `non-empty-list<T>`, `non-empty-array<K, V>` | `T[]`, `Record<K, V>` |
 | `array{id: string, ...}` (unsealed) | `{ id: string; [key: string]: unknown }` |
 | `array{int, string, ...}` (unsealed tuple) | `[number, string, ...unknown[]]` |
-| `self::STATUS_*`, `Foo::BAR`, `value-of<self::MODE_*>` | the constants' values: `'draft' \| 'live'` |
+| `self::STATUS_*`, `Foo::BAR` | the constants' values: `'draft' \| 'live'` |
+| `value-of<self::OPTIONS>` (an array constant) | its elements; `value-of<>` of any other constant is an error, as PHPStan reads it |
 | `(A \| B)`, `Base & array{...}` | `A \| B`, `interface … extends Base` |
 | `MoneyInterface`, `\Acme\Money` (a class) | the JSON it serialises to — see below |
 | `included<T>` — a generic listed in `includes.types` | `T`, on a key absent unless asked for — see below |

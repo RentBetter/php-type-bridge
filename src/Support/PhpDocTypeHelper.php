@@ -325,7 +325,8 @@ final class PhpDocTypeHelper
 
     /**
      * The literal values of the constants a `Class::PATTERN` names, as one literal or a union of
-     * them. `value-of<…>` of an array constant takes its elements instead.
+     * them. `value-of<…>` takes an array constant's elements instead, and of any other constant is
+     * an error, as PHPStan reads it.
      *
      * @param array<string, string> $classImports
      */
@@ -351,7 +352,21 @@ final class PhpDocTypeHelper
             }
 
             $value = $constant->getValue();
-            foreach ($type->valueOf && \is_array($value) ? array_values($value) : [$value] as $literal) {
+            if (!$type->valueOf) {
+                $constantValues = [$value];
+            } elseif (\is_array($value)) {
+                $constantValues = array_values($value);
+            } else {
+                throw new RuntimeException(\sprintf(
+                    '`value-of<%1$s::%2$s>` matches %3$s::%4$s, which is not an array: value-of<> takes the elements of an array constant, and PHPStan reads it of any other as an invalid type. Write `%1$s::%2$s` for the constants\' own values.',
+                    $type->class,
+                    $type->pattern,
+                    $class,
+                    $constant->getName(),
+                ));
+            }
+
+            foreach ($constantValues as $literal) {
                 if (!\is_string($literal) && !\is_int($literal) && !\is_float($literal) && !\is_bool($literal)) {
                     throw new RuntimeException(\sprintf(
                         '`%s::%s` matches %s::%s, whose value is not a string, number or bool, so it has no literal type.',

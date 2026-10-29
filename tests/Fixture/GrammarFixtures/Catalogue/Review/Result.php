@@ -8,7 +8,8 @@ namespace PTGS\TypeBridge\Tests\Fixture\GrammarFixtures\Catalogue\Review;
  * Constant sets standing in for enums: the type is whichever of their values.
  *
  * @phpstan-type ResultAction = self::RESULT_*
- * @phpstan-type ModeChoice = array{manualModes?: list<value-of<self::MODE_*>>}
+ * @phpstan-type ModeChoice = array{manualModes?: list<self::MODE_*>}
+ * @phpstan-type ModePick = value-of<self::MODES>
  * @phpstan-type Retry = self::RETRY_LIMIT
  */
 final class Result
@@ -18,5 +19,6 @@ final class Result
     public const string OTHER = 'not a result';
     public const string MODE_SIMPLE = 'simple';
     public const string MODE_FULL = 'full';
+    public const array MODES = [self::MODE_SIMPLE, self::MODE_FULL];
     public const int RETRY_LIMIT = 3;
 }
