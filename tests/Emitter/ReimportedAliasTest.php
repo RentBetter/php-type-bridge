@@ -10,7 +10,11 @@ use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
+use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainMapper;
+use PTGS\TypeBridge\Tests\Fixture\ReimportOrderFixtures\Common\D;
+use PTGS\TypeBridge\Tests\Fixture\ReimportOrderFixtures\Notes\A;
+use PTGS\TypeBridge\Tests\Fixture\ReimportOrderFixtures\Notes\B;
 
 /**
  * An alias imported from a class that only imports it itself is the type where it is declared, as
@@ -51,6 +55,21 @@ final class ReimportedAliasTest extends TestCase
         $this->expectExceptionMessage('Unknown TypeScript symbol "Code"');
 
         $this->emit(__DIR__ . '/../Fixture/CyclicImportFixtures');
+    }
+
+    public function testAnImportIsTheSameWhicheverClassIsReadFirst(): void
+    {
+        // A is read first; following its `Foo` reads B, which imports `Bar` back from A while A is
+        // still being followed. B's `Bar` is still D's, as it is when B is read on its own.
+        $src = __DIR__ . '/../Fixture/ReimportOrderFixtures';
+        $files = new ClassFileTypes();
+        $classes = $files->classesIn($src);
+        $files->imports(A::class, $classes[A::class], $src, $classes);
+        self::assertSame(D::class, $files->imports(B::class, $classes[B::class], $src, $classes)['imports']['Bar']->targetClass);
+
+        $notes = $this->emit($src)['Notes'];
+        self::assertStringContainsString("export interface BUses {\n  bar: Bar;\n}", $notes);
+        self::assertStringContainsString("export interface Uses {\n  foo: Foo;\n  bar: Bar;\n}", $notes);
     }
 
     /**

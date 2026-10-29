@@ -21,7 +21,8 @@ final class ReportNoteType extends AbstractFormType
         $builder
             ->add('note', TextType::class)
             ->add('tags', CollectionType::class, ['entry_type' => TextType::class, 'allow_add' => true])
-            ->add('code', TextType::class);
+            ->add('code', TextType::class)
+            ->add('label', TextType::class);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

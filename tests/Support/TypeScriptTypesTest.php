@@ -56,6 +56,7 @@ final class TypeScriptTypesTest extends TestCase
         yield 'a conditional whose last branch has a null in its union' => ['string extends string ? string : number | null', null];
         yield 'an intersection with a part it cannot read' => ['Nullable<string> & unknown', null];
         yield 'a quote escaped in a literal' => ["'it\\'s' | null", true];
+        yield 'a backslash escaped at the end of a literal' => ["'a\\\\' | null", true];
     }
 
     #[DataProvider('types')]

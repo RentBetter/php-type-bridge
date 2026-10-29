@@ -6,9 +6,12 @@ namespace PTGS\TypeBridge\Tests\Parser;
 
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
+use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Parser\UnionType;
 
 /**
  * The key `Base & Own` has where both declare it, as TypeScript reads the intersection: required
@@ -51,6 +54,14 @@ final class ShapeFieldIntersectionTest extends TestCase
         self::assertInstanceOf(ShapeType::class, $key->type);
         self::assertSame(['a', 'b'], array_map(static fn(ShapeField $field): string => $field->name, $key->type->fields));
         self::assertFalse($key->type->fields[0]->mayBeLeftOut());
+    }
+
+    public function testAKeyValuedQuestionMarkTAdmitsNullWhereTDoes(): void
+    {
+        // `?T` is `key?: T` in the TypeScript: a null it may be sent is T's. An alias of
+        // `string|null` read through is a union with null among its members.
+        self::assertTrue(ShapeField::admitsNull(new NullableType(new UnionType([new ScalarType('string'), new ScalarType('null')]), optional: true)));
+        self::assertFalse(ShapeField::admitsNull(new NullableType(new ScalarType('string'), optional: true)));
     }
 
     public function testAShapeHasEveryKeyOfEitherSide(): void

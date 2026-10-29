@@ -13,6 +13,7 @@ use Symfony\Component\Form\Extension\Core\Type\CollectionType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Core\Type\UrlType;
+use Symfony\Component\Form\Exception\TransformationFailedException;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormEvent;
 use Symfony\Component\Form\FormEvents;
@@ -56,10 +57,16 @@ final class NoteType extends AbstractFormType
             ->add('kind', ChoiceType::class, ['choices' => ['Bug' => 'bug', 'Idea' => 'idea', 'Chore' => 'chore']])
             ->add('refs', CollectionType::class, ['entry_type' => TextType::class, 'allow_add' => true])
             ->add('fallback', TextType::class, ['empty_data' => 'n/a'])
-            ->add('quantity', IntegerType::class, ['empty_data' => '0']);
+            ->add('quantity', IntegerType::class, ['empty_data' => '0'])
+            ->add('serial', TextType::class);
         $builder->get('ref')->addModelTransformer(new CallbackTransformer(
             static fn(?string $value): ?string => $value,
             static fn(?string $value): ?string => null === $value ? null : strtoupper($value),
+        ));
+        // A blank serial is no serial: the transformer fails it, and the form is invalid.
+        $builder->get('serial')->addModelTransformer(new CallbackTransformer(
+            static fn(?string $value): ?string => $value,
+            static fn(?string $value): string => $value ?? throw new TransformationFailedException('A serial is needed.'),
         ));
         $builder->get('slug')->addEventListener(FormEvents::PRE_SUBMIT, static function (FormEvent $event): void {
             $slug = $event->getData();

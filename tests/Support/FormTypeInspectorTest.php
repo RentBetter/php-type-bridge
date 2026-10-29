@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectNoteType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportStatusType;
 use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NestedBrokenRequestType;
 use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NonContractRootType;
 use RuntimeException;
@@ -145,6 +146,15 @@ final class FormTypeInspectorTest extends TestCase
         self::assertTrue($fields['count']->transformsValue, 'A number is read from what was sent');
         self::assertTrue($fields['ref']->transformsValue, 'A model transformer');
         self::assertTrue($fields['ref']->withDeclared([], [], null)->transformsValue);
+    }
+
+    public function test_an_expanded_choice_is_one_field_not_the_buttons_it_draws(): void
+    {
+        // Its radio buttons are children named 0, 1, … — none of them a field a request sends.
+        $fields = array_column((new FormTypeInspector())->inspect(ReportStatusType::class)['fields'], null, 'name');
+
+        self::assertSame(['open', 'closed'], $fields['status']->choiceValues);
+        self::assertSame([], $fields['status']->children);
     }
 
     public function test_a_choice_or_an_all_nested_where_it_always_holds_is_read_too(): void

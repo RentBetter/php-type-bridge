@@ -61,6 +61,17 @@ final class ClassLevelRouteTest extends TestCase
     }
 
     #[DataProvider('configs')]
+    public function testAMethodsOwnHttpMethodIsTheOneItIsFor(TypeBridgeConfig $config, string $prefix): void
+    {
+        // The route serves GET and DELETE, the class's first; the method's own #[Route] says DELETE.
+        $tool = $this->tools($config)['RemoveListedNote'] ?? [];
+
+        self::assertSame('DELETE', $tool['method'] ?? null);
+        self::assertTrue($tool['destructive'] ?? null);
+        self::assertSame($prefix . '/listed-notes/{id}', $tool['path'] ?? null);
+    }
+
+    #[DataProvider('configs')]
     public function testAnImportantParamIsAParamLikeAnyOther(TypeBridgeConfig $config, string $prefix): void
     {
         $tool = $this->tools($config)['ExportNote'] ?? [];

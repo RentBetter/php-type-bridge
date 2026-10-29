@@ -250,6 +250,17 @@ final class EndpointQueryTest extends TestCase
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['tags']['items']);
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['code']);
+        self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['label'], '`?MaybeProduct`');
+    }
+
+    public function test_an_expanded_choice_may_be_cleared(): void
+    {
+        // Radio buttons are a compound form, but no embedded one: the choice reads what is sent, and
+        // a null sent clears it, as Symfony submits it.
+        $contracts = (new EndpointContractCollector())->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'updateReportStatus'), 'PUT')]])['tools'][0];
+
+        self::assertContains(null, $tool['inputSchema']['properties']['status']['enum'] ?? []);
     }
 
     public function test_a_key_required_at_any_level_an_input_extends_is_required(): void
@@ -362,7 +373,7 @@ final class EndpointQueryTest extends TestCase
             enumResolver: $enumResolver,
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
             // A null that means something, so the contract says `T|null`: in a query, "any product".
-            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region', 'ReportFields.description', 'ReportAddressInput.street', 'NoteInput.note'],
+            preserveNull: ['AnyProductFilterData.product', 'RegionScope.region', 'NorthRegionFilterData.region', 'OpenScope.region', 'DeepScope.region', 'MidScope.region', 'ReportFields.description', 'ReportAddressInput.street', 'NoteInput.note', 'ReportStatusData.status'],
             typeAliases: self::TYPE_ALIASES,
         ))->emit(
             (new PhpDocTypeCollector())->collect(self::SRC),

@@ -60,4 +60,6 @@ final class NoteData
 
     /** @var list<string> */
     public array $aliases = [];
+
+    public ?string $serial = null;
 }

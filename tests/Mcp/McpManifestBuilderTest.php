@@ -26,6 +26,7 @@ use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\AttributeText;
+use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Spec\Param;
 use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
@@ -33,6 +34,7 @@ use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Enum\ProjectStatus;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Authorize;
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
 use PTGS\TypeBridge\Tests\Fixture\ConstraintFixtures\NoteCode;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType as BlankNoteType;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\AtLeastOneOf;
 use Symfony\Component\Validator\Constraints\Choice;
@@ -1358,6 +1360,17 @@ final class McpManifestBuilderTest extends TestCase
 
         $tool = $this->toolWithBody('POST', [$code], $this->shape('array{code?: string}'));
         self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['code']);
+    }
+
+    public function testABlankItsTransformerFailsIsRefused(): void
+    {
+        // Submitted blank, the serial's transformer fails: the form is invalid, a 422. So a POST
+        // requires it, and no update may send it null — whatever its contract says.
+        $fields = array_column((new FormTypeInspector())->inspect(BlankNoteType::class)['fields'], null, 'name');
+        $contract = $this->shape('array{serial?: string|null}');
+
+        self::assertSame(['serial'], $this->toolWithBody('POST', [$fields['serial']], $contract)['inputSchema']['required'] ?? []);
+        self::assertSame(['type' => 'string'], $this->toolWithBody('PUT', [$fields['serial']], $contract)['inputSchema']['properties']['serial']);
     }
 
     public function testAKeyAnIntersectionRequiresOnEitherSideIsRequired(): void

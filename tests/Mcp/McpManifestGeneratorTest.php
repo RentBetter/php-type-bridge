@@ -145,6 +145,18 @@ final class McpManifestGeneratorTest extends TestCase
         }
     }
 
+    public function testARequirementTypedWithAProjectWideAliasIsTheJsonTypeItStandsFor(): void
+    {
+        // `Code` is a string, so the argument is one, holding to its requirement; `Id` a number. A
+        // TypeScript alias is no JSON Schema type.
+        $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
+        $config = TypeBridgeConfig::fromArray(['requirementTypes' => ['^\\d+$' => 'Id', '[a-z]+' => 'Code'], 'typeAliases' => ['Id' => 'number', 'Code' => 'string']]);
+        $tools = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name');
+
+        self::assertSame(['type' => 'number'], $tools['ShowAnchored']['inputSchema']['properties']['id'] ?? null);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[a-z]+)$'], $tools['ShowAnchoredCode']['inputSchema']['properties']['code'] ?? null);
+    }
+
     public function testAMethodWhoseFirstRouteIsNotServedIsDescribedByTheOneThatIs(): void
     {
         // Its first #[Route] is confined to the dev env; the router serves the second, so the path,
