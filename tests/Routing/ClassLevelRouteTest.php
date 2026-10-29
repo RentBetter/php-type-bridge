@@ -16,6 +16,7 @@ use PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
+use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\AccountNoteController;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\ArchiveNoteController;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\LabelController;
 
@@ -76,7 +77,8 @@ final class ClassLevelRouteTest extends TestCase
     {
         $tool = $this->tools($config)['ExportNote'] ?? [];
 
-        self::assertSame($prefix . '/accounts/{accountId}/notes/{id}.{!_format}', $tool['path'] ?? null);
+        // Published as a client fills it: the `!` says only that every URL carries the param.
+        self::assertSame($prefix . '/accounts/{accountId}/notes/{id}.{_format}', $tool['path'] ?? null);
         self::assertSame(['accountId', 'id', '_format'], $tool['inputSchema']['required'] ?? null);
     }
 
@@ -103,6 +105,7 @@ final class ClassLevelRouteTest extends TestCase
 
         self::assertStringContainsString("export const ArchiveNote: Endpoint<ArchiveNoteEndpointMap, { path: ArchiveNotePathParams }> = {\n  method: 'POST',\n  path: '" . $prefix . "/notes/{id}/archive',\n};", $notes);
         self::assertStringContainsString('export type DeleteNotePathParams = { accountId: number; id: string };', $notes);
+        self::assertStringContainsString("  path: '" . $prefix . "/accounts/{accountId}/notes/{id}.{_format}',", $notes);
         self::assertStringContainsString("  method: 'PUT',\n  path: '" . $prefix . "/labels/{labelId}',", $notes);
     }
 
@@ -123,6 +126,8 @@ final class ClassLevelRouteTest extends TestCase
             $archive = $inspector->inspect(ArchiveNoteController::class, '__invoke');
             self::assertSame(['POST'], $archive?->httpMethods);
             self::assertSame($prefix . '/notes/{id}/archive', $archive?->path);
+
+            self::assertSame($prefix . '/accounts/{accountId}/notes/{id}.{_format}', $inspector->inspect(AccountNoteController::class, 'exportNoteAction')?->path);
 
             $replace = $inspector->inspect(LabelController::class, 'replaceLabelAction');
             self::assertSame(['PUT'], $replace?->httpMethods);

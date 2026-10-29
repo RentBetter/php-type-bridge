@@ -83,6 +83,38 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertMatchesRegularExpression('/import type \\{[^}]*\\bMeta as CommonMeta\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
     }
 
+    public function test_a_base_classs_import_is_used_under_the_name_it_is_imported_as_whatever_the_prefix(): void
+    {
+        // With an interface prefix both are emitted `IMeta`: the inherited one is the imported one.
+        $notes = self::emit(self::fixtures('InheritedSameNameFixtures'), new TypeScriptNaming(interfacePrefix: 'I'))['Notes'];
+
+        self::assertStringContainsString("export interface IListNotesResponse {\n  meta: IMeta;\n  page: CommonIMeta;\n}", $notes);
+        self::assertMatchesRegularExpression('/import type \\{[^}]*\\bIMeta as CommonIMeta\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
+    }
+
+    public function test_an_enum_imported_under_another_name_is_used_under_it(): void
+    {
+        // The Notes module declares a `NoteState` of its own; the Common enum a base names is
+        // imported under another name, and the property is typed with that.
+        $notes = self::emit(self::fixtures('EnumAliasClashFixtures'))['Notes'];
+
+        self::assertMatchesRegularExpression('/import type \\{[^}]*\\bNoteState as CommonNoteState\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  label: NoteState;\n  state: CommonNoteState;\n}", $notes);
+    }
+
+    public function test_a_generic_bases_params_are_what_the_response_binds_them_to(): void
+    {
+        // `@extends AbstractListResponse<NoteView>`, the alias the child's own file declares, in the
+        // child's module; through a base that passes its own param on and binds the other; unbound,
+        // each param its bound or anything; a library's generic base too.
+        $notes = self::emit(self::fixtures('GenericBaseFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ListNotesResponse {\n  items: NoteView[];\n  first: NoteView | null;\n  labels: string[];\n}", $notes);
+        self::assertStringContainsString("export interface ListPinnedNotesResponse {\n  items: number[];\n  first: number | null;\n  labels: ('pinned' | 'archived')[];\n}", $notes);
+        self::assertStringContainsString("export interface ListAnythingResponse {\n  items: unknown[];\n  first: unknown;\n  labels: string[];\n}", $notes);
+        self::assertStringContainsString("export interface NotePageResponse {\n  rows: number[];\n}", $notes);
+    }
+
     public function test_an_alias_the_base_class_declares_itself_is_imported_where_the_child_is_emitted(): void
     {
         $output = self::emit(self::fixtures('InheritedLocalAliasFixtures'));

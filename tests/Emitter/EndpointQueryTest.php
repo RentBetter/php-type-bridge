@@ -194,6 +194,29 @@ final class EndpointQueryTest extends TestCase
         }
     }
 
+    public function test_an_alias_whose_null_cant_be_read_is_no_matter_where_its_null_decides_nothing(): void
+    {
+        // `price?: Money` in a query: left out already, whatever Money admits. Nothing turns on what
+        // tsc would make of `Dinero`.
+        $src = __DIR__ . '/../Fixture/OpaqueQueryAliasFixtures';
+        $contracts = (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
+        $keys = $contracts['Prices'][0]->request?->query?->keys();
+
+        self::assertSame(['title', 'price'], array_map(static fn(ShapeField $key): string => $key->name, $keys->fields ?? []));
+        self::assertFalse($keys?->fields[0]->mayBeLeftOut(inQuery: true));
+        self::assertTrue($keys?->fields[1]->mayBeLeftOut(inQuery: true));
+    }
+
+    public function test_an_alias_whose_null_cant_be_read_is_refused_where_a_body_may_clear_it(): void
+    {
+        // In a body the same key may be sent null to clear it, or not: that does turn on Money.
+        $src = __DIR__ . '/../Fixture/OpaqueBodyAliasFixtures';
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Whether the project-wide alias "Money" (`Dinero`) admits null');
+
+        (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
+    }
+
     public function test_a_project_wide_alias_naming_another_is_read_as_that_one_is_declared(): void
     {
         // MaybeText is OptionalText, which admits null: a key typed with it may be left out.
@@ -239,6 +262,17 @@ final class EndpointQueryTest extends TestCase
 
         self::assertSame(['id', 'title'], $tool['inputSchema']['required'], "Its path's id, and the title");
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
+    }
+
+    public function test_a_key_inherited_through_an_alias_of_an_alias_is_inherited(): void
+    {
+        // `ListInput & array{product?: string}`, ListInput being PagedInput: `sort` is required, so
+        // the query can't be left out, and the tool requires it.
+        $contracts = (new EndpointContractCollector())->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        $tool = (new McpManifestBuilder())->build(['Reports' => [self::asTool(self::contract($contracts, 'listSortedReports'), 'GET')]])['tools'][0];
+
+        self::assertSame(['sort'], $tool['inputSchema']['required'] ?? []);
+        self::assertStringContainsString('export const ListSortedReports: Endpoint<ListSortedReportsEndpointMap, { query: ListSortedReportsQuery }> = {', $this->emit()['Reports']);
     }
 
     public function test_a_body_key_typed_with_an_alias_that_admits_null_takes_null(): void

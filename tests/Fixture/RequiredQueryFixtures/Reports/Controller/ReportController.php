@@ -30,6 +30,7 @@ use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportListF
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportNoteType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportPlaceType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportStatusType;
+use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\SortedReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\WeeklyReportFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Response\ReportResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -228,6 +229,14 @@ final class ReportController
     #[ApiRequest(body: ReportStatusType::class)]
     #[ApiResponses([ReportResponse::class])]
     public function updateReportStatus(): ReportResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/api/reports/sorted', methods: ['GET'])]
+    #[ApiRequest(query: SortedReportFilterType::class)]
+    #[ApiResponses([ReportResponse::class])]
+    public function listSortedReports(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
     }
