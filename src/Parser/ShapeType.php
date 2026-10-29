@@ -16,6 +16,19 @@ final readonly class ShapeType extends ParsedType
     ) {}
 
     /**
+     * The keys a type declares itself, read as a shape: a shape's, or an intersection's own — what it
+     * inherits is declared where its base is. Null for a type that is neither.
+     */
+    public static function declaredBy(?ParsedType $type): ?self
+    {
+        return match (true) {
+            $type instanceof self => $type,
+            $type instanceof IntersectionType => $type->extra,
+            default => null,
+        };
+    }
+
+    /**
      * The keys `$base & $own` has, as TypeScript reads an intersection: every key of either, one
      * both declare {@see ShapeField::intersected()} — so every reader of an input's keys, the
      * Endpoint and the tool alike, reads one set. Open to more keys where either is.

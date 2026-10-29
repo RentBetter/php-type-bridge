@@ -8,6 +8,7 @@ use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Model\FailedBlank;
 use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
@@ -19,6 +20,7 @@ use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\AttributeText;
+use PTGS\TypeBridge\Support\ClassNames;
 use PTGS\TypeBridge\Support\HeldConstraints;
 use ReflectionProperty;
 use Throwable;
@@ -166,11 +168,10 @@ final class McpManifestBuilder
         $request = $contract->request;
         if (null !== $request) {
             foreach ($request->pathParams ?? [] as $param) {
-                // A path param's tsType ('string'/'number') doubles as its JSON Schema type, and
-                // a path segment is always required. A string's route requirement says what it
-                // must look like, so a model learns a ticket is `SO-12` before the router's 404.
-                $properties[$param->name] = ['type' => $param->tsType];
-                $pattern = 'string' === $param->tsType && null !== $param->requirement ? self::routePattern($param->requirement, $param->utf8) : null;
+                // A path segment is always required. A string's route requirement says what it must
+                // look like, so a model learns a ticket is `SO-12` before the router's 404.
+                $properties[$param->name] = ['type' => $param->schemaType()];
+                $pattern = 'string' === $param->schemaType() && null !== $param->requirement ? self::routePattern($param->requirement, $param->utf8) : null;
                 if (null !== $pattern) {
                     $properties[$param->name]['pattern'] = $pattern;
                 }
@@ -240,7 +241,18 @@ final class McpManifestBuilder
     {
         $this->blankRefused ??= new WeakMap();
 
-        return $this->blankRefused[$field] ??= $this->refuses($field->constraints, $field->blankValue);
+        return $this->blankRefused[$field] ??= $this->refusesBlankValue($field->constraints, $field->blankValue);
+    }
+
+    /**
+     * Whether a blank reaching validation as the value is refused: one the form can't make a value
+     * of ({@see FailedBlank}) always is; any other where a constraint refuses it.
+     *
+     * @param list<Constraint> $constraints
+     */
+    private function refusesBlankValue(array $constraints, mixed $value): bool
+    {
+        return $value instanceof FailedBlank || $this->refuses($constraints, $value);
     }
 
     /**
@@ -574,7 +586,7 @@ final class McpManifestBuilder
             // An entry takes null where its contract admits one and nothing it is held to refuses it,
             // as the entry reaches validation: null, '' where its options keep a blank a string,
             // false for a checkbox.
-            return $json && null !== $item && ShapeField::admitsNull($item) && !$this->refuses($field->entryConstraints, $field->entryBlankValue)
+            return $json && null !== $item && ShapeField::admitsNull($item) && !$this->refusesBlankValue($field->entryConstraints, $field->entryBlankValue)
                 ? self::withNull($schema)
                 : $schema;
         }
@@ -1071,7 +1083,7 @@ final class McpManifestBuilder
 
     private function scalarTypeOf(string $formTypeClass): string
     {
-        $shortName = $this->shortName($formTypeClass);
+        $shortName = ClassNames::short($formTypeClass);
 
         return match (true) {
             str_contains($shortName, 'Boolean') => 'boolean',
@@ -1079,12 +1091,5 @@ final class McpManifestBuilder
             str_contains($shortName, 'Number'), str_contains($shortName, 'Money') => 'number',
             default => 'string',
         };
-    }
-
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-
-        return false === $position ? $className : substr($className, $position + 1);
     }
 }

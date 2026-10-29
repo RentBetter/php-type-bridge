@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Support;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\AliasListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\YearlyTotalsType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectNoteType;
@@ -146,6 +148,13 @@ final class FormTypeInspectorTest extends TestCase
         self::assertTrue($fields['count']->transformsValue, 'A number is read from what was sent');
         self::assertTrue($fields['ref']->transformsValue, 'A model transformer');
         self::assertTrue($fields['ref']->withDeclared([], [], null)->transformsValue);
+    }
+
+    public function test_a_field_named_by_number_is_read_by_that_name(): void
+    {
+        $fields = (new FormTypeInspector())->inspect(YearlyTotalsType::class)['fields'];
+
+        self::assertSame(['2025', '2026'], array_map(static fn(CollectedFormField $field): string => $field->name, $fields));
     }
 
     public function test_an_expanded_choice_is_one_field_not_the_buttons_it_draws(): void

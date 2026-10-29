@@ -13,6 +13,9 @@ namespace PTGS\TypeBridge\Model;
  *
  * `utf8` is the route's own `utf8` option when it states one — whether the router matches the
  * requirement by character (PCRE `u`) or by byte — and null when it leaves it to the router's default.
+ *
+ * `standsFor` is the TypeScript a project-wide alias `tsType` names (`UuidStr` => `string`), read
+ * through any alias it names in turn; null where `tsType` is no such alias.
  */
 final readonly class CollectedPathParam
 {
@@ -21,5 +24,19 @@ final readonly class CollectedPathParam
         public string $tsType,
         public ?string $requirement = null,
         public ?bool $utf8 = null,
+        public ?string $standsFor = null,
     ) {}
+
+    /**
+     * The JSON Schema type a tool takes it as: a number or a boolean where its type is one, and a
+     * string otherwise — what a path segment is, whatever narrower type it is typed with.
+     */
+    public function schemaType(): string
+    {
+        return match (trim($this->standsFor ?? $this->tsType)) {
+            'number' => 'number',
+            'boolean' => 'boolean',
+            default => 'string',
+        };
+    }
 }

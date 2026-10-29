@@ -7,11 +7,13 @@ namespace PTGS\TypeBridge\Support;
 use Closure;
 use PTGS\TypeBridge\Contract\ContractFormType;
 use PTGS\TypeBridge\Model\CollectedFormField;
+use PTGS\TypeBridge\Model\FailedBlank;
 use ReflectionAttribute;
 use ReflectionProperty;
 use RuntimeException;
 use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
+use Symfony\Component\Form\Exception\TransformationFailedException;
 use Symfony\Component\Form\Extension\Core\CoreExtension;
 use Symfony\Component\Form\Extension\Core\EventListener\TrimListener;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
@@ -108,6 +110,7 @@ final class FormTypeInspector
                 $this->assertContractFormType($formTypeClass);
             }
 
+            $name = (string) $name;
             $propertyPath = $this->resolvePropertyPath($config, $name);
             $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
             $constraints = $this->collectConstraints($config, $property);
@@ -128,7 +131,9 @@ final class FormTypeInspector
                 multiple: $this->isMultipleChoice($config),
                 hasModelTransformers: [] !== $config->getModelTransformers(),
                 hasViewTransformers: [] !== $config->getViewTransformers(),
-                children: $this->collectFields($child),
+                // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
+                // what is sent itself, and none of them is a field a request sends.
+                children: self::isChoice($config) ? [] : $this->collectFields($child),
                 entryChildren: null !== $entry && $entry->getCompound() ? $this->collectFields($entry) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
@@ -155,7 +160,8 @@ final class FormTypeInspector
      *
      * A compound field is what its type makes it: a collection is emptied, []; an expanded choice
      * chooses none; an embedded form is null as far as its own constraints go. A choice a loader
-     * fills is never loaded here, and one whose transformers refuse a blank is taken as null.
+     * fills is never loaded here. One whose transformer fails a blank is a {@see FailedBlank}: the
+     * form is invalid, as Symfony submits it.
      *
      * @param FormConfigInterface<mixed> $config
      */
@@ -188,7 +194,10 @@ final class FormTypeInspector
             }
 
             return $value;
+        } catch (TransformationFailedException) {
+            return new FailedBlank();
         } catch (Throwable) {
+            // An `empty_data` closure that reads what only a request has: what it makes is unknown.
             return null;
         }
     }
@@ -500,10 +509,16 @@ final class FormTypeInspector
      */
     private function isMultipleChoice(FormConfigInterface $config): bool
     {
-        if (!$config->hasOption('multiple') || true !== $config->getOption('multiple')) {
-            return false;
-        }
+        return $config->hasOption('multiple') && true === $config->getOption('multiple') && self::isChoice($config);
+    }
 
+    /**
+     * Whether the field is of the choice family: ChoiceType, or a type built on it.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private static function isChoice(FormConfigInterface $config): bool
+    {
         for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
             if ($type->getInnerType() instanceof ChoiceType) {
                 return true;

@@ -10,12 +10,12 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * A class-level #[Route] naming a method, and a method naming another: Symfony serves the route at
- * both, the class's first. The method says which it is for.
+ * both, the class's first. The method says which it is for, however it spells it.
  */
 #[Route('/listed-notes', methods: ['GET'])]
 final class ListedNoteController
 {
-    #[Route('/{id}', methods: ['DELETE'])]
+    #[Route('/{id}', methods: ['delete'])]
     #[ApiResponses([NoteArchivedResponse::class])]
     #[McpTool(description: 'Remove a listed note.')]
     public function removeListedNoteAction(): NoteArchivedResponse

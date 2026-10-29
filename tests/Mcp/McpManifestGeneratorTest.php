@@ -147,10 +147,10 @@ final class McpManifestGeneratorTest extends TestCase
 
     public function testARequirementTypedWithAProjectWideAliasIsTheJsonTypeItStandsFor(): void
     {
-        // `Code` is a string, so the argument is one, holding to its requirement; `Id` a number. A
-        // TypeScript alias is no JSON Schema type.
+        // `Code` is a string, so the argument is one, holding to its requirement; `Id` is `Num`, a
+        // number. A TypeScript alias is no JSON Schema type.
         $dir = __DIR__ . '/../Fixture/TwiceRoutedApp';
-        $config = TypeBridgeConfig::fromArray(['requirementTypes' => ['^\\d+$' => 'Id', '[a-z]+' => 'Code'], 'typeAliases' => ['Id' => 'number', 'Code' => 'string']]);
+        $config = TypeBridgeConfig::fromArray(['requirementTypes' => ['^\\d+$' => 'Id', '[a-z]+' => 'Code'], 'typeAliases' => ['Id' => 'Num', 'Num' => 'number', 'Code' => 'string']]);
         $tools = array_column((new McpManifestGenerator())->generate($dir, $config)['tools'], null, 'name');
 
         self::assertSame(['type' => 'number'], $tools['ShowAnchored']['inputSchema']['properties']['id'] ?? null);

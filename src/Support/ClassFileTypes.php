@@ -39,8 +39,11 @@ final class ClassFileTypes
     /** @var array<string, array<string, list<string>>> by source directory */
     private array $shortNameMaps = [];
 
-    /** @var array<string, true> by source directory and class: the imports being followed */
+    /** @var array<string, true> by source directory and class: the imports being followed, in the order they began */
     private array $following = [];
+
+    /** @var array<string, true> by source directory and class: those read against one only partly followed */
+    private array $cutShort = [];
 
     public function __construct(
         private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
@@ -174,8 +177,13 @@ final class ClassFileTypes
             $this->shortNameMaps[$srcDir] ??= $this->classLocator->shortNameMap(array_keys($classFiles)),
             $this->domainGuesser,
         );
-        // Read while it is followed: an import that leads back here is left where it points.
+        // Read while it is followed: an import that leads back here is left where it points. What
+        // was read since it began is read against that, so none of it is kept: read again, once
+        // this is done, it follows this class's imports through.
         if (isset($this->following[$key])) {
+            $since = \array_slice(array_keys($this->following), array_search($key, array_keys($this->following), true) + 1);
+            $this->cutShort += array_fill_keys($since, true);
+
             return ['imports' => $read['imports'], 'unresolved' => $read['unresolved'], 'phpStanOnly' => []];
         }
         $this->following[$key] = true;
@@ -203,8 +211,40 @@ final class ClassFileTypes
         }
 
         unset($this->following[$key]);
+        $result = ['imports' => $imports, 'unresolved' => $unresolved, 'phpStanOnly' => $phpStanOnly];
+        if (isset($this->cutShort[$key])) {
+            unset($this->cutShort[$key]);
 
-        return $this->imports[$key] = ['imports' => $imports, 'unresolved' => $unresolved, 'phpStanOnly' => $phpStanOnly];
+            return $result;
+        }
+
+        return $this->imports[$key] = $result;
+    }
+
+    /**
+     * The names a class's types are read with, the same for every collector: what it imports that
+     * is emitted, and the aliases it declares that are. An import of an alias kept for PHPStan, and
+     * an alias the class keeps for PHPStan itself, are set aside with why a type using it can't be
+     * emitted, beside the imports that can't be followed.
+     *
+     * @param array<string, string> $classFiles
+     *
+     * @return array{imports: array<string, ImportedType>, definitions: array<string, string>, unresolved: array<string, string>}
+     */
+    public function scope(string $class, string $file, string $srcDir, array $classFiles): array
+    {
+        $read = $this->imports($class, $file, $srcDir, $classFiles);
+        $definitions = $this->definitions($file);
+        $unresolved = [...$read['unresolved'], ...$read['phpStanOnly']];
+        $only = $this->phpStanOnly($class);
+        foreach (array_keys($definitions) as $alias) {
+            if (null !== $only && $only->covers($alias)) {
+                $unresolved[$alias] = self::phpStanOnlyReason($alias, $class);
+                unset($definitions[$alias]);
+            }
+        }
+
+        return ['imports' => array_diff_key($read['imports'], $read['phpStanOnly']), 'definitions' => $definitions, 'unresolved' => $unresolved];
     }
 
     /**

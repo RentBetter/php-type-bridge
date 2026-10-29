@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Resolver;
 
+use PTGS\TypeBridge\Support\ClassNames;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionEnum;
@@ -114,12 +115,6 @@ final class EnumResolver
 
     public function getShortName(string $className): string
     {
-        $fqcn = $this->resolveFqcn($className);
-        $position = strrpos($fqcn, '\\');
-        if (false === $position) {
-            return $fqcn;
-        }
-
-        return substr($fqcn, $position + 1);
+        return ClassNames::short($this->resolveFqcn($className));
     }
 }

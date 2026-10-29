@@ -146,11 +146,14 @@ final class TypeScriptTypes
     {
         $depth = 0;
         $quote = null;
+        $escaped = false;
         $previous = '';
         foreach (str_split($type) as $index => $character) {
             if (null !== $quote) {
                 yield $index => [$character, $depth + 1];
-                $quote = $character === $quote && '\\' !== $previous ? null : $quote;
+                // A backslash escapes the character after it, another backslash included.
+                $quote = $character === $quote && !$escaped ? null : $quote;
+                $escaped = '\\' === $character && !$escaped;
             } elseif (str_contains('\'"`', $character)) {
                 $quote = $character;
                 yield $index => [$character, $depth + 1];

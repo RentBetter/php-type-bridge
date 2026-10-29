@@ -539,7 +539,7 @@ final class PhpDocTypeHelper
             if (isset($classImports[$first[0]])) {
                 $candidates[] = $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
             }
-            if (null !== $ownerClass && null !== $namespace = $this->namespace($ownerClass)) {
+            if (null !== $ownerClass && null !== $namespace = ClassNames::namespaceOf($ownerClass)) {
                 $candidates[] = $namespace . '\\' . $name;
             }
             $candidates[] = $name;
@@ -618,7 +618,7 @@ final class PhpDocTypeHelper
             return $trimmed;
         }
 
-        $namespace = $this->namespace($ownerClass);
+        $namespace = ClassNames::namespaceOf($ownerClass);
         if (null !== $namespace) {
             $candidate = $namespace . '\\' . $trimmed;
             if (isset($classFiles[$candidate])) {
@@ -646,26 +646,6 @@ final class PhpDocTypeHelper
         ));
     }
 
-    private function namespace(string $className): ?string
-    {
-        $position = strrpos($className, '\\');
-        if (false === $position) {
-            return null;
-        }
-
-        return substr($className, 0, $position);
-    }
-
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-        if (false === $position) {
-            return $className;
-        }
-
-        return substr($className, $position + 1);
-    }
-
     /**
      * The name a type alias is collected under — the one an import of it, an endpoint's input
      * reference and its own declaration all key it by: a named alias is its own name; a class's `_self`
@@ -679,7 +659,7 @@ final class PhpDocTypeHelper
             return $alias;
         }
 
-        $shortName = $this->shortName($ownerClass);
+        $shortName = ClassNames::short($ownerClass);
 
         return enum_exists($ownerClass) ? ValueOfName::shapeName($ownerClass, $shortName, $shortName . 'Data') : $shortName;
     }

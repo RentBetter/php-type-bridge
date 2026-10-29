@@ -17,6 +17,7 @@ use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
+use PTGS\TypeBridge\Model\FailedBlank;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
@@ -1360,6 +1361,32 @@ final class McpManifestBuilderTest extends TestCase
 
         $tool = $this->toolWithBody('POST', [$code], $this->shape('array{code?: string}'));
         self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['code']);
+    }
+
+    public function testAPathParamIsTheJsonTypeItsTypeIs(): void
+    {
+        // A number, a boolean, or what a path segment is: a string, whatever narrower type it has.
+        $properties = $this->pathTool([
+            new CollectedPathParam('id', 'number'),
+            new CollectedPathParam('flag', 'boolean'),
+            new CollectedPathParam('kind', "'a' | 'b'"),
+            new CollectedPathParam('ref', 'Ref', standsFor: 'number'),
+        ]);
+
+        self::assertSame(['type' => 'number'], $properties['id']);
+        self::assertSame(['type' => 'boolean'], $properties['flag']);
+        self::assertSame(['type' => 'string'], $properties['kind']);
+        self::assertSame(['type' => 'number'], $properties['ref']);
+    }
+
+    public function testAnEntrysBlankItsTransformerFailsIsRefusedToo(): void
+    {
+        $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $serials = new CollectedFormField(name: 'serials', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryBlankValue: new FailedBlank());
+
+        $body = $this->toolWithBody('PUT', [$serials], $this->shape('array{serials?: list<string|null>}'))['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $body['serials']['items']);
     }
 
     public function testABlankItsTransformerFailsIsRefused(): void

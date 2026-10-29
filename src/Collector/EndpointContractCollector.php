@@ -25,6 +25,7 @@ use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Routing\ControllerAttributeClassLoader;
 use PTGS\TypeBridge\Routing\DeclaredRoutes;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
@@ -35,9 +36,11 @@ use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use PTGS\TypeBridge\Support\TypeScriptTypes;
+use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
+use Symfony\Component\Routing\Attribute\Route as RouteAttribute;
 use Symfony\Component\Routing\Route;
 use Throwable;
 
@@ -57,6 +60,11 @@ final class EndpointContractCollector
     /** @var array<string, ParsedType|null> each type written, parsed once however many inputs name it */
     private array $parsedTypes = [];
 
+    /** @var array<string, ShapeType|null> by source directory and class: a whole-value field's contract, read once however many forms embed it */
+    private array $contracts = [];
+
+    /** @var array<string, bool> by name: whether a project-wide alias admits null, read once however many keys it types */
+    private array $configAliasesAdmittingNull = [];
 
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
@@ -165,7 +173,7 @@ final class EndpointContractCollector
                     }
                     $seenNames[$endpointName] = $claimant;
                     $route = $this->routeOf($className, $method->getName());
-                    $httpMethod = $route?->getMethods()[0] ?? 'GET';
+                    $httpMethod = self::httpMethodOf($method, $route);
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
                         name: $endpointName,
@@ -417,6 +425,25 @@ final class EndpointContractCollector
     }
 
     /**
+     * The HTTP method an endpoint is called with: of those its route serves, the first its own
+     * #[Route] names — Symfony merges a class-level #[Route]'s methods in ahead of the method's, and
+     * an import's replace both — else the route's first; GET where it names none.
+     */
+    private static function httpMethodOf(ReflectionMethod $method, ?Route $route): string
+    {
+        $served = array_values($route?->getMethods() ?? []);
+        $declaredBy = $route?->getOption(ControllerAttributeClassLoader::ATTRIBUTE);
+        $attribute = \is_int($declaredBy) ? $method->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF)[$declaredBy] ?? null : null;
+        foreach (null === $attribute ? [] : $attribute->newInstance()->methods as $own) {
+            if (\in_array(strtoupper($own), $served, true)) {
+                return strtoupper($own);
+            }
+        }
+
+        return $served[0] ?? 'GET';
+    }
+
+    /**
      * The path an MCP tool is published with. With a route resolver configured it is the served
      * path, and both ways the router can fail to supply one are errors rather than fallbacks: a
      * routing file that will not load, or a method the loaded collection does not route. Either
@@ -497,7 +524,7 @@ final class EndpointContractCollector
         foreach ($matches[1] as $name) {
             $requirement = $route->getRequirement($name);
             $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
-            $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8);
+            $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8, $this->configAliasStandsFor($tsType));
         }
 
         return $params;
@@ -568,6 +595,19 @@ final class EndpointContractCollector
      */
     private function contractOf(string $class, string $srcDir, array $classFiles): ?ShapeType
     {
+        $key = $srcDir . "\0" . $class;
+        if (\array_key_exists($key, $this->contracts)) {
+            return $this->contracts[$key];
+        }
+
+        return $this->contracts[$key] = $this->readContractOf($class, $srcDir, $classFiles);
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     */
+    private function readContractOf(string $class, string $srcDir, array $classFiles): ?ShapeType
+    {
         $file = $classFiles[$class] ?? null;
         $self = null === $file || !$this->files->readable($file) ? null : $this->files->definitions($file)['_self'] ?? null;
         if (null === $self) {
@@ -594,11 +634,11 @@ final class EndpointContractCollector
     {
         $self = $this->parseType($definition);
         if ($self instanceof NameRefType && null === $self->class) {
-            return [self::shapeOf($this->readAliases($self, $class, $file, $srcDir, $classFiles, [])), null];
+            return [ShapeType::declaredBy($this->readAliases($self, $class, $file, $srcDir, $classFiles, [])), null];
         }
 
         return [
-            $this->withAliasesRead(self::shapeOf($self), $class, $file, $srcDir, $classFiles),
+            $this->withAliasesRead(ShapeType::declaredBy($self), $class, $file, $srcDir, $classFiles),
             $self instanceof IntersectionType ? $this->inheritedShape($self, $class, $file, $srcDir, $classFiles) : null,
         ];
     }
@@ -664,7 +704,7 @@ final class EndpointContractCollector
     {
         $base = $depth > 8 ? null : $this->aliasDefinition($self->base->name, $class, $file, $srcDir, $classFiles);
         $parsed = null === $base ? null : $this->parseType($base['definition']);
-        $own = null === $base ? null : $this->withAliasesRead(self::shapeOf($parsed), $base['class'], $base['file'], $srcDir, $classFiles);
+        $own = null === $base ? null : $this->withAliasesRead(ShapeType::declaredBy($parsed), $base['class'], $base['file'], $srcDir, $classFiles);
         if (null === $base || null === $own) {
             return null;
         }
@@ -774,6 +814,17 @@ final class EndpointContractCollector
     }
 
     /**
+     * The TypeScript a project-wide alias stands for, through any alias it names in turn; null where
+     * the type is no such alias.
+     */
+    private function configAliasStandsFor(string $type, int $depth = 0): ?string
+    {
+        $standsFor = $depth > 8 ? null : $this->typeAliases[trim($type)] ?? null;
+
+        return null === $standsFor ? null : $this->configAliasStandsFor($standsFor, $depth + 1) ?? $standsFor;
+    }
+
+    /**
      * Whether a project-wide alias admits null, as its TypeScript says ({@see TypeScriptTypes::admitsNull()}).
      * A key typed with it is one a client may leave out of a query, or clear, where it does, and the
      * Endpoint's AsQuery<T> reads that off the TypeScript as tsc evaluates it: where its text can't
@@ -783,7 +834,7 @@ final class EndpointContractCollector
     {
         $type = $this->typeAliases[$name];
 
-        return TypeScriptTypes::admitsNull($type, $this->typeAliases) ?? throw new RuntimeException(\sprintf(
+        return $this->configAliasesAdmittingNull[$name] ??= TypeScriptTypes::admitsNull($type, $this->typeAliases) ?? throw new RuntimeException(\sprintf(
             'Whether the project-wide alias "%s" (`%s`) admits null can\'t be read from its TypeScript, and a key of a request is typed with it: whether that key may be left out, or cleared, turns on it. Write the null out — `%2$s | null` where it admits one, `NonNullable<%2$s>` where it doesn\'t.',
             $name,
             $type,
@@ -823,15 +874,6 @@ final class EndpointContractCollector
         }
 
         return $base instanceof ShapeType ? ShapeType::intersected($base, $extra) : new IntersectionType($written->base, $extra);
-    }
-
-    private static function shapeOf(?ParsedType $parsed): ?ShapeType
-    {
-        return match (true) {
-            $parsed instanceof ShapeType => $parsed,
-            $parsed instanceof IntersectionType => $parsed->extra,
-            default => null,
-        };
     }
 
     private function parseType(string $type): ?ParsedType

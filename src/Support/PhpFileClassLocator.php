@@ -57,8 +57,7 @@ final class PhpFileClassLocator
     {
         $map = [];
         foreach ($classNames as $className) {
-            $position = strrpos($className, '\\');
-            $map[false === $position ? $className : substr($className, $position + 1)][] = $className;
+            $map[ClassNames::short($className)][] = $className;
         }
 
         return $map;

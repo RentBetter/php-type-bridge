@@ -202,17 +202,10 @@ final class ResponseClassCollector
             return null;
         }
 
-        $read = $this->files->imports($className, $file, $srcDir, $classFiles);
-        $imports = array_diff_key($read['imports'], $read['phpStanOnly']);
-        $unresolved = [...$read['unresolved'], ...$read['phpStanOnly']];
+        $scope = $this->files->scope($className, $file, $srcDir, $classFiles);
+        $imports = $scope['imports'];
         $domain = $this->domainGuesser->guess($srcDir, $file);
-        $phpStanOnly = $this->files->phpStanOnly($className);
-        foreach (array_keys($this->files->definitions($file)) as $alias) {
-            if (null !== $phpStanOnly && $phpStanOnly->covers($alias)) {
-                $unresolved[$alias] = ClassFileTypes::phpStanOnlyReason($alias, $className);
-
-                continue;
-            }
+        foreach (array_keys($scope['definitions']) as $alias) {
             $imports[$alias] = new ImportedType(
                 localAlias: $alias,
                 targetClass: $className,
@@ -224,7 +217,7 @@ final class ResponseClassCollector
 
         return [
             'imports' => $imports,
-            'unresolved' => $unresolved,
+            'unresolved' => $scope['unresolved'],
             'classImports' => $this->files->classImports($file),
             'domain' => $domain,
         ];

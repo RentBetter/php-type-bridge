@@ -9,9 +9,7 @@ use PhpParser\Node\Stmt\Class_;
 use PHPStan\Analyser\Scope;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
-use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\NullableType;
-use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
@@ -78,12 +76,12 @@ final class PreserveNullConsistencyRule implements Rule
                 continue;
             }
 
-            $shape = $this->extractShape($parsed);
+            $shape = ShapeType::declaredBy($parsed);
             if (null === $shape) {
                 continue;
             }
 
-            $shapeName = $this->shapeName($alias, $ownerClass);
+            $shapeName = $this->docHelper->emittedTypeName($alias, $ownerClass);
             foreach ($shape->fields as $field) {
                 $error = $this->checkField($field, $shapeName, $ownerClass, $startLine);
                 if (null !== $error) {
@@ -93,30 +91,6 @@ final class PreserveNullConsistencyRule implements Rule
         }
 
         return $errors;
-    }
-
-    private function extractShape(ParsedType $parsed): ?ShapeType
-    {
-        if ($parsed instanceof ShapeType) {
-            return $parsed;
-        }
-
-        if ($parsed instanceof IntersectionType) {
-            return $parsed->extra;
-        }
-
-        return null;
-    }
-
-    private function shapeName(string $alias, string $ownerClass): string
-    {
-        if ('_self' !== $alias) {
-            return $alias;
-        }
-
-        $position = strrpos($ownerClass, '\\');
-
-        return false === $position ? $ownerClass : substr($ownerClass, $position + 1);
     }
 
     private function checkField(ShapeField $field, string $shapeName, string $ownerClass, int $line): ?\PHPStan\Rules\IdentifierRuleError

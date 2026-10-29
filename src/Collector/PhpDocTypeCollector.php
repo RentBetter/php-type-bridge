@@ -42,32 +42,26 @@ final class PhpDocTypeCollector
                 continue;
             }
 
-            $definitions = $this->files->definitions($file);
-            // An alias for PHPStan alone is not emitted, and an emitted one typed with it fails.
-            $phpStanOnly = [];
-            $only = $this->files->phpStanOnly($className);
-            if (null !== $only) {
-                foreach (array_keys($definitions) as $alias) {
-                    if ($only->covers($alias)) {
-                        $phpStanOnly[$alias] = ClassFileTypes::phpStanOnlyReason($alias, $className);
-                    }
-                }
-                $definitions = array_diff_key($definitions, $phpStanOnly);
-            }
             // A class may declare what it serialises to by importing a type as its `_self`
             // rather than writing the shape itself; it then has nothing of its own to emit.
-            $importsSelf = !isset($definitions['_self']) && $this->files->importsSelf($file);
-            if ([] === $definitions && !$importsSelf) {
+            $importsSelf = !isset($this->files->definitions($file)['_self']) && $this->files->importsSelf($file);
+            if ([] === $this->files->definitions($file) && !$importsSelf) {
                 continue;
             }
 
-            // An import that can't be emitted fails only an alias that uses it: a file may import
+            // An alias for PHPStan alone is not emitted, and an emitted one typed with it fails. An
+            // import that can't be emitted fails only an alias that uses it: a file may import
             // anything for its own code. One of an alias kept for PHPStan is no symbol of any
             // module, so it is none of what the file emits; a `_self` imported from one is still
             // recorded as the class's, and fails where something names the class.
+            $scope = $this->files->scope($className, $file, $srcDir, $classFiles);
+            $definitions = $scope['definitions'];
+            if ([] === $definitions && !$importsSelf) {
+                continue;
+            }
             $read = $this->files->imports($className, $file, $srcDir, $classFiles);
-            $imports = array_diff_key($read['imports'], $read['phpStanOnly']);
-            $unresolved = [...$read['unresolved'], ...$read['phpStanOnly'], ...$phpStanOnly];
+            $imports = $scope['imports'];
+            $unresolved = $scope['unresolved'];
 
             $classImports = $this->files->classImports($file);
             $localAliases = array_keys($definitions);

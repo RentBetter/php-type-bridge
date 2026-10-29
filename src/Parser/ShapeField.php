@@ -27,14 +27,16 @@ final readonly class ShapeField
     /**
      * Whether a type admits null as a value sent: `T|null`, a union with a null among several
      * members (`'open'|'closed'|null`, which parses as a union, not a nullable), or `mixed`, which
-     * admits anything — its TypeScript `unknown` too. `?T` does not: it is a key left out when null,
-     * and a project's preserveNull rule holds every nullable key to `?T` but the ones whose null
-     * means something.
+     * admits anything — its TypeScript `unknown` too. `?T` does only where T does: it is a key left
+     * out when null, and a project's preserveNull rule holds every nullable key to `?T` but the ones
+     * whose null means something.
      */
     public static function admitsNull(ParsedType $type): bool
     {
+        // `?T` is a key left out when null, `key?: T` in the TypeScript: it may be sent null only where
+        // T may — an alias of `string|null` read through, say.
         if ($type instanceof NullableType) {
-            return !$type->optional;
+            return !$type->optional || self::admitsNull($type->inner);
         }
         if ($type instanceof ScalarType) {
             return 'mixed' === $type->base();
