@@ -117,6 +117,26 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString("export interface NotePairResponse {\n  key: string;\n  value: boolean;\n}", $notes);
     }
 
+    public function test_a_generic_bases_binding_is_read_in_the_module_of_the_file_that_writes_it(): void
+    {
+        // The binding names the Notes class Note, and NoteSummary, an alias of the Notes module: the
+        // Common module's own `Note` is no part of it.
+        $notes = self::emit(self::fixtures('GenericBaseFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ListModelNotesResponse {\n  items: Note[];\n  first: Note | null;\n", $notes);
+        self::assertStringContainsString("export interface ListSummariesResponse {\n  items: NoteSummary[];\n  first: NoteSummary | null;\n", $notes);
+        self::assertStringNotContainsString('CommonNote', $notes);
+    }
+
+    public function test_a_template_param_is_read_as_phpstan_ranks_its_spellings(): void
+    {
+        // `@phpstan-template R of int` over `@template R`; `@psalm-template P of string`, read too;
+        // `@template D = bool`, its default where nothing binds it.
+        $notes = self::emit(self::fixtures('GenericBaseFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface RankedNotesResponse {\n  ranks: number[];\n  tags: string[];\n  flag: boolean;\n}", $notes);
+    }
+
     public function test_an_alias_the_base_class_declares_itself_is_imported_where_the_child_is_emitted(): void
     {
         $output = self::emit(self::fixtures('InheritedLocalAliasFixtures'));
@@ -348,6 +368,16 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString('import type { IRestoreNoteResponse as CommonIRestoreNoteResponse }', $notes);
         self::assertStringContainsString('  code: CommonIRestoreNoteResponse;', $notes);
         self::assertSame(1, substr_count($notes, 'export type IRestoreNoteResponse ='));
+    }
+
+    public function test_two_enums_of_one_name_collide_in_a_module_of_enums_alone(): void
+    {
+        // Common holds only the two enums, named from Notes: it is written all the same, and two
+        // declarations of `NoteState` in it are a collision, said so.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('"NoteState" is emitted by both');
+
+        self::emit(self::fixtures('EnumOnlyModuleFixtures'));
     }
 
     public function test_a_php_stan_only_alias_is_neither_emitted_nor_imported(): void

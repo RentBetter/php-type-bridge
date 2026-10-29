@@ -18,6 +18,7 @@ use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\AccountNoteController;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\ArchiveNoteController;
+use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\EnvNoteController;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\LabelController;
 
 /**
@@ -70,6 +71,20 @@ final class ClassLevelRouteTest extends TestCase
         self::assertSame('DELETE', $tool['method'] ?? null);
         self::assertTrue($tool['destructive'] ?? null);
         self::assertSame($prefix . '/listed-notes/{id}', $tool['path'] ?? null);
+    }
+
+    #[DataProvider('configs')]
+    public function testARouteConfinedToAnEnvIsTheRouteItIsThere(TypeBridgeConfig $config, string $prefix): void
+    {
+        // Loaded with no env, Symfony leaves it out; it is the route all the same, where it is served.
+        $tools = $this->tools($config);
+
+        self::assertSame('DELETE', $tools['DeleteEnvNote']['method'] ?? null);
+        self::assertTrue($tools['DeleteEnvNote']['destructive'] ?? null);
+        self::assertSame($prefix . '/env-notes/{id}', $tools['DeleteEnvNote']['path'] ?? null);
+        self::assertSame(['id'], $tools['DeleteEnvNote']['inputSchema']['required'] ?? null);
+        self::assertSame('PUT', $tools['ProdLabel']['method'] ?? null);
+        self::assertSame($prefix . '/prod-labels/{labelId}', $tools['ProdLabel']['path'] ?? null);
     }
 
     #[DataProvider('configs')]
@@ -128,6 +143,9 @@ final class ClassLevelRouteTest extends TestCase
             self::assertSame($prefix . '/notes/{id}/archive', $archive?->path);
 
             self::assertSame($prefix . '/accounts/{accountId}/notes/{id}.{_format}', $inspector->inspect(AccountNoteController::class, 'exportNoteAction')?->path);
+
+            self::assertSame(['DELETE'], $inspector->inspect(EnvNoteController::class, 'deleteEnvNoteAction')?->httpMethods);
+            self::assertSame($prefix . '/env-notes/{id}', $inspector->inspect(EnvNoteController::class, 'deleteEnvNoteAction')?->path);
 
             $replace = $inspector->inspect(LabelController::class, 'replaceLabelAction');
             self::assertSame(['PUT'], $replace?->httpMethods);
