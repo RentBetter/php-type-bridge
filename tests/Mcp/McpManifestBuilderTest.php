@@ -1354,14 +1354,17 @@ final class McpManifestBuilderTest extends TestCase
 
     public function testARefusedBlankIsRefusedThoughTheRuleMatchesIt(): void
     {
-        // NotBlank refuses '', which `^[A-Z]*$` matches: the pattern refuses it as the server does.
+        // NotBlank refuses '', which `^[A-Z]*$` matches: the schema refuses it as the server does —
+        // with a minimum length, not a lookahead, which RE2 and the interoperable subset don't read.
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
         $code = new CollectedFormField(name: 'code', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^[A-Z]*$/D')]);
         $raw = new CollectedFormField(name: 'raw', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^[A-Z]*$/')], trim: false);
+        $long = new CollectedFormField(name: 'long', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Length(min: 3), new Regex('/^[A-Z]*$/D')]);
 
-        $properties = $this->toolWithBody('POST', [$code, $raw], $this->shape('array{code?: string, raw?: string}'))['inputSchema']['properties'];
-        self::assertSame(['type' => 'string', 'pattern' => '^(?!$)(?:[A-Z]*)$'], $properties['code']);
-        self::assertSame(['type' => 'string', 'pattern' => '^(?!$)(?:[A-Z]*)\\n?$'], $properties['raw']);
+        $properties = $this->toolWithBody('POST', [$code, $raw, $long], $this->shape('array{code?: string, raw?: string, long?: string}'))['inputSchema']['properties'];
+        self::assertSame(['type' => 'string', 'minLength' => 1, 'pattern' => '^(?:[A-Z]*)$'], $properties['code']);
+        self::assertSame(['type' => 'string', 'minLength' => 1, 'pattern' => '^(?:[A-Z]*)\\n?$'], $properties['raw']);
+        self::assertSame(['type' => 'string', 'minLength' => 3, 'pattern' => '^(?:[A-Z]*)$'], $properties['long'], 'A longer minimum holds');
     }
 
     public function testABlankTheServerTakesIsTakenThoughALengthBoundsTheRest(): void
@@ -1390,6 +1393,16 @@ final class McpManifestBuilderTest extends TestCase
         $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
         self::assertSame(['enum' => ['open', 'closed', null]], $properties['status']);
         self::assertSame(['anyOf' => [['type' => 'string'], ['type' => 'integer'], ['type' => 'null']]], $properties['ref']);
+    }
+
+    public function testAKeyValuedAnOptionalAliasOfANullableScalarIsThatScalar(): void
+    {
+        // `pinned: ?MaybeFlag`, `MaybeFlag` an alias of `bool|null`, read through: a boolean, taking
+        // null, whatever the form type's name guesses.
+        $pinned = new CollectedFormField(name: 'pinned', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null);
+        $contract = new ShapeType([new ShapeField('pinned', new NullableType(new NullableType(new ScalarType('bool'), optional: false), optional: true), optional: false)]);
+
+        self::assertSame(['type' => ['boolean', 'null']], $this->toolWithBody('PUT', [$pinned], $contract)['inputSchema']['properties']['pinned']);
     }
 
     public function testAnEscapedBackslashIsNoControlEscape(): void

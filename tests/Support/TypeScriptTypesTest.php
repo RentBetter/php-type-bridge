@@ -44,6 +44,7 @@ final class TypeScriptTypesTest extends TestCase
         yield 'a key of a type' => ['keyof Window', false];
         yield 'an intersection with a brand' => ["string & { readonly __brand: 'Id' }", false];
         yield 'an intersection of two that do' => ['unknown & (null | string)', true];
+        yield 'any intersected, which is any' => ['any & string', true];
         yield 'undefined' => ['undefined | void | never', false];
         yield 'a built-in that never does' => ['Record<string, null> | Date | Promise<null> | NonNullable<string | null>', false];
         // What a generic, a conditional, an indexed access or a typeof makes is tsc's to work out.

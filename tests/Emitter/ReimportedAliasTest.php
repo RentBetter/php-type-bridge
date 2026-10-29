@@ -75,6 +75,16 @@ final class ReimportedAliasTest extends TestCase
         self::assertStringContainsString("export interface Uses {\n  foo: Foo;\n  bar: Bar;\n}", $notes);
     }
 
+    public function testAClassTheAutoloaderCantFindStillEmitsItsTypes(): void
+    {
+        // Its namespace doesn't match its path: nothing throws loading it, it just isn't found, and
+        // its types are read from its file as they always were. Only one whose declaration throws is
+        // no part of the application.
+        $notes = $this->emit(__DIR__ . '/../Fixture/MisplacedShapesFixtures')['Notes'] ?? '';
+
+        self::assertStringContainsString("export interface NoteFilter {\n  status: string;\n}", $notes);
+    }
+
     public function testAnImportThroughAClassBeingFollowedIsTheSameWhicheverIsReadFirst(): void
     {
         // A's `X` is B's, which B imports back from A as `V`: A's own import of `V`, from D, which has
