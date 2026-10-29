@@ -7,6 +7,10 @@
     failOnRisky="true"
     failOnWarning="true"
 >
+    <php>
+        <!-- The PHPStan rule tests boot PHPStan's container, which outgrows PHP's default 128M. -->
+        <ini name="memory_limit" value="1G"/>
+    </php>
     <testsuites>
         <testsuite name="TypeBridge">
             <directory>tests</directory>

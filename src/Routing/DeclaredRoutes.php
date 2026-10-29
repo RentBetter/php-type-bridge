@@ -50,14 +50,16 @@ final class DeclaredRoutes
      */
     public function routeFor(string $className, string $methodName): ?Route
     {
-        foreach (array_unique([$this->env, ...self::envsOf($className, $methodName)]) as $env) {
-            $route = $this->routeIn($className, $methodName, $env);
+        $route = $this->routeIn($className, $methodName, $this->env);
+        // Its #[Route]s' envs are read only for a method not served in this one.
+        foreach (null === $route ? self::envsOf($className, $methodName) : [] as $env) {
+            $route = $env === $this->env ? null : $this->routeIn($className, $methodName, $env);
             if (null !== $route) {
                 return $route;
             }
         }
 
-        return null;
+        return $route;
     }
 
     /**
