@@ -762,7 +762,8 @@ final class McpManifestBuilder
         $matches = static fn (string $value): bool => 1 === preg_match($pattern, $value);
 
         $from = $matches('0') ? 0 : 1;
-        $unbounded = array_all(['1', '2', '9', '10', '99', '100', '1000', '123456789012'], $matches);
+        // A ceiling of digits past any a real id has shows at the last of these.
+        $unbounded = array_all(['1', '2', '9', '10', '99', '100', '1000', '123456789012', str_repeat('9', 64)], $matches);
         if ($unbounded) {
             $type = $matches('1.5') ? 'number' : 'integer';
 

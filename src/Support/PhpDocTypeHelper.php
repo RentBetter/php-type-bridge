@@ -350,13 +350,16 @@ final class PhpDocTypeHelper
      *
      * And the types it binds a trait's template params to where a class or trait in it uses the
      * trait — `@use Trait<…>` on the `use` statement (or the class), ranked as PHPStan ranks them:
-     * `@phpstan-use`, `@template-use`, `@use` — by the trait's short name, as it is written.
+     * `@phpstan-use`, `@template-use`, `@use` — by the trait the name means, as PHP resolves it
+     * there: through the file's `use` statements, else in its namespace.
      *
      * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}
      */
     public function readFile(string $content): array
     {
         $tokens = \PhpToken::tokenize($content);
+        $classImports = $this->classImportsIn($tokens);
+        $namespace = self::namespaceIn($tokens);
         $definitions = [];
         $importTags = [];
         $uses = [];
@@ -373,7 +376,7 @@ final class PhpDocTypeHelper
             }
             foreach (['@phpstan-use', '@template-use', '@use'] as $rank => $tagName) {
                 foreach ($node->getUsesTagValues($tagName) as $use) {
-                    $uses[ClassNames::short(ltrim($use->type->type->name, '\\'))][$rank] ??= array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $use->type->genericTypes));
+                    $uses[self::traitNamed($use->type->type->name, $classImports, $namespace)][$rank] ??= array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $use->type->genericTypes));
                 }
             }
         }
@@ -387,10 +390,50 @@ final class PhpDocTypeHelper
 
         return [
             'definitions' => $definitions,
-            'classImports' => $this->classImportsIn($tokens),
+            'classImports' => $classImports,
             'importTags' => $importTags,
             'uses' => $bound,
         ];
+    }
+
+    /**
+     * The class a trait's name written in a file means: fully qualified, through the file's `use`
+     * statements, or in its namespace.
+     *
+     * @param array<string, string> $classImports
+     */
+    private static function traitNamed(string $written, array $classImports, string $namespace): string
+    {
+        if (str_starts_with($written, '\\')) {
+            return ltrim($written, '\\');
+        }
+        $first = explode('\\', $written, 2);
+        if (isset($classImports[$first[0]])) {
+            return $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
+        }
+
+        return '' === $namespace ? $written : $namespace . '\\' . $written;
+    }
+
+    /**
+     * The namespace a file declares, '' for none.
+     *
+     * @param array<\PhpToken> $tokens
+     */
+    private static function namespaceIn(array $tokens): string
+    {
+        $count = \count($tokens);
+        for ($i = 0; $i < $count; ++$i) {
+            if (!$tokens[$i]->is(\T_NAMESPACE)) {
+                continue;
+            }
+            for (++$i; $i < $count && $tokens[$i]->is(\T_WHITESPACE); ++$i) {
+            }
+
+            return $i < $count && $tokens[$i]->is([\T_NAME_QUALIFIED, \T_STRING]) ? $tokens[$i]->text : '';
+        }
+
+        return '';
     }
 
     /**

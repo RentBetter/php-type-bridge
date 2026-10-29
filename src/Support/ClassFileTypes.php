@@ -154,9 +154,9 @@ final class ClassFileTypes
      *
      * @return list<string>
      */
-    public function usesArgs(string $file, string $traitShortName): array
+    public function usesArgs(string $file, string $trait): array
     {
-        return ('' === $file ? false : $this->read($file))['uses'][$traitShortName] ?? [];
+        return ('' === $file ? false : $this->read($file))['uses'][$trait] ?? [];
     }
 
     /**

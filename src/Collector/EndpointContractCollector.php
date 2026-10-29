@@ -78,6 +78,12 @@ final class EndpointContractCollector
     /** How many more the contract being read may read through ({@see self::mayRead()}). */
     private int $readsLeft = self::READS;
 
+    /** @var array<string, ParsedType> by where it is declared and how it is asked: an alias or a `_self` read in full */
+    private array $readThrough = [];
+
+    /** How many reads were cut short by a name being read already, or past the bound: a read none of was is kept */
+    private int $cutShort = 0;
+
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
      *        merged over {@see RequirementType::defaults()}
@@ -654,12 +660,13 @@ final class EndpointContractCollector
     private function readContractOf(string $class, string $srcDir, array $classFiles, bool $inQuery): ?ShapeType
     {
         $file = $classFiles[$class] ?? null;
-        $self = null === $file || !$this->files->readable($file) ? null : $this->files->definitions($file)['_self'] ?? null;
+        // Its own `_self`, or one it imports, read where it is declared.
+        $self = null === $file || !$this->files->readable($file) ? null : $this->aliasDefinition('_self', $class, $file, $srcDir, $classFiles);
         if (null === $self) {
             return null;
         }
 
-        [$own, $inherited] = $this->selfContract($self, $class, $file, $srcDir, $classFiles, $inQuery, nullAsked: true);
+        [$own, $inherited] = $this->selfContract($self['definition'], $self['class'], $self['file'], $srcDir, $classFiles, $inQuery, nullAsked: true, name: $self['name']);
 
         return ShapeType::withInherited($own, $inherited);
     }
@@ -677,17 +684,18 @@ final class EndpointContractCollector
      *
      * @return array{0: ShapeType|null, 1: ShapeType|null} its own keys, and those it inherits
      */
-    private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): array
+    private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked, string $name = '_self'): array
     {
         $this->readsLeft = self::READS;
+        $reading = [$file . "\0" . $name => true];
         $self = $this->parseType($definition);
         if ($self instanceof NameRefType && null === $self->class) {
-            return [ShapeType::declaredBy($this->readAliases($self, $class, $file, $srcDir, $classFiles, self::reading($file), $inQuery, $nullAsked)), null];
+            return [ShapeType::declaredBy($this->readAliases($self, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked)), null];
         }
 
         return [
-            $this->withAliasesRead(ShapeType::declaredBy($self), $class, $file, $srcDir, $classFiles, $inQuery, $nullAsked),
-            $self instanceof IntersectionType ? $this->inheritedShape($self, $class, $file, $srcDir, $classFiles, $inQuery, $nullAsked) : null,
+            $this->withAliasesRead(ShapeType::declaredBy($self), $class, $file, $srcDir, $classFiles, $inQuery, $nullAsked, $reading),
+            $self instanceof IntersectionType ? $this->inheritedShape($self, $class, $file, $srcDir, $classFiles, $inQuery, $nullAsked, $reading) : null,
         ];
     }
 
@@ -747,10 +755,11 @@ final class EndpointContractCollector
      *
      * @param string                $class the class whose file the intersection is written in
      * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading the aliases being read: the class's own `_self` itself
      */
-    private function inheritedShape(IntersectionType $self, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): ?ShapeType
+    private function inheritedShape(IntersectionType $self, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked, array $reading): ?ShapeType
     {
-        $base = $this->readAliases($self->base, $class, $file, $srcDir, $classFiles, self::reading($file), $inQuery, $nullAsked);
+        $base = $this->readAliases($self->base, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
 
         return $base instanceof ShapeType ? $base : null;
     }
@@ -787,10 +796,11 @@ final class EndpointContractCollector
      *
      * @param string                $class the class whose file the shape is written in
      * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading the aliases being read: the class's own `_self` itself
      */
-    private function withAliasesRead(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked): ?ShapeType
+    private function withAliasesRead(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked, array $reading): ?ShapeType
     {
-        $read = null === $shape ? null : $this->readAliases($shape, $class, $file, $srcDir, $classFiles, self::reading($file), $inQuery, $nullAsked);
+        $read = null === $shape ? null : $this->readAliases($shape, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
 
         return $read instanceof ShapeType ? $read : $shape;
     }
@@ -855,34 +865,15 @@ final class EndpointContractCollector
             return $admitsNull ? new NullableType($alias, optional: false) : $alias;
         }
 
-        // Keyed by the name it is declared under, which an import may give another.
-        $key = $declared['file'] . "\0" . $declared['name'];
-        $parsed = isset($reading[$key]) || !$this->mayRead() ? null : $this->parseType($declared['definition']);
-        if (null === $parsed) {
-            return $alias;
-        }
-
         // An alias of `?T` is emitted `T`: a key typed with it is no key left out when null.
-        $parsed = $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
-
-        return $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true], $inQuery, $nullAsked);
+        return $this->readDeclared($alias, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked, unwrapOptional: true);
     }
 
     /**
-     * The aliases being read where a class's own `_self` is: the class itself, which a key of it
-     * naming it again does not read again.
-     *
-     * @return array<string, true>
-     */
-    private static function reading(string $file): array
-    {
-        return [$file . "\0_self" => true];
-    }
-
-    /**
-     * Whether one more alias or class may be read through for the contract being read: each is read
-     * on every path it is named on, so classes naming one another unroll into every order of them.
-     * Past a bound no real contract nears, a name stays a name.
+     * Whether one more alias or class may be read through for the contract being read. One read in
+     * full is kept ({@see self::readDeclared()}), but one cut short by a name being read already is
+     * read again on each path it is named on, so classes naming one another unroll into every order
+     * of them. Past a bound no real contract nears, a name stays a name.
      */
     private function mayRead(): bool
     {
@@ -904,18 +895,48 @@ final class EndpointContractCollector
             return new ValueOfType($class);
         }
 
+        // Its own `_self`, or one it imports.
         $file = $classFiles[$class] ?? null;
-        if (null === $file) {
-            return $type;
+        $declared = null === $file ? null : $this->aliasDefinition('_self', $class, $file, $srcDir, $classFiles);
+
+        return null === $declared ? $type : $this->readDeclared($type, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked, unwrapOptional: false);
+    }
+
+    /**
+     * An alias or a class's `_self` read where it is declared, keyed by the name it is declared
+     * under — which an import may give another: as written where it names itself at any remove.
+     * What it makes is the same wherever it is read but where a remove names something being read
+     * already, so it is read once and kept, unless it did.
+     *
+     * @param array{definition: string, class: string, file: string, name: string} $declared
+     * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading
+     */
+    private function readDeclared(NameRefType $written, array $declared, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked, bool $unwrapOptional): ParsedType
+    {
+        $key = $declared['file'] . "\0" . $declared['name'];
+        $kept = $key . "\0" . ($inQuery ? 'query' : 'body') . "\0" . ($nullAsked ? 'asked' : 'not');
+        if (isset($this->readThrough[$kept])) {
+            return $this->readThrough[$kept];
         }
-        $self = $this->files->emittedDefinitions($class, $file)['_self'] ?? null;
-        $key = $file . "\0_self";
-        $parsed = null === $self || isset($reading[$key]) || !$this->mayRead() ? null : $this->parseType($self);
+        if (isset($reading[$key]) || !$this->mayRead()) {
+            ++$this->cutShort;
+
+            return $written;
+        }
+        $parsed = $this->parseType($declared['definition']);
         if (null === $parsed) {
-            return $type;
+            return $written;
+        }
+        $parsed = $unwrapOptional && $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
+
+        $cutShort = $this->cutShort;
+        $read = $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true], $inQuery, $nullAsked);
+        if ($cutShort === $this->cutShort) {
+            $this->readThrough[$kept] = $read;
         }
 
-        return $this->readAliases($parsed, $class, $file, $srcDir, $classFiles, [...$reading, $key => true], $inQuery, $nullAsked);
+        return $read;
     }
 
     /**

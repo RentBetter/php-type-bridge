@@ -51,7 +51,9 @@ final readonly class EmitterRegistry
 
         foreach ($candidateClasses as $candidate) {
             // One this install can't load is no part of the application, nor an emitter of it.
-            if (!PhpFileClassLocator::loads($candidate)) {
+            // Only a class can be made an emitter: an interface or a trait carrying the attribute
+            // is passed over.
+            if (!PhpFileClassLocator::loads($candidate) || !class_exists($candidate)) {
                 continue;
             }
 

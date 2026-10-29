@@ -36,7 +36,11 @@ use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\All;
 use Symfony\Component\Validator\Constraints\Choice;
 use Symfony\Component\Validator\Constraints\Valid;
+use Symfony\Component\Validator\Mapping\CascadingStrategy;
+use Symfony\Component\Validator\Mapping\ClassMetadataInterface;
+use Symfony\Component\Validator\Mapping\PropertyMetadataInterface;
 use Symfony\Component\Validator\Validation;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
 use Throwable;
 
 final class FormTypeInspector
@@ -45,6 +49,9 @@ final class FormTypeInspector
 
     /** The types the inspection factory knows, where it built that factory itself; null for one given it. */
     private ?FormRegistryInterface $registry = null;
+
+    /** Reads a class's validation metadata, for whether a property cascades ({@see self::cascades()}). */
+    private ?ValidatorInterface $validatorMetadata = null;
 
     public function __construct(?FormFactoryInterface $formFactory = null)
     {
@@ -123,8 +130,10 @@ final class FormTypeInspector
             $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
             $formConstraints = $this->collectConstraints($config, null);
             $constraints = $validated ? $this->collectConstraints($config, $property) : $formConstraints;
-            // What it holds is validated in turn only where it cascades from a validated object.
-            $cascades = $validated && array_any(HeldConstraints::always($constraints), static fn (Constraint $constraint): bool => $constraint instanceof Valid);
+            // What it holds is validated in turn only where it cascades from a validated object: a
+            // Valid among its constraints, or its class's #[Assert\Cascade].
+            $cascades = $validated && (array_any(HeldConstraints::always($constraints), static fn (Constraint $constraint): bool => $constraint instanceof Valid)
+                || (null !== $property && null !== $ownerClass && $this->cascades($ownerClass, $property->getName())));
             $entry = $this->entryBuilder($config);
 
             $fields[] = new CollectedFormField(
@@ -221,6 +230,23 @@ final class FormTypeInspector
             // An `empty_data` closure that reads what only a request has: what it makes is unknown.
             return null;
         }
+    }
+
+    /**
+     * Whether the validator cascades into what the class's property holds, as its metadata says:
+     * a #[Assert\Valid] on the property, or the class's #[Assert\Cascade], which cascades into
+     * every property it holds an object or an array in.
+     */
+    private function cascades(string $class, string $property): bool
+    {
+        try {
+            $metadata = ($this->validatorMetadata ??= Validation::createValidatorBuilder()->enableAttributeMapping()->getValidator())->getMetadataFor($class);
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $metadata instanceof ClassMetadataInterface
+            && array_any($metadata->getPropertyMetadata($property), static fn (PropertyMetadataInterface $member): bool => CascadingStrategy::CASCADE === $member->getCascadingStrategy());
     }
 
     /**

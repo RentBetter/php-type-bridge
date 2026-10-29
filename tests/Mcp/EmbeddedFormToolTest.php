@@ -68,6 +68,28 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertTrue(ShapeField::admitsNull($keys[60]->type), 'memo, last, is still read');
     }
 
+    public function test_what_a_class_reads_as_is_the_same_whichever_input_reads_it_first(): void
+    {
+        // AData and BData name each other. Read for AData's input first, BData is cut short where it
+        // names AData again: kept, BData's own input would find AData's `b` read through.
+        $src = __DIR__ . '/../Fixture/MutualInputFixtures';
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Pairs'];
+        $a = $contracts[1]->request?->body?->keys()?->fields[0]->type;
+
+        self::assertInstanceOf(ShapeType::class, $a);
+        self::assertInstanceOf(NameRefType::class, $a->fields[0]->type, 'BData, being read, is not read again inside AData');
+    }
+
+    public function test_a_read_where_null_was_not_asked_is_not_one_where_it_is(): void
+    {
+        // FeeData read for a body no tool takes asks nothing of Money; read for a tool's, it must.
+        $src = __DIR__ . '/../Fixture/AskedReadFixtures';
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Whether the project-wide alias "Money"');
+
+        (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->statusIndex($src));
+    }
+
     public function test_a_field_left_out_without_clear_missing_is_its_propertys_none(): void
     {
         // Submitted with `clearMissing: false`, a field left out isn't submitted: no form check runs,
