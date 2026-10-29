@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Support;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
@@ -43,5 +44,13 @@ final class PhpDocTypeHelperScopeTest extends TestCase
         self::assertNull($resolved->class);
 
         self::assertNull((new DeclaredRoutes())->routeFor(DevOnlyRule::class, 'check'));
+    }
+
+    public function test_a_constant_of_a_class_that_cant_be_declared_is_one_it_cant_find(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Class "DevOnlyRule" in `DevOnlyRule::STATE_*` could not be found.');
+
+        (new PhpDocTypeHelper())->resolveImportedNames(new ClassConstantType('DevOnlyRule', 'STATE_*'), [], 'PTGS\\TypeBridge\\Tests\\Fixture\\UnloadableFixtures\\DevOnly\\Other');
     }
 }

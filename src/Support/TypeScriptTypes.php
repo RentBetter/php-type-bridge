@@ -21,7 +21,8 @@ final class TypeScriptTypes
     /**
      * Whether the type admits null, as `null extends T` holds in TypeScript — as AsQuery<T> reads it:
      * `null`, `unknown` or `any` among the members of its union, read outside brackets and quotes; a
-     * member in brackets read inside them; an intersection where each of its parts does; another of
+     * member in brackets read inside them; an intersection where each of its parts does, or one is
+     * `any`, which an intersection with it is; another of
      * the config's aliases as it is declared. A literal, an object, a list, a tuple or a function —
      * the whole type, when an arrow is its top level: `() => string | null` returns the union — and a
      * built-in that never admits null, do not.
@@ -75,6 +76,11 @@ final class TypeScriptTypes
      */
     private static function allAdmitNull(array $parts, array $aliases, array $reading): ?bool
     {
+        // `any & T` is `any`, whatever T is.
+        if (\in_array('any', $parts, true)) {
+            return true;
+        }
+
         $all = true;
         foreach ($parts as $part) {
             $read = self::admitsNull($part, $aliases, $reading);

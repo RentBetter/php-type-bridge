@@ -1403,6 +1403,18 @@ final class McpManifestBuilderTest extends TestCase
         $contract = new ShapeType([new ShapeField('pinned', new NullableType(new NullableType(new ScalarType('bool'), optional: false), optional: true), optional: false)]);
 
         self::assertSame(['type' => ['boolean', 'null']], $this->toolWithBody('PUT', [$pinned], $contract)['inputSchema']['properties']['pinned']);
+
+        // And `?MaybeRef`, `MaybeRef = Ref|null` and `Ref = string|array{name: string}`: still the id
+        // or the object. `?MaybeFlags`, `MaybeFlags = list<bool>|null`: still a list of booleans.
+        $artefact = new CollectedFormField(name: 'artefact', formTypeClass: 'App\\EmbeddedArtefactType', required: false, mapped: true, compound: true, dataClass: 'App\\ArtefactData', children: [$this->scalarField('name', 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true)]);
+        $flags = new CollectedFormField(name: 'flags', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType', required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType');
+        $ref = new UnionType([new ScalarType('string'), new ShapeType([new ShapeField('name', new ScalarType('string'), optional: false)])]);
+        $properties = $this->toolWithBody('PUT', [$artefact, $flags], new ShapeType([
+            new ShapeField('artefact', new NullableType(new NullableType($ref, optional: false), optional: true), optional: false),
+            new ShapeField('flags', new NullableType(new NullableType(new ListType(new ScalarType('bool')), optional: false), optional: true), optional: false),
+        ]))['inputSchema']['properties'];
+        self::assertSame(['type' => 'string'], $properties['artefact']['anyOf'][0] ?? null);
+        self::assertSame(['type' => 'boolean'], $properties['flags']['items'] ?? null);
     }
 
     public function testAnEscapedBackslashIsNoControlEscape(): void

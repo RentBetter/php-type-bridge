@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Routing;
 
+use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionAttribute;
 use ReflectionClass;
 use Symfony\Component\Routing\Attribute\Route as RouteAttribute;
@@ -88,7 +89,7 @@ final class DeclaredRoutes
      */
     private static function readEnvs(string $className, string $methodName): array
     {
-        if (!class_exists($className) || !method_exists($className, $methodName)) {
+        if (!PhpFileClassLocator::loads($className) || !method_exists($className, $methodName)) {
             return [];
         }
 
@@ -126,7 +127,7 @@ final class DeclaredRoutes
      */
     private function read(string $className, string $env): array
     {
-        if (!class_exists($className) || new ReflectionClass($className)->isAbstract()) {
+        if (!PhpFileClassLocator::loads($className) || new ReflectionClass($className)->isAbstract()) {
             return [];
         }
 

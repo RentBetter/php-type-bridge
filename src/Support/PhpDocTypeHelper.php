@@ -476,7 +476,7 @@ final class PhpDocTypeHelper
         $class = 'self' === $type->class || 'static' === $type->class
             ? ($selfClass ?? throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $type->class)))
             : $this->resolveClassName($type->class, $ownerClass, $classImports);
-        if (null === $class || (!class_exists($class) && !interface_exists($class) && !enum_exists($class))) {
+        if (null === $class || !PhpFileClassLocator::loads($class)) {
             throw new RuntimeException(\sprintf(
                 'Class "%s" in `%s::%s` could not be found. Write self::, import the class, or give its fully qualified name.',
                 $type->class,
@@ -543,7 +543,8 @@ final class PhpDocTypeHelper
         }
 
         foreach ($candidates as $candidate) {
-            if (class_exists($candidate) || interface_exists($candidate) || enum_exists($candidate)) {
+            // One whose declaration throws in this install — a require-dev parent — is no class here.
+            if (PhpFileClassLocator::loads($candidate)) {
                 return $candidate;
             }
         }
@@ -659,12 +660,20 @@ final class PhpDocTypeHelper
     /**
      * The type with each name it uses read in the scope of the file that writes it ({@see ScopedType}),
      * its shape — a `?T`, a list, a union, an `included<…>` — as it is. An intersection, whose base
-     * is a name by syntax, is scoped whole.
+     * is a name by syntax, is scoped whole — inside the `?` and beside the null of a type that has
+     * them, which a reader asks of the type itself.
      *
      * @param list<ImportedType> $imports the writing file's
      */
     public function scoped(ParsedType $type, array $imports, ?string $domain): ParsedType
     {
+        if ($type instanceof NullableType) {
+            return new NullableType($this->scoped($type->inner, $imports, $domain), $type->optional);
+        }
+        if ($type instanceof UnionType) {
+            return new UnionType(array_map(fn (ParsedType $member): ParsedType => $this->scoped($member, $imports, $domain), $type->types));
+        }
+
         $intersects = false;
         for ($types = [$type]; [] !== $types && !$intersects;) {
             $part = array_pop($types);

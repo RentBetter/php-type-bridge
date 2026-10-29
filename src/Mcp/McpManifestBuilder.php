@@ -358,7 +358,13 @@ final class McpManifestBuilder
     private function fieldSchema(CollectedFormField $field, ?ParsedType $declared = null, bool $json = false, bool $makes = false): array
     {
         $schema = $this->valueSchema($field, $declared, $json, $makes);
-        $bounds = $this->bounds(HeldConstraints::always($field->constraints), $schema['type']);
+        $always = HeldConstraints::always($field->constraints);
+        $bounds = $this->bounds($always, $schema['type']);
+        $pattern = $this->patternOf($field, $schema['type'], $always);
+        if (isset($pattern['minLength'])) {
+            $bounds['minLength'] = max($bounds['minLength'] ?? 0, $pattern['minLength']);
+            unset($pattern['minLength']);
+        }
         // A blank the server takes is submitted null, which a Length skips: its minimum holds the
         // values that aren't blank.
         if ('string' === $schema['type'] && ($bounds['minLength'] ?? 0) > 0 && !$this->refusesBlank($field)) {
@@ -366,7 +372,7 @@ final class McpManifestBuilder
             unset($bounds['minLength']);
             $bounds = ['anyOf' => [['maxLength' => 0], ['minLength' => $minimum]], ...$bounds];
         }
-        $schema = [...$schema, ...$bounds, ...$this->patternOf($field, $schema['type'])];
+        $schema = [...$schema, ...$bounds, ...$pattern];
 
         // A key that takes a record's id or the fields to make one (`string|array{name: string}`)
         // is a compound form with a scalar the form lifts out before submit; the form shows only the
@@ -428,7 +434,8 @@ final class McpManifestBuilder
      */
     private function declaredScalars(?ParsedType $declared): array
     {
-        if ($declared instanceof NullableType) {
+        // `?Alias` of an alias of `T|null` is a nullable of a nullable: its scalar is what both wrap.
+        while ($declared instanceof NullableType) {
             $declared = $declared->inner;
         }
         if (!$declared instanceof UnionType) {
@@ -563,7 +570,7 @@ final class McpManifestBuilder
      */
     private function declaredScalar(?ParsedType $declared): ?string
     {
-        if ($declared instanceof NullableType) {
+        while ($declared instanceof NullableType) {
             $declared = $declared->inner;
         }
         if (!$declared instanceof ScalarType) {
@@ -672,7 +679,7 @@ final class McpManifestBuilder
      */
     private static function soleMember(?ParsedType $type, string $kind): ?ParsedType
     {
-        if ($type instanceof NullableType) {
+        while ($type instanceof NullableType) {
             $type = $type->inner;
         }
         if ($type instanceof UnionType) {
@@ -720,21 +727,31 @@ final class McpManifestBuilder
      * Sequentially or a Compound holds as one beside them, and one among an AtLeastOneOf's
      * alternatives or a When's may not hold at all, so is no pattern — and one more to count.
      *
-     * @return array{pattern?: string}
+     * A blank the server refuses the rule may match all the same (`^[A-Z]*$` under a NotBlank): a
+     * minimum length of 1 refuses it too. A lookahead (`(?!$)`) would, but RE2 and JSON Schema's
+     * interoperable subset don't read one.
+     *
+     * @param list<Constraint> $always the field's constraints that always hold ({@see HeldConstraints::always()})
+     *
+     * @return array{pattern?: string, minLength?: int}
      */
-    private function patternOf(CollectedFormField $field, string $type): array
+    private function patternOf(CollectedFormField $field, string $type, array $always): array
     {
         if ('string' !== $type) {
             return [];
         }
 
         $regexes = array_values(array_filter(HeldConstraints::any($field->constraints), static fn (Constraint $constraint): bool => $constraint instanceof Regex));
-        if (1 !== \count($regexes) || !\in_array($regexes[0], HeldConstraints::always($field->constraints), true)) {
+        $regex = $regexes[0] ?? null;
+        if (1 !== \count($regexes) || null === $regex?->pattern || !\in_array($regex, $always, true)) {
             return [];
         }
-        $pattern = $this->regexPattern($regexes[0], $field);
+        $pattern = $this->regexPattern($regex, $field);
+        if (null === $pattern) {
+            return [];
+        }
 
-        return null === $pattern ? [] : ['pattern' => $pattern];
+        return $this->refusesBlank($field) && 1 === preg_match($regex->pattern, '') ? ['pattern' => $pattern, 'minLength' => 1] : ['pattern' => $pattern];
     }
 
     /**
@@ -761,30 +778,24 @@ final class McpManifestBuilder
         }
         [$inner, $flags] = $rule;
 
+        // The rule as it reads the trimmed value. A padded value the server would trim is refused —
+        // costing a caller nothing — rather than allowed with `\p{…}` padding, which only
+        // Unicode-mode regex reads. Where the rule could match the padding itself (a space, a control
+        // character, a negated class), a padded value it accepts may trim to one it doesn't, so there
+        // is no pattern.
+        if ($field->trim && PortableRegex::matchesPadding($inner)) {
+            return null;
+        }
+
+        // A trimmed value has no final newline for `$` to match before.
+        $newline = $field->trim || str_contains($flags, 'D') ? '' : '\n?';
+        $value = '(?:' . $inner . ')' . $newline;
         // A blank value reaches the validator as null, trimmed or not, and the Regex lets it through.
-        $blank = !$this->refusesBlank($field);
-        // One the server refuses the rule may match all the same (`^[A-Z]*$`): the pattern refuses it too.
-        $refused = !$blank && 1 === preg_match($regex->pattern, '') ? '(?!$)' : '';
-
-        if ($field->trim) {
-            // The rule as it reads the trimmed value. A padded value the server would trim is
-            // refused — costing a caller nothing — rather than allowed with `\p{…}` padding, which
-            // only Unicode-mode regex reads. Where the rule could match the padding itself (a space,
-            // a control character, a negated class), a padded value it accepts may trim to one it
-            // doesn't, so there is no pattern.
-            if (PortableRegex::matchesPadding($inner)) {
-                return null;
-            }
-
-            return '^' . $refused . '(?:' . $inner . ')' . ($blank ? '?' : '') . '$';
+        if (!$this->refusesBlank($field)) {
+            $value = '' === $newline ? $value . '?' : '(?:' . $value . ')?';
         }
 
-        $newline = str_contains($flags, 'D') ? '' : '\n?';
-        if ($blank) {
-            return '' === $newline ? '^(?:' . $inner . ')?$' : '^(?:(?:' . $inner . ')' . $newline . ')?$';
-        }
-
-        return '^' . $refused . '(?:' . $inner . ')' . $newline . '$';
+        return '^' . $value . '$';
     }
 
     private function tighter(string $keyword, int|float $current, int|float $limit): int|float
