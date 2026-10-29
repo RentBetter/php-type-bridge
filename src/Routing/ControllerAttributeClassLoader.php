@@ -37,6 +37,23 @@ final class ControllerAttributeClassLoader extends AttributeClassLoader
      */
     public const string METHODS = 'typebridge_route_methods';
 
+    /**
+     * The HTTP methods a route is for: of those it serves, the ones its own #[Route] names
+     * ({@see self::METHODS}), in the order it names them — Symfony merges a class-level #[Route]'s
+     * in ahead of them, and an import's replace both — else all it serves. What the Endpoint, the
+     * tool and the PHPStan rules read alike.
+     *
+     * @return list<string>
+     */
+    public static function methodsFor(Route $route): array
+    {
+        $served = array_values($route->getMethods());
+        $own = $route->getOption(self::METHODS);
+        $named = array_values(array_filter(\is_array($own) ? $own : [], static fn (mixed $method): bool => \in_array($method, $served, true)));
+
+        return [] === $named ? $served : $named;
+    }
+
     /** @var array<string, int> by `Class::method`, the last of its #[Route]s read in this load */
     private array $read = [];
 

@@ -44,13 +44,7 @@ final readonly class ShapeField
         if (!$type instanceof UnionType) {
             return false;
         }
-        foreach ($type->types as $member) {
-            if ($member instanceof ScalarType && \in_array($member->base(), ['null', 'mixed'], true)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $type->hasNull() || array_any($type->types, static fn (ParsedType $member): bool => $member instanceof ScalarType && 'mixed' === $member->base());
     }
 
     /**
@@ -99,7 +93,7 @@ final readonly class ShapeField
         if (!$type instanceof UnionType) {
             return $type;
         }
-        $members = array_values(array_filter($type->types, static fn (ParsedType $member): bool => !$member instanceof ScalarType || 'null' !== $member->base()));
+        $members = array_values(array_filter($type->types, static fn (ParsedType $member): bool => !ScalarType::isNull($member)));
 
         return 1 === \count($members) ? $members[0] : new UnionType($members);
     }

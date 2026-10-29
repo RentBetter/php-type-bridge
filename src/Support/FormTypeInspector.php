@@ -135,9 +135,10 @@ final class FormTypeInspector
                 hasModelTransformers: [] !== $config->getModelTransformers(),
                 hasViewTransformers: [] !== $config->getViewTransformers(),
                 // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
-                // what is sent itself, and none of them is a field a request sends.
+                // what is sent itself, and none of them is a field a request sends — as a field, or
+                // as each entry of a collection.
                 children: self::isChoice($config) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config)),
-                entryChildren: null !== $entry && $entry->getCompound() ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig())) : [],
+                entryChildren: null !== $entry && $entry->getCompound() && !self::isChoice($entry->getFormConfig()) ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig())) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),

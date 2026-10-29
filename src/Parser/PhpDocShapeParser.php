@@ -245,7 +245,7 @@ final class PhpDocShapeParser
             $nonNullTypes = [];
             $hasNull = false;
             foreach ($types as $t) {
-                if ($t instanceof ScalarType && 'null' === $t->type) {
+                if (ScalarType::isNull($t)) {
                     $hasNull = true;
                 } else {
                     $nonNullTypes[] = $t;

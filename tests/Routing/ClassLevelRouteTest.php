@@ -203,8 +203,18 @@ final class ClassLevelRouteTest extends TestCase
         $src = __DIR__ . '/../Fixture/Utf8RouteFixtures';
         $contract = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src))['Tags'][0];
 
-        self::assertSame(['name'], array_map(static fn(CollectedPathParam $param): string => $param->name, $contract->request?->pathParams ?? []));
-        self::assertNull($contract->request?->pathParams[0]->utf8 ?? false);
+        $params = $contract->request?->pathParams ?? [];
+        self::assertSame(['name'], array_map(static fn(CollectedPathParam $param): string => $param->name, $params));
+        self::assertNull($params[0]->utf8);
+    }
+
+    public function testARouteThatTurnsUtf8OffItselfIsOneTheRouterRefuses(): void
+    {
+        $src = __DIR__ . '/../Fixture/Utf8OffRouteFixtures';
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('The route /tags/{name} cannot be compiled as Symfony compiles it: Cannot use UTF-8 route requirements without setting the "utf8" option');
+
+        (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
     }
 
     public function testARouteAttributeThatThrowsIsNoRouteToGuess(): void

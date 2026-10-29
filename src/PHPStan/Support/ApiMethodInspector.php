@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\PHPStan\Support;
 
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Routing\ControllerAttributeClassLoader;
 use PTGS\TypeBridge\Routing\DeclaredRoutes;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use ReflectionAttribute;
@@ -53,7 +54,7 @@ final class ApiMethodInspector
         $routed = [] !== $method->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF)
             || ('__invoke' === $methodName && [] !== new ReflectionClass($className)->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF));
         $route = $this->routePathResolver?->routeFor($className, $methodName) ?? ($routed ? $this->declaredRoutes->routeFor($className, $methodName) : null);
-        [$path, $httpMethods] = null !== $route ? [RoutePathResolver::clientPath($route->getPath()), array_values($route->getMethods())] : $this->writtenRoute($method);
+        [$path, $httpMethods] = null !== $route ? [RoutePathResolver::clientPath($route->getPath()), ControllerAttributeClassLoader::methodsFor($route)] : $this->writtenRoute($method);
 
         $declaredResponses = [];
         $responsesAttributes = $method->getAttributes(ApiResponses::class);
@@ -114,7 +115,7 @@ final class ApiMethodInspector
     {
         $name = $attribute->getName();
 
-        return 'Symfony\\Component\\Routing\\Attribute\\Route' === $name
+        return is_a($name, RouteAttribute::class, true)
             || str_ends_with($name, '\\Route')
             || 'Route' === $name;
     }

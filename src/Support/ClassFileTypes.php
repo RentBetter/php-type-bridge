@@ -40,11 +40,8 @@ final class ClassFileTypes
     /** @var array<string, array<string, list<string>>> by source directory */
     private array $shortNameMaps = [];
 
-    /** @var array<string, true> by source directory and class: the imports being followed, in the order they began */
-    private array $following = [];
-
-    /** @var array<string, true> by source directory and class: those read against one only partly followed */
-    private array $cutShort = [];
+    /** @var array<string, array{imports: array<string, ImportedType>, unresolved: array<string, string>}> by source directory and class: its imports as written, none followed */
+    private array $written = [];
 
     public function __construct(
         public readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
@@ -190,25 +187,7 @@ final class ClassFileTypes
             return $this->imports[$key];
         }
 
-        $read = $this->docHelper->importedTypes(
-            $this->read($file)['importTags'] ?? [],
-            $class,
-            $srcDir,
-            $classFiles,
-            $this->shortNameMaps[$srcDir] ??= $this->classLocator->shortNameMap(array_keys($classFiles)),
-            $this->domainGuesser,
-        );
-        // Read while it is followed: an import that leads back here is left where it points. What
-        // was read since it began is read against that, so none of it is kept: read again, once
-        // this is done, it follows this class's imports through.
-        if (isset($this->following[$key])) {
-            $since = \array_slice(array_keys($this->following), array_search($key, array_keys($this->following), true) + 1);
-            $this->cutShort += array_fill_keys($since, true);
-
-            return ['imports' => $read['imports'], 'unresolved' => $read['unresolved'], 'phpStanOnly' => []];
-        }
-        $this->following[$key] = true;
-
+        $read = $this->written($class, $file, $srcDir, $classFiles);
         $imports = [];
         $unresolved = $read['unresolved'];
         $phpStanOnly = [];
@@ -231,15 +210,26 @@ final class ClassFileTypes
             }
         }
 
-        unset($this->following[$key]);
-        $result = ['imports' => $imports, 'unresolved' => $unresolved, 'phpStanOnly' => $phpStanOnly];
-        if (isset($this->cutShort[$key])) {
-            unset($this->cutShort[$key]);
+        return $this->imports[$key] = ['imports' => $imports, 'unresolved' => $unresolved, 'phpStanOnly' => $phpStanOnly];
+    }
 
-            return $result;
-        }
-
-        return $this->imports[$key] = $result;
+    /**
+     * The imports the class's file writes, each as it is written: none followed.
+     *
+     * @param array<string, string> $classFiles
+     *
+     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>}
+     */
+    private function written(string $class, string $file, string $srcDir, array $classFiles): array
+    {
+        return $this->written[$srcDir . "\0" . $class] ??= $this->docHelper->importedTypes(
+            $this->read($file)['importTags'] ?? [],
+            $class,
+            $srcDir,
+            $classFiles,
+            $this->shortNameMaps[$srcDir] ??= $this->classLocator->shortNameMap(array_keys($classFiles)),
+            $this->domainGuesser,
+        );
     }
 
     /**
@@ -290,24 +280,35 @@ final class ClassFileTypes
      */
     private function declaredAt(ImportedType $import, string $srcDir, array $classFiles): ImportedType|string
     {
-        $file = $classFiles[$import->targetClass] ?? null;
-        if (null === $file || isset($this->definitions($file)[$import->sourceName()])) {
-            return $import;
-        }
+        // Followed alias by alias, through each class's imports as written, so where it leads is the
+        // same whichever class is read first. One that leads back to an alias already passed is left
+        // where it points.
+        $passed = [];
+        while (true) {
+            $file = $classFiles[$import->targetClass] ?? null;
+            if (null === $file || isset($this->definitions($file)[$import->sourceName()])) {
+                return $import;
+            }
+            $at = $import->targetClass . "\0" . $import->sourceName();
+            if (isset($passed[$at])) {
+                return $import;
+            }
+            $passed[$at] = true;
 
-        $further = $this->imports($import->targetClass, $file, $srcDir, $classFiles);
-        $next = $further['imports'][$import->sourceName()] ?? null;
-        if (null === $next) {
-            return $further['unresolved'][$import->sourceName()] ?? $import;
-        }
+            $further = $this->written($import->targetClass, $file, $srcDir, $classFiles);
+            $next = $further['imports'][$import->sourceName()] ?? null;
+            if (null === $next) {
+                return $further['unresolved'][$import->sourceName()] ?? $import;
+            }
 
-        return new ImportedType(
-            localAlias: $import->localAlias,
-            targetClass: $next->targetClass,
-            targetTypeName: $next->targetTypeName,
-            targetDomain: $next->targetDomain,
-            sourceAlias: $next->sourceName(),
-        );
+            $import = new ImportedType(
+                localAlias: $import->localAlias,
+                targetClass: $next->targetClass,
+                targetTypeName: $next->targetTypeName,
+                targetDomain: $next->targetDomain,
+                sourceAlias: $next->sourceName(),
+            );
+        }
     }
 
     /**

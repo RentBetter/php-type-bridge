@@ -29,6 +29,15 @@ final readonly class ShapeType extends ParsedType
     }
 
     /**
+     * Every key an input declares, those it inherits included, as the intersection reads them: its
+     * own alone where what it inherits can't be read; null where it declares no shape.
+     */
+    public static function withInherited(?self $own, ?self $inherited): ?self
+    {
+        return null === $own || null === $inherited ? $own : self::intersected($inherited, $own);
+    }
+
+    /**
      * The keys `$base & $own` has, as TypeScript reads an intersection: every key of either, one
      * both declare {@see ShapeField::intersected()} — so every reader of an input's keys, the
      * Endpoint and the tool alike, reads one set. Open to more keys where either is.

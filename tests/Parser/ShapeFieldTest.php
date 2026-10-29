@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Tests\Parser;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
+use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 
 /**
@@ -36,5 +37,27 @@ final class ShapeFieldTest extends TestCase
         self::assertInstanceOf(ShapeType::class, $parsed);
 
         self::assertSame($mayBeLeftOut, $parsed->fields[0]->mayBeLeftOut());
+    }
+
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function values(): iterable
+    {
+        yield 'T' => ['array{key: string}', false];
+        yield 'T|null' => ['array{key: string|null}', true];
+        yield "'a'|'b'|null" => ["array{key: 'a'|'b'|null}", true];
+        yield 'mixed' => ['array{key: mixed}', true];
+        yield 'T|mixed, which is mixed' => ['array{key: string|int|mixed}', true];
+        yield '?T, a key left out when null' => ['array{key: ?string}', false];
+    }
+
+    #[DataProvider('values')]
+    public function test_a_value_sent_may_be_null_where_its_type_admits_one(string $shape, bool $admitsNull): void
+    {
+        $parsed = (new PhpDocShapeParser())->parse($shape);
+        self::assertInstanceOf(ShapeType::class, $parsed);
+
+        self::assertSame($admitsNull, ShapeField::admitsNull($parsed->fields[0]->type));
     }
 }

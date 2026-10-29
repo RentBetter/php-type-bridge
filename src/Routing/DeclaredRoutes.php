@@ -33,7 +33,7 @@ final class DeclaredRoutes
     private array $errors = [];
 
     /** @var array<string, list<string>> by `Class::method`: the envs its routes are confined to, read once */
-    private static array $envs = [];
+    private array $envs = [];
 
     /**
      * @param string $env the env the application is deployed in, as {@see RoutePathResolver::$env}
@@ -52,7 +52,7 @@ final class DeclaredRoutes
     {
         $route = $this->routeIn($className, $methodName, $this->env);
         // Its #[Route]s' envs are read only for a method not served in this one.
-        foreach (null === $route ? self::envsOf($className, $methodName) : [] as $env) {
+        foreach (null === $route ? $this->envsOf($className, $methodName) : [] as $env) {
             $route = $env === $this->env ? null : $this->routeIn($className, $methodName, $env);
             if (null !== $route) {
                 return $route;
@@ -76,12 +76,14 @@ final class DeclaredRoutes
      *
      * @return list<string>
      */
-    public static function envsOf(string $className, string $methodName): array
+    private function envsOf(string $className, string $methodName): array
     {
-        return self::$envs[$className . '::' . $methodName] ??= self::readEnvs($className, $methodName);
+        return $this->envs[$className . '::' . $methodName] ??= self::readEnvs($className, $methodName);
     }
 
     /**
+     * None where the class's #[Route]s can't be made — their loading said why ({@see self::loadError()}).
+     *
      * @return list<string>
      */
     private static function readEnvs(string $className, string $methodName): array
@@ -92,10 +94,14 @@ final class DeclaredRoutes
 
         $class = new ReflectionClass($className);
         $envs = [];
-        foreach ([...$class->getMethod($methodName)->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF), ...$class->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF)] as $attribute) {
-            foreach (ControllerAttributeClassLoader::envsOf($attribute->newInstance()) as $env) {
-                $envs[$env] = $env;
+        try {
+            foreach ([...$class->getMethod($methodName)->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF), ...$class->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF)] as $attribute) {
+                foreach (ControllerAttributeClassLoader::envsOf($attribute->newInstance()) as $env) {
+                    $envs[$env] = $env;
+                }
             }
+        } catch (Throwable) {
+            return [];
         }
 
         return array_values($envs);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Collector;
 
+use LogicException;
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\McpTool;
@@ -39,6 +40,7 @@ use PTGS\TypeBridge\Support\TypeScriptTypes;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
+use Symfony\Component\Routing\CompiledRoute;
 use Symfony\Component\Routing\Route;
 use Throwable;
 
@@ -427,22 +429,12 @@ final class EndpointContractCollector
     }
 
     /**
-     * The HTTP method an endpoint is called with: of those its route serves, the first its own
-     * #[Route] names ({@see ControllerAttributeClassLoader::METHODS}) — Symfony merges a class-level
-     * #[Route]'s methods in ahead of the method's, and an import's replace both — else the route's
-     * first; GET where it names none.
+     * The HTTP method an endpoint is called with: the first its route is for
+     * ({@see ControllerAttributeClassLoader::methodsFor()}); GET where it names none.
      */
     private static function httpMethodOf(?Route $route): string
     {
-        $served = array_values($route?->getMethods() ?? []);
-        $own = $route?->getOption(ControllerAttributeClassLoader::METHODS);
-        foreach (\is_array($own) ? $own : [] as $method) {
-            if (\in_array($method, $served, true)) {
-                return $method;
-            }
-        }
-
-        return $served[0] ?? 'GET';
+        return (null === $route ? [] : ControllerAttributeClassLoader::methodsFor($route))[0] ?? 'GET';
     }
 
     /**
@@ -528,7 +520,7 @@ final class EndpointContractCollector
         }
         // Named as Symfony's compiler names them: `{!slug}` is `slug` too.
         try {
-            $names = array_values(array_filter($route->compile()->getPathVariables(), \is_string(...)));
+            $names = array_values(array_filter(self::compiled($route)->getPathVariables(), \is_string(...)));
         } catch (Throwable $exception) {
             throw new RuntimeException(\sprintf('The route %s cannot be compiled as Symfony compiles it: %s', $route->getPath(), $exception->getMessage()), previous: $exception);
         }
@@ -550,6 +542,24 @@ final class EndpointContractCollector
         }
 
         return $params;
+    }
+
+    /**
+     * The route compiled as the router compiles it. A Unicode requirement needs `utf8`, which a route
+     * may leave to the router's default — FrameworkBundle's is on — not known here: one that needs it
+     * is compiled with it, which names the same path variables.
+     */
+    private static function compiled(Route $route): CompiledRoute
+    {
+        try {
+            return $route->compile();
+        } catch (LogicException $exception) {
+            if ($route->hasOption('utf8')) {
+                throw $exception;
+            }
+
+            return (clone $route)->setOption('utf8', true)->compile();
+        }
     }
 
     /**
@@ -640,7 +650,7 @@ final class EndpointContractCollector
 
         [$own, $inherited] = $this->selfContract($self, $class, $file, $srcDir, $classFiles, $inQuery, nullAsked: true);
 
-        return null === $own || null === $inherited ? $own : ShapeType::intersected($inherited, $own);
+        return ShapeType::withInherited($own, $inherited);
     }
 
     /**
@@ -739,20 +749,20 @@ final class EndpointContractCollector
      *
      * @param array<string, string> $classFiles
      *
-     * @return array{definition: string, class: string, file: string}|null
+     * @return array{definition: string, class: string, file: string, name: string}|null
      */
     private function aliasDefinition(string $alias, string $class, string $file, string $srcDir, array $classFiles): ?array
     {
         $definition = $this->files->definitions($file)[$alias] ?? null;
         if (null !== $definition) {
-            return ['definition' => $definition, 'class' => $class, 'file' => $file];
+            return ['definition' => $definition, 'class' => $class, 'file' => $file, 'name' => $alias];
         }
 
         $import = $this->files->imports($class, $file, $srcDir, $classFiles)['imports'][$alias] ?? null;
         $target = null === $import ? null : $classFiles[$import->targetClass] ?? null;
         $definition = null === $target ? null : $this->files->definitions($target)[$import->sourceName()] ?? null;
 
-        return null === $import || null === $target || null === $definition ? null : ['definition' => $definition, 'class' => $import->targetClass, 'file' => $target];
+        return null === $import || null === $target || null === $definition ? null : ['definition' => $definition, 'class' => $import->targetClass, 'file' => $target, 'name' => $import->sourceName()];
     }
 
     /**
@@ -794,7 +804,7 @@ final class EndpointContractCollector
             $type instanceof NameRefType => null === $type->class ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked) : $type,
             // An explicit null settles the type's own: what else it admits is not asked of it.
             $type instanceof NullableType => new NullableType($read($type->inner, $type->optional && $nullAsked), $type->optional),
-            $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member, $nullAsked && !self::hasNull($type)), $type->types)),
+            $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member, $nullAsked && !$type->hasNull()), $type->types)),
             $type instanceof ListType => new ListType($read($type->inner, $nullAsked && !$inQuery)),
             $type instanceof MapType => new MapType($type->key, $read($type->value, $nullAsked && !$inQuery)),
             $type instanceof ShapeType => new ShapeType(array_map(
@@ -823,7 +833,8 @@ final class EndpointContractCollector
             return $admitsNull ? new NullableType($alias, optional: false) : $alias;
         }
 
-        $key = $declared['file'] . "\0" . $alias->name;
+        // Keyed by the name it is declared under, which an import may give another.
+        $key = $declared['file'] . "\0" . $declared['name'];
         $parsed = isset($reading[$key]) ? null : $this->parseType($declared['definition']);
         if (null === $parsed) {
             return $alias;
@@ -861,20 +872,6 @@ final class EndpointContractCollector
             $name,
             $type,
         ));
-    }
-
-    /**
-     * Whether a union lists null among its members.
-     */
-    private static function hasNull(UnionType $union): bool
-    {
-        foreach ($union->types as $member) {
-            if ($member instanceof ScalarType && 'null' === $member->base()) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

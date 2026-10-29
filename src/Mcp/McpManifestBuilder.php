@@ -531,7 +531,7 @@ final class McpManifestBuilder
         $values = [];
         $null = false;
         foreach ($union->types as $member) {
-            if ($member instanceof ScalarType && 'null' === $member->base()) {
+            if (ScalarType::isNull($member)) {
                 $null = true;
 
                 continue;
@@ -548,7 +548,7 @@ final class McpManifestBuilder
             }
         }
 
-        if ([] !== $members && array_all($union->types, static fn (ParsedType $member): bool => $member instanceof LiteralType || ($member instanceof ScalarType && 'null' === $member->base()))) {
+        if ([] !== $members && array_all($union->types, static fn (ParsedType $member): bool => $member instanceof LiteralType || ScalarType::isNull($member))) {
             $schema = ['enum' => $values];
         } else {
             $schema = 1 === \count($members) ? $members[0] : ['anyOf' => $members];

@@ -37,10 +37,6 @@ final readonly class CollectedInputReference
      */
     public function keys(): ?ShapeType
     {
-        if (null === $this->contract || null === $this->inheritedContract) {
-            return $this->contract;
-        }
-
-        return ShapeType::intersected($this->inheritedContract, $this->contract);
+        return ShapeType::withInherited($this->contract, $this->inheritedContract);
     }
 }
