@@ -391,7 +391,7 @@ final class PhpDocTypeHelper
 
         if ([] === $values) {
             throw new RuntimeException(\sprintf(
-                '%s matches %s, which hold no values, so PHPStan reads it as never.',
+                '%s takes no value from %s, so PHPStan reads it as never.',
                 $written,
                 implode(', ', array_keys($matched)),
             ));

@@ -57,12 +57,12 @@ final class PhpDocTypeHelperClassConstantTest extends TestCase
         yield 'value-of of an empty array' => [
             'value-of<self::NONE>',
             $fixture,
-            "`value-of<self::NONE>` matches {$fixture}::NONE, which hold no values, so PHPStan reads it as never.",
+            "`value-of<self::NONE>` takes no value from {$fixture}::NONE, so PHPStan reads it as never.",
         ];
         yield 'value-of of a pure enum case' => [
             'value-of<self::ON>',
             ConstantFixtureSwitch::class,
-            '`value-of<self::ON>` matches ' . ConstantFixtureSwitch::class . '::ON, which hold no values, so PHPStan reads it as never.',
+            '`value-of<self::ON>` takes no value from ' . ConstantFixtureSwitch::class . '::ON, so PHPStan reads it as never.',
         ];
         yield 'value-of of an array with an element that has no literal type' => [
             'value-of<self::NESTED>',
