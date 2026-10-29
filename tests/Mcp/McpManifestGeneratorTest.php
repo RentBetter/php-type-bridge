@@ -145,6 +145,16 @@ final class McpManifestGeneratorTest extends TestCase
         }
     }
 
+    public function testAToolIsPublishedWhateverAResponseSends(): void
+    {
+        // The manifest asks of a response only its status: one whose properties can't be read —
+        // typed with an alias from nowhere — fails its TypeScript, not the tools.
+        $dir = __DIR__ . '/../Fixture/StatusOnlyFixtures';
+        $tools = array_column((new McpManifestGenerator())->generate($dir, new TypeBridgeConfig())['tools'], null, 'name');
+
+        self::assertSame('/api/notes/{id}', $tools['ShowNote']['path'] ?? null);
+    }
+
     public function testARequirementTypedWithAProjectWideAliasIsTheJsonTypeItStandsFor(): void
     {
         // `Code` is a string, so the argument is one, holding to its requirement; `Id` is `Num`, a

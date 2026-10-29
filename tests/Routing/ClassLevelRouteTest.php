@@ -17,6 +17,7 @@ use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\AccountNoteController;
+use PTGS\TypeBridge\Tests\Fixture\EnvBrokenApp\Notes\NoteController as EnvBrokenNoteController;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\ArchiveNoteController;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\EnvNoteController;
 use PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\Notes\LabelController;
@@ -87,6 +88,9 @@ final class ClassLevelRouteTest extends TestCase
         self::assertSame($prefix . '/prod-labels/{labelId}', $tools['ProdLabel']['path'] ?? null);
         // The routing config is read in that env too: its `when@prod` imports this one, under /api/live.
         self::assertSame(('' === $prefix ? '' : '/api/live') . '/notes/{id}', $tools['ShowLiveNote']['path'] ?? null);
+        // And in an env its `when@` sections name, though no #[Route] names one: a controller it
+        // imports there alone is served there.
+        self::assertSame(('' === $prefix ? '' : '/api/preview') . '/notes/{id}', $tools['ShowPreviewNote']['path'] ?? null);
     }
 
     #[DataProvider('configs')]
@@ -124,6 +128,19 @@ final class ClassLevelRouteTest extends TestCase
         self::assertStringContainsString('export type DeleteNotePathParams = { accountId: number; id: string };', $notes);
         self::assertStringContainsString("  path: '" . $prefix . "/accounts/{accountId}/notes/{id}.{_format}',", $notes);
         self::assertStringContainsString("  method: 'PUT',\n  path: '" . $prefix . "/labels/{labelId}',", $notes);
+    }
+
+    public function testAnEnvsRoutingThatCantBeReadFailsNoRouteServedWithoutIt(): void
+    {
+        // The dev routing imports a bundle's file a standalone reader can't locate; a dev-only endpoint
+        // looks there. Every tool the router serves with no env is still served.
+        $app = __DIR__ . '/../Fixture/EnvBrokenApp';
+        $resolver = new RoutePathResolver($app, 'config/routes.yaml');
+        self::assertNull($resolver->pathFor(EnvBrokenNoteController::class, 'debugNoteAction'));
+        self::assertNull($resolver->loadError());
+
+        $tools = array_column((new McpManifestGenerator())->generate($app, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $app))['tools'], null, 'name');
+        self::assertSame('/api/notes/{id}', $tools['ShowNote']['path'] ?? null);
     }
 
     public function testAClassWhoseRoutesSymfonyRefusesIsNoRouteToGuess(): void

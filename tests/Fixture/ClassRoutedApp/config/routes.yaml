@@ -12,3 +12,9 @@ when@prod:
             namespace: PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\LiveNotes
         type: attribute
         prefix: '/api/live'
+    preview_notes:
+        resource:
+            path: ../PreviewNotes/
+            namespace: PTGS\TypeBridge\Tests\Fixture\ClassRoutedApp\PreviewNotes
+        type: attribute
+        prefix: '/api/preview'

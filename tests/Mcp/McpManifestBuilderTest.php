@@ -1350,6 +1350,19 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['code']);
     }
 
+    public function testAWordBoundaryCannotMatchPaddingAClassBackspaceCan(): void
+    {
+        // Outside a class `\\b` is a word boundary, which no padding matches: a trimmed field keeps
+        // its pattern. Inside one it is a backspace, which a padded value could carry.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $word = new CollectedFormField(name: 'word', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^\\bfoo\\b$/D')]);
+        $class = new CollectedFormField(name: 'class', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank(), new Regex('/^[a\\b]+$/D')]);
+
+        $properties = $this->toolWithBody('POST', [$word, $class], $this->shape('array{word?: string, class?: string}'))['inputSchema']['properties'];
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:\\bfoo\\b)$'], $properties['word']);
+        self::assertSame(['type' => 'string'], $properties['class']);
+    }
+
     public function testAConstraintNestedInAnotherGroupBoundsNothing(): void
     {
         // The sequence is in both groups, its Regex and Length in Strict alone: validated by

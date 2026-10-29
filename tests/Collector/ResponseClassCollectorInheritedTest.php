@@ -131,6 +131,15 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertMatchesRegularExpression('/^import type \\{[^}]*\\bTag\\b[^}]*\\} from \'[^\']*Common[^\']*\';$/m', $notes);
     }
 
+    public function test_a_param_bound_to_a_type_left_out_when_null_is_that(): void
+    {
+        // `@extends AbstractBoxResponse<?NoteView>`: `item` is `?NoteView`, a key left out when null;
+        // in a list, an item that may be null.
+        $notes = self::emit(self::fixtures('GenericBaseFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface BoxedNoteResponse {\n  item?: NoteView;\n  items: (NoteView | null)[];\n}", $notes);
+    }
+
     public function test_a_template_param_is_read_as_phpstan_ranks_its_spellings(): void
     {
         // `@phpstan-template R of int` over `@template R`; `@psalm-template P of string`, read too;
@@ -371,6 +380,20 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString('import type { IRestoreNoteResponse as CommonIRestoreNoteResponse }', $notes);
         self::assertStringContainsString('  code: CommonIRestoreNoteResponse;', $notes);
         self::assertSame(1, substr_count($notes, 'export type IRestoreNoteResponse ='));
+    }
+
+    public function test_a_class_named_in_full_is_that_class_whatever_alias_its_file_imports_by_its_short_name(): void
+    {
+        // The file imports Common's `Money` alias and names Billing's Money class: each property is
+        // the type it names, each imported, one under another name.
+        $output = self::emit(self::fixtures('ClassAliasNameFixtures'));
+
+        self::assertMatchesRegularExpression('/^import type \\{ Money \\} from \'[^\']*Billing[^\']*\';$/m', $output['Notes']);
+        self::assertMatchesRegularExpression('/^import type \\{ Money as CommonMoney \\} from \'[^\']*Common[^\']*\';$/m', $output['Notes']);
+        self::assertStringContainsString("export interface ShowPriceResponse {\n  price: Money;\n  total: CommonMoney;\n}", $output['Notes']);
+        // Where the alias is used by nothing, the class is imported all the same.
+        self::assertMatchesRegularExpression('/^import type \\{ Money \\} from \'[^\']*Billing[^\']*\';$/m', $output['Costs']);
+        self::assertStringContainsString("export interface ShowCostResponse {\n  cost: Money;\n}", $output['Costs']);
     }
 
     public function test_two_enums_of_one_name_collide_in_a_module_of_enums_alone(): void
