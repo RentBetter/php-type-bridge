@@ -9,16 +9,16 @@ use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Parser\LiteralType;
 use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
-use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\UnionType;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use RuntimeException;
 
 /**
  * Class constants resolve to the literal values PHPStan reads them as, against the class that
- * owns the shape, and `value-of<>` takes of each what PHPStan's own does. A form PHPStan cannot
- * read stops generation, rather than emit a type for a shape that goes unchecked. The plain
- * wildcard and an array constant's elements are covered end to end by the grammar fixtures.
+ * owns the shape, and `value-of<>` takes of them together what PHPStan's own does. A form PHPStan
+ * cannot read stops generation, rather than emit a type for a shape that goes unchecked, and so
+ * does null, which only the shape's own nullability may bring. The plain wildcard and an array
+ * constant's elements are covered end to end by the grammar fixtures.
  */
 final class PhpDocTypeHelperClassConstantTest extends TestCase
 {
@@ -29,12 +29,18 @@ final class PhpDocTypeHelperClassConstantTest extends TestCase
             new UnionType([new LiteralType('active'), new LiteralType('paused')]),
             $this->resolve('value-of<self::*>', ConstantFixtureStatus::class),
         );
+        self::assertEquals(
+            new UnionType([new LiteralType(1), new LiteralType(2)]),
+            $this->resolve('value-of<self::*>', ConstantFixturePriority::class),
+        );
     }
 
-    public function test_a_null_constant_or_element_is_null(): void
+    public function test_a_value_several_constants_hold_is_taken_once(): void
     {
-        self::assertEquals(new ScalarType('null'), $this->resolve('self::NOTHING'));
-        self::assertEquals(new UnionType([new LiteralType('yes'), new ScalarType('null')]), $this->resolve('value-of<self::MAYBE>'));
+        self::assertEquals(
+            new UnionType([new LiteralType('x'), new LiteralType('y'), new LiteralType('z')]),
+            $this->resolve('value-of<self::SHARED_*>'),
+        );
     }
 
     /**
@@ -54,6 +60,16 @@ final class PhpDocTypeHelperClassConstantTest extends TestCase
             $fixture,
             "`value-of<self::MIXED_*>` matches {$fixture}::MIXED_ONE, which is neither an array nor an enum case: value-of<> takes an array's elements or a case's backing value, and PHPStan reads it of anything else as an invalid type.",
         ];
+        yield 'value-of of a null constant, where the bare form would fail too' => [
+            'value-of<self::NOTHING>',
+            $fixture,
+            "`value-of<self::NOTHING>` matches {$fixture}::NOTHING, which is neither an array nor an enum case: value-of<> takes an array's elements or a case's backing value, and PHPStan reads it of anything else as an invalid type.",
+        ];
+        yield 'value-of of an enum case beside an array' => [
+            'value-of<self::*>',
+            ConstantFixtureMixed::class,
+            '`value-of<self::*>` matches the enum case ' . ConstantFixtureMixed::class . '::ON and ' . ConstantFixtureMixed::class . "::EXTRA, which is not one: value-of<> takes cases' backing values only when every constant it matches is a case, and PHPStan reads a mix as an invalid type.",
+        ];
         yield 'value-of of an empty array' => [
             'value-of<self::NONE>',
             $fixture,
@@ -67,12 +83,22 @@ final class PhpDocTypeHelperClassConstantTest extends TestCase
         yield 'value-of of an array with an element that has no literal type' => [
             'value-of<self::NESTED>',
             $fixture,
-            "`value-of<self::NESTED>` matches {$fixture}::NESTED, whose element 1 is not a string, number, bool or null, so it has no literal type.",
+            "`value-of<self::NESTED>` matches {$fixture}::NESTED, whose element 1 is not a string, number or bool, so it has no literal type.",
+        ];
+        yield 'a null constant' => [
+            'self::NOTHING',
+            $fixture,
+            "`self::NOTHING` matches {$fixture}::NOTHING, whose value is null. Write nullability in the shape, as `?T` or `T|null`, so preserveNull governs it.",
+        ];
+        yield 'value-of of an array with a null element' => [
+            'value-of<self::MAYBE>',
+            $fixture,
+            "`value-of<self::MAYBE>` matches {$fixture}::MAYBE, whose element 1 is null. Write nullability in the shape, as `?T` or `T|null`, so preserveNull governs it.",
         ];
         yield 'an array constant on its own' => [
             'self::NESTED',
             $fixture,
-            "`self::NESTED` matches {$fixture}::NESTED, whose value is not a string, number, bool or null, so it has no literal type.",
+            "`self::NESTED` matches {$fixture}::NESTED, whose value is not a string, number or bool, so it has no literal type.",
         ];
         yield 'a pattern that matches nothing' => [
             'value-of<self::MISSING_*>',
@@ -117,6 +143,8 @@ final class ConstantFixture
     public const null NOTHING = null;
     public const array MAYBE = ['yes', null];
     public const array NESTED = ['a', ['b']];
+    public const array SHARED_A = ['x', 'y'];
+    public const array SHARED_B = ['y', 'z'];
 }
 
 enum ConstantFixtureStatus: string
@@ -125,7 +153,20 @@ enum ConstantFixtureStatus: string
     case PAUSED = 'paused';
 }
 
+enum ConstantFixturePriority: int
+{
+    case LOW = 1;
+    case HIGH = 2;
+}
+
 enum ConstantFixtureSwitch
 {
     case ON;
+}
+
+enum ConstantFixtureMixed: string
+{
+    case ON = 'on';
+
+    public const array EXTRA = ['x'];
 }

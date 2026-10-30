@@ -222,8 +222,8 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `non-empty-list<T>`, `non-empty-array<K, V>` | `T[]`, `Record<K, V>` |
 | `array{id: string, ...}` (unsealed) | `{ id: string; [key: string]: unknown }` |
 | `array{int, string, ...}` (unsealed tuple) | `[number, string, ...unknown[]]` |
-| `self::STATUS_*`, `Foo::BAR` | the constants' values: `'draft' \| 'live'` |
-| `value-of<self::OPTIONS>`, `value-of<Status::ACTIVE>` | an array constant's elements, an enum case's backing value; `value-of<>` of any other constant is an error, as PHPStan reads it |
+| `self::STATUS_*`, `Foo::BAR` | the constants' values: `'draft' \| 'live'`; a null value is an error, since nullability is written as `?T` or `T\|null` |
+| `value-of<self::OPTIONS>`, `value-of<Status::*>` | the elements of array constants, or the backing values when every constant matched is an enum case. A mix, any other constant, or one with no values (an empty array, a pure case: PHPStan's `never`) is an error |
 | `(A \| B)`, `Base & array{...}` | `A \| B`, `interface … extends Base` |
 | `MoneyInterface`, `\Acme\Money` (a class) | the JSON it serialises to — see below |
 | `included<T>` — a generic listed in `includes.types` | `T`, on a key absent unless asked for — see below |
