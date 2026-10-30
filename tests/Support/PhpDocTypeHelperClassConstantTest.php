@@ -43,6 +43,22 @@ final class PhpDocTypeHelperClassConstantTest extends TestCase
         );
     }
 
+    public function test_an_empty_array_beside_one_with_values_adds_nothing(): void
+    {
+        self::assertEquals(new LiteralType('z'), $this->resolve('value-of<self::SOME_*>'));
+    }
+
+    public function test_the_class_keywords_resolve_as_phpstan_resolves_them(): void
+    {
+        self::assertEquals(new LiteralType('simple'), $this->resolve('Self::MODE_SIMPLE'));
+        self::assertEquals(new LiteralType('base'), $this->resolve('parent::BASE', ConstantFixtureChild::class));
+        self::assertEquals(new LiteralType('simple'), $this->resolve('static::MODE_SIMPLE'));
+        self::assertEquals(
+            new UnionType([new LiteralType('base'), new LiteralType('late')]),
+            $this->resolve('static::*', ConstantFixtureBase::class),
+        );
+    }
+
     /**
      * @return iterable<string, array{string, class-string, string}>
      */
@@ -69,6 +85,21 @@ final class PhpDocTypeHelperClassConstantTest extends TestCase
             'value-of<self::*>',
             ConstantFixtureMixed::class,
             '`value-of<self::*>` matches the enum case ' . ConstantFixtureMixed::class . '::ON and ' . ConstantFixtureMixed::class . "::EXTRA, which is not one: value-of<> takes cases' backing values only when every constant it matches is a case, and PHPStan reads a mix as an invalid type.",
+        ];
+        yield 'one constant through static:: on a class that is not final' => [
+            'static::LATE',
+            ConstantFixtureBase::class,
+            '`static::LATE` names one constant through static:: on ' . ConstantFixtureBase::class . ', which is not final, so PHPStan reads it as the type the constant declares rather than its value. Write `self::LATE`.',
+        ];
+        yield 'parent:: on a class with no parent' => [
+            'parent::MODE_SIMPLE',
+            $fixture,
+            "`parent::MODE_SIMPLE` is written on {$fixture}, which has no parent class.",
+        ];
+        yield 'a bare enum case, pointing to value-of' => [
+            'self::ACTIVE',
+            ConstantFixtureStatus::class,
+            '`self::ACTIVE` matches ' . ConstantFixtureStatus::class . '::ACTIVE, whose value is not a string, number or bool, so it has no literal type. Write `value-of<self::ACTIVE>` for the backing values.',
         ];
         yield 'value-of of an empty array' => [
             'value-of<self::NONE>',
@@ -145,12 +176,26 @@ final class ConstantFixture
     public const array NESTED = ['a', ['b']];
     public const array SHARED_A = ['x', 'y'];
     public const array SHARED_B = ['y', 'z'];
+    public const array SOME_NONE = [];
+    public const array SOME_ONE = ['z'];
+}
+
+class ConstantFixtureBase
+{
+    public const string BASE = 'base';
+    public const string LATE = 'late';
+}
+
+final class ConstantFixtureChild extends ConstantFixtureBase
+{
 }
 
 enum ConstantFixtureStatus: string
 {
     case ACTIVE = 'active';
     case PAUSED = 'paused';
+
+    public const self DEFAULT = self::ACTIVE;
 }
 
 enum ConstantFixturePriority: int

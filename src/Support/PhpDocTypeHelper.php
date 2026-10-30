@@ -336,9 +336,14 @@ final class PhpDocTypeHelper
      */
     private function resolveClassConstant(ClassConstantType $type, ?string $ownerClass, array $classImports): ParsedType
     {
-        $class = 'self' === $type->class || 'static' === $type->class
-            ? ($ownerClass ?? throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $type->class)))
-            : $this->resolveClassName($type->class, $ownerClass, $classImports);
+        $keyword = strtolower($type->class);
+        $class = match ($keyword) {
+            'self', 'static', 'parent' => $ownerClass ?? throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $type->class)),
+            default => $this->resolveClassName($type->class, $ownerClass, $classImports),
+        };
+        if ('parent' === $keyword && null !== $class) {
+            $class = get_parent_class($class) ?: throw new RuntimeException(\sprintf('`%s::%s` is written on %s, which has no parent class.', $type->class, $type->pattern, $class));
+        }
         if (null === $class || (!class_exists($class) && !interface_exists($class) && !enum_exists($class))) {
             throw new RuntimeException(\sprintf(
                 'Class "%s" in `%s::%s` could not be found. Write self::, import the class, or give its fully qualified name.',
@@ -350,6 +355,17 @@ final class PhpDocTypeHelper
         $pattern = '/^' . str_replace('\\*', '.*', preg_quote($type->pattern, '/')) . '$/';
         $bare = \sprintf('`%s::%s`', $type->class, $type->pattern);
         $written = $type->valueOf ? \sprintf('`value-of<%s::%s>`', $type->class, $type->pattern) : $bare;
+
+        // PHPStan reads every constant a wildcard matches by its value, but one constant named
+        // through `static::` on a class a subclass may extend by its declared type, if it has one
+        if ('static' === $keyword && !str_contains($type->pattern, '*') && !(new ReflectionClass($class))->isFinal()) {
+            throw new RuntimeException(\sprintf(
+                '%s names one constant through static:: on %s, which is not final, so PHPStan reads it as the type the constant declares rather than its value. Write `self::%s`.',
+                $written,
+                $class,
+                $type->pattern,
+            ));
+        }
 
         $matched = [];
         foreach ((new ReflectionClass($class))->getReflectionConstants() as $constant) {
@@ -396,6 +412,14 @@ final class PhpDocTypeHelper
         $values = [];
         foreach ($members as $name => $elements) {
             foreach ($elements as $key => $member) {
+                if (\is_scalar($member)) {
+                    if (!\in_array($member, $values, true)) {
+                        $values[] = $member;
+                    }
+
+                    continue;
+                }
+
                 $what = $type->valueOf ? \sprintf('element %s', var_export($key, true)) : 'value';
                 if (null === $member) {
                     throw new RuntimeException(\sprintf(
@@ -405,12 +429,13 @@ final class PhpDocTypeHelper
                         $what,
                     ));
                 }
-                if (!\is_scalar($member)) {
-                    throw new RuntimeException(\sprintf('%s matches %s, whose %s is not a string, number or bool, so it has no literal type.', $written, $name, $what));
-                }
-                if (!\in_array($member, $values, true)) {
-                    $values[] = $member;
-                }
+
+                // A case's own value is the form value-of<> reads, when every constant matched is a backed case
+                $instead = !$type->valueOf && array_all($matched, static fn(mixed $other): bool => $other instanceof BackedEnum)
+                    ? \sprintf(' Write `value-of<%s::%s>` for the backing values.', $type->class, $type->pattern)
+                    : '';
+
+                throw new RuntimeException(\sprintf('%s matches %s, whose %s is not a string, number or bool, so it has no literal type.%s', $written, $name, $what, $instead));
             }
         }
 
