@@ -27,7 +27,7 @@ final class ShapeIntersectionAliasTest extends RuleTestCase
      */
     public static function getAdditionalConfigFiles(): array
     {
-        return [__DIR__ . '/../../../extension.neon'];
+        return [\dirname(__DIR__, 3) . '/extension.neon'];
     }
 
     public function testAnAliasPhpStanCannotReadIsReported(): void

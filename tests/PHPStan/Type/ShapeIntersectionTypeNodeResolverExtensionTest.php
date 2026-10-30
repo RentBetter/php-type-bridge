@@ -28,6 +28,6 @@ final class ShapeIntersectionTypeNodeResolverExtensionTest extends TypeInference
      */
     public static function getAdditionalConfigFiles(): array
     {
-        return [__DIR__ . '/../../../extension.neon'];
+        return [\dirname(__DIR__, 3) . '/extension.neon'];
     }
 }
