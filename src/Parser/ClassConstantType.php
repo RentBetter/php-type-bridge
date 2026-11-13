@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Parser;
 
 /**
- * A class constant, or a set of them: `self::STATUS_*`, `Foo::BAR`, `value-of<self::MODE_*>`.
+ * A class constant, or a set of them: `self::STATUS_*`, `Foo::BAR`, `value-of<self::OPTIONS>`.
  *
  * Only a placeholder — which constants match, and so which literal values the type allows,
  * depends on the class that owns the shape, which the parser does not know.

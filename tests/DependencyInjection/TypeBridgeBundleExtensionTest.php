@@ -9,13 +9,19 @@ use PTGS\TypeBridge\Command\GenerateTypesCommand;
 use PTGS\TypeBridge\Form\DefaultValidationErrorResponseFactory;
 use PTGS\TypeBridge\Form\RequestFormProcessor;
 use PTGS\TypeBridge\Form\ValidationErrorResponseFactory;
+use PTGS\TypeBridge\Http\Include\ExpandGuard;
+use PTGS\TypeBridge\Http\Include\ExpandRefusedException;
 use PTGS\TypeBridge\Http\Include\IncludeResolver;
 use PTGS\TypeBridge\Http\Include\IncludeResponseSubscriber;
+use PTGS\TypeBridge\Http\Include\IncludeTree;
+use PTGS\TypeBridge\Http\Include\Ref;
 use PTGS\TypeBridge\Http\Include\RefRegistry;
 use PTGS\TypeBridge\Http\TypeBridgeResponseSubscriber;
 use PTGS\TypeBridge\Http\TypeBridgeThrowableListener;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
+use PTGS\TypeBridge\Tests\Http\Include\Fixtures\RecordingExpandGuard;
+use PTGS\TypeBridge\Tests\Http\Include\Fixtures\RowsResponse;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\Thing;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\ThingNormalizer;
 use PTGS\TypeBridge\TypeBridgeBundle;
@@ -132,6 +138,51 @@ final class TypeBridgeBundleExtensionTest extends TestCase
         $registry = $container->get(RefRegistry::class);
         self::assertInstanceOf(RefRegistry::class, $registry);
         self::assertInstanceOf(ThingNormalizer::class, $registry->for(Thing::class));
+    }
+
+    public function test_without_an_expand_guard_every_reference_expands(): void
+    {
+        $container = $this->compileWithBundle(
+            bundleConfig: ['includes' => true],
+            before: static function (ContainerBuilder $container): void {
+                $container->register(ThingNormalizer::class)->setAutoconfigured(true);
+            },
+        );
+
+        $body = $this->expandThing($container);
+        self::assertIsArray($body['rows']);
+        self::assertSame('Thing thing-1', $body['rows'][0]['thing']['name'] ?? null);
+    }
+
+    public function test_an_apps_expand_guard_is_handed_to_the_resolver(): void
+    {
+        $container = $this->compileWithBundle(
+            bundleConfig: ['includes' => true],
+            before: static function (ContainerBuilder $container): void {
+                $container->register(ThingNormalizer::class)->setAutoconfigured(true);
+                $container->register(RecordingExpandGuard::class);
+                $container->setAlias(ExpandGuard::class, RecordingExpandGuard::class);
+            },
+        );
+
+        $this->expectException(ExpandRefusedException::class);
+
+        $this->expandThing($container);
+    }
+
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function expandThing(ContainerBuilder $container): array
+    {
+        $resolver = $container->get(IncludeResolver::class);
+        self::assertInstanceOf(IncludeResolver::class, $resolver);
+
+        return $resolver->body(
+            new RowsResponse(rows: [['id' => 'a', 'thing' => new Ref(Thing::class, 'thing-1')]]),
+            IncludeTree::parse(''),
+            IncludeTree::parseExpand('rows.thing'),
+        );
     }
 
     /**

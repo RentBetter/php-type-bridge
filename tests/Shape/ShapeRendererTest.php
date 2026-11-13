@@ -86,7 +86,7 @@ final class ShapeRendererTest extends TestCase
              *     limit: positive-int,
              *     label: non-empty-string,
              *     reviewer: class-string,
-             *     mode: value-of<self::MODE_*>,
+             *     mode: value-of<self::MODES>,
              *     result: self::RESULT_*,
              *     row: array{int, string, ...},
              *     envelope: array{id: string, ...},

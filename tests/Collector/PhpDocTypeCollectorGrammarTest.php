@@ -60,9 +60,14 @@ final class PhpDocTypeCollectorGrammarTest extends TestCase
         self::assertStringContainsString('export type Retry = 3;', self::$output);
     }
 
-    public function test_value_of_a_constant_wildcard_in_a_list_is_a_list_of_those_values(): void
+    public function test_a_constant_wildcard_in_a_list_is_a_list_of_those_values(): void
     {
         self::assertStringContainsString("manualModes?: ('simple' | 'full')[];", self::$output);
+    }
+
+    public function test_value_of_an_array_constant_is_its_elements(): void
+    {
+        self::assertStringContainsString("export type ModePick = 'simple' | 'full';", self::$output);
     }
 
     public function test_a_union_of_shapes_in_a_field(): void

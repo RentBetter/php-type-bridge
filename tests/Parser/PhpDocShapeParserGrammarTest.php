@@ -150,7 +150,7 @@ final class PhpDocShapeParserGrammarTest extends TestCase
 
     public function test_value_of_a_constant_wildcard(): void
     {
-        $type = (new PhpDocShapeParser())->parse('list<value-of<self::PORTAL_INPUT_TYPE_*>>');
+        $type = (new PhpDocShapeParser())->parse('list<value-of<self::OPTION_SETS_*>>');
 
         self::assertInstanceOf(ListType::class, $type);
         self::assertInstanceOf(ClassConstantType::class, $type->inner);

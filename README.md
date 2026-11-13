@@ -222,7 +222,8 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `non-empty-list<T>`, `non-empty-array<K, V>` | `T[]`, `Record<K, V>` |
 | `array{id: string, ...}` (unsealed) | `{ id: string; [key: string]: unknown }` |
 | `array{int, string, ...}` (unsealed tuple) | `[number, string, ...unknown[]]` |
-| `self::STATUS_*`, `Foo::BAR`, `value-of<self::MODE_*>` | the constants' values: `'draft' \| 'live'` |
+| `self::STATUS_*`, `Foo::BAR`, `parent::BAZ` | the constants' values: `'draft' \| 'live'`. A null value is an error, since nullability is written as `?T` or `T\|null`, and so is one `static::` constant of a class that is not final, which PHPStan reads by its declared type |
+| `value-of<self::OPTIONS>`, `value-of<Status::*>` | the elements of array constants, or the backing values when every constant matched is an enum case. A mix, any other constant, or a match with no value at all (only empty arrays or pure cases: PHPStan's `never`) is an error |
 | `(A \| B)`, `Base & array{...}` | `A \| B`, `interface … extends Base` |
 | `MoneyInterface`, `\Acme\Money` (a class) | the JSON it serialises to — see below |
 | `included<T>` — a generic listed in `includes.types` | `T`, on a key absent unless asked for — see below |
@@ -230,6 +231,8 @@ A shape is written for PHPStan first, so TypeBridge reads the PHPStan types a co
 | `enum<T>` — a generic listed in `includes.enumTypes` | `T`'s own type: an enum the normaliser hands over as a marker |
 
 A refinement keeps its spelling in the parsed tree, so a shape rendered back to PHPDoc reads as it was written.
+
+PHPStan reads `Base & array{...}` the same way: one shape holding the keys of both, which a normaliser returns as `[...$base, 'extra' => …]` (`ShapeIntersectionTypeNodeResolverExtension`, auto-loaded through `extension.neon`). On its own PHPStan reads the intersection of two shapes as a set of values: `never` when they share no required key, and without the keys of a part whose keys are all optional. The extension reads only the form the parser takes, a type alias naming one closed shape and then a keyed `array{...}`, open or not. As in an interface extending another, a key the base declares may be declared again only to narrow it (a narrower type, or required in place of optional); any other redeclaration is an invalid type. An open base, and any other form, is PHPStan's own reading.
 
 ### Keys sent only when asked for
 
@@ -432,6 +435,23 @@ final class DefinitionNormalizer implements ShapeNormalizer, RefNormalizer
 
 The bundle tags every autoconfigured implementation, and `RefRegistry` matches a ref's class with `is_a()`, so a Doctrine proxy finds its entity's normaliser. Each record carries its `id`. Every ref a request reaches at one level is fetched with one `resolveMany()` per entity, each id once, and the records are walked in turn: a path goes on into them (`checks.definition.latestResult`), `include` paths reach inside them, and a reference cycle is followed only as far as a path spells it out. A ref that no `RefNormalizer` claims, or a record it does not return, is a server bug (`LogicException`), not a 422.
 
+### Refusing an expand
+
+A record a caller may read can reference one they may not, and a path goes on through it. An app whose callers may not see everything a reference leads to registers an `ExpandGuard`, the service `IncludeResolver` asks before it expands:
+
+```php
+#[AsAlias(ExpandGuard::class)]
+final readonly class RoleExpandGuard implements ExpandGuard
+{
+    public function mayExpand(string $entityClass): bool
+    {
+        return $this->currentUser()->mayExpand($entityClass);
+    }
+}
+```
+
+It is asked about each entity an expand reaches, once a request, before anything of that entity is fetched — with the entity's own class, never a Doctrine proxy. A refusal ends the body: the subscriber answers 403 with the path that reached it (`` `checks.owner` cannot be expanded by this caller.``), never the entity. Without a guard every reference expands, as before.
+
 ### Sending an enum whole
 
 An enum that goes out as an object implements `PTGS\TypeBridge\Enum\ApiEnum`, which asks for `id()` and `jsonSerialize(): array`:
@@ -462,6 +482,7 @@ enum CheckStatus: string implements ApiEnum
 - `include`: `x.*` opens every optional key one level under x — never at the root, never mid-path.
 - `expand`: no `*`, since each expansion is a query. A field list narrows what is at a path to those keys and its `id`, keeping any key a deeper path goes on into: a record (`checks.definition(name)`), the rows themselves (`checks(name,status)`), or nested (`checks(name,status(name))`). The same path given twice merges its lists, a path without a list asks for the whole thing, and an unknown field is skipped.
 - A 422 for a root that is not a field of the response, a malformed path, a field list on `include`, or an expand that ends at something that is neither a ref, an `ApiEnum` nor narrowed by a list. It is the app's own 422: the subscriber builds it with the bound `ValidationErrorResponseFactory`, its path `include` or `expand`.
+- A 403 for an expand the app's `ExpandGuard` refuses (see [Refusing an expand](#refusing-an-expand)).
 
 Markers are found in the response's public properties and the arrays beneath them; any other object is left for `json_encode()`, and not looked into.
 
