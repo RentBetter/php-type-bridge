@@ -1878,7 +1878,8 @@ final class McpManifestBuilderTest extends TestCase
     public function testACollectionEntryKeptAnEmptyStringTakesNoNullWhereANotBlankRefusesIt(): void
     {
         // Its entry_options give each entry empty_data '': a null sent for one reaches validation
-        // as '', which NotBlank(allowNull: true) refuses and a NotNull lets through.
+        // as '', which NotBlank(allowNull: true) refuses and a NotNull lets through. And `""` sent
+        // for one is that blank too: a code takes at least one character.
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
         $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
         $codes = new CollectedFormField(name: 'codes', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryConstraints: [new NotBlank(allowNull: true)], entryBlankValue: '');
@@ -1887,7 +1888,7 @@ final class McpManifestBuilderTest extends TestCase
         self::assertInstanceOf(ShapeType::class, $contract);
 
         $body = $this->toolWithBody('PUT', [$codes, $notes], $contract)['inputSchema']['properties'];
-        self::assertSame(['type' => 'string'], $body['codes']['items']);
+        self::assertSame(['type' => 'string', 'minLength' => 1], $body['codes']['items']);
         self::assertSame(['type' => ['string', 'null']], $body['notes']['items']);
     }
 

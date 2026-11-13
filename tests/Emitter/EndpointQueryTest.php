@@ -402,6 +402,12 @@ final class EndpointQueryTest extends TestCase
         self::assertStringContainsString('{ [K in keyof T as null extends T[K] ? K : never]?: AsQuery<Exclude<T[K], null>> }', $this->emit()['Reports']);
     }
 
+    public function test_as_query_sends_no_null_in_a_list(): void
+    {
+        // A list's item is never null in a query string either: `ids[]=null` is the text "null".
+        self::assertStringContainsString('? { [K in keyof T]: AsQuery<Exclude<T[K], null>> }', $this->emit()['Reports']);
+    }
+
     public function test_as_query_keeps_a_tuple_a_tuple(): void
     {
         // A tuple is mapped as itself, position by position, not widened to a list of its members.
