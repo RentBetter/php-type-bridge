@@ -215,6 +215,24 @@ final class McpManifestGeneratorTest extends TestCase
         (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/NoRouteToolFixtures', new TypeBridgeConfig());
     }
 
+    public function testAFieldLeftOutIsRequiredWhereASubmitOfNothingRefusesIt(): void
+    {
+        // What a real submit of nothing refuses. With clearMissing off a field left out isn't
+        // submitted: it keeps what a new OrderData holds there — null for `enabled` and `note`, which
+        // their NotNull refuses, `standard` for `label` — and `memo`, bound to no property, is never
+        // checked. With it on each is submitted blank: `qty` 0, which Positive refuses, `label` null
+        // and `memo` blank, while an unticked `enabled` and a `note` of '' pass. A new filter's
+        // `product` is null either way, which its NotBlank refuses.
+        $required = static function (bool $clearMissing): array {
+            $tools = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/LeftOutFixtures', TypeBridgeConfig::fromArray(['clearMissing' => $clearMissing]))['tools'];
+
+            return array_column(array_map(static fn (array $tool): array => [$tool['name'], $tool['inputSchema']['required'] ?? []], $tools), 1, 0);
+        };
+
+        self::assertSame(['CreateOrder' => ['enabled', 'note'], 'ListOrders' => ['product']], $required(false));
+        self::assertSame(['CreateOrder' => ['qty', 'label', 'memo'], 'ListOrders' => ['product']], $required(true));
+    }
+
     public function testAToolWhosePathIsAClassTakesItsRoutesPlaceholders(): void
     {
         // The class types the Endpoint's path; the tool still takes each placeholder, held to its

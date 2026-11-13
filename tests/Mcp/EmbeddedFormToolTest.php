@@ -211,6 +211,33 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertInstanceOf(ShapeType::class, $contracts['Restock']->request?->body?->keys()?->fields[0]->type);
     }
 
+    public function test_a_collector_reads_a_tree_as_a_fresh_one_does_whatever_it_read_before(): void
+    {
+        // NoteInput's Charge is read in Notes' file in both trees, but its Fee only where the tree
+        // holds FeeShapes: read for the whole tree, it isn't what the Notes tree alone makes of it.
+        $tree = __DIR__ . '/../Fixture/TwoTreeFixtures';
+        $fee = static function (EndpointContractCollector $collector, string $src): ?string {
+            $charge = array_values($collector->collect($src, (new ResponseClassCollector())->statusIndex($src)))[0][0]->request?->body?->keys()?->fields[0]->type;
+
+            return $charge instanceof ShapeType ? $charge->fields[0]->type::class : null;
+        };
+        $collector = new EndpointContractCollector();
+
+        self::assertSame(ShapeType::class, $fee($collector, $tree));
+        self::assertSame($fee(new EndpointContractCollector(), $tree . '/Notes'), $fee($collector, $tree . '/Notes'));
+    }
+
+    public function test_a_key_typed_with_an_enum_declaring_its_own_shape_is_that_shape(): void
+    {
+        // NoteStatus serialises to its `_self`, which its TypeScript names NoteStatusData: the key
+        // is that shape, in the tool as in the Endpoint, not the enum's values.
+        $src = __DIR__ . '/../Fixture/EnumSelfKeyFixtures';
+        $status = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Notes'][0]->request?->body?->keys()?->fields[0]->type;
+
+        self::assertInstanceOf(ShapeType::class, $status);
+        self::assertSame(['code', 'label'], array_map(static fn (ShapeField $key): string => $key->name, $status->fields));
+    }
+
     public function test_a_class_named_from_its_files_namespace_or_a_use_is_read(): void
     {
         // `Input\AddressData`, `Parts\AddressData` and the name in full are one class, as PHP and the
