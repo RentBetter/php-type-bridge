@@ -11,7 +11,7 @@ use Symfony\Component\Routing\Attribute\Route;
 
 final class NoteController
 {
-    #[Route('/notes/{id}', requirements: ['id' => '\d+'], methods: ['GET'])]
+    #[Route('/notes/{id}', requirements: ['id' => '[0-9]+'], methods: ['GET'])]
     #[ApiRequest(path: NotePath::class)]
     #[ApiResponses([NoteResponse::class])]
     #[McpTool(description: 'Show a note.')]

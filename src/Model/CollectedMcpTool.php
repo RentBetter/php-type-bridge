@@ -20,6 +20,8 @@ final readonly class CollectedMcpTool
      * @param string|null  $unserved why the application, as it is deployed, serves no route for the
      *        tool: the manifest fails on it, which the TypeScript, describing the endpoint as its
      *        route does, does not
+     * @param string|null  $unreadable why what the tool takes can't be read as far as describing it
+     *        needs ({@see \PTGS\TypeBridge\Collector\UnreadableContract}): the manifest fails on it too
      */
     public function __construct(
         public string $name,
@@ -29,5 +31,6 @@ final readonly class CollectedMcpTool
         public bool $destructive,
         public array $scopes = [],
         public ?string $unserved = null,
+        public ?string $unreadable = null,
     ) {}
 }

@@ -7,9 +7,9 @@ namespace PTGS\TypeBridge\Model;
 final readonly class CollectedEndpointRequest
 {
     /**
-     * @param list<CollectedPathParam>|null $pathParams Route-derived path params, set when the
-     *        path comes from the #[Route] placeholders rather than an explicit #[ApiRequest(path:)]
-     *        class. Mutually exclusive with $path.
+     * @param list<CollectedPathParam>|null $pathParams the route's placeholders, null where it has
+     *        none: a tool's path arguments, and the Endpoint's path where no #[ApiRequest(path:)]
+     *        class ($path) types it
      */
     public function __construct(
         public ?CollectedInputReference $query = null,

@@ -91,6 +91,14 @@ final class McpManifestBuilder
         REGEX;
 
     /**
+     * A route requirement that takes nothing but digits: `\d` and classes of digits (`[0-46-9]`),
+     * each quantified any way at all (`{1,4}`, `*`, `+?`).
+     */
+    private const string DIGITS = <<<'REGEX'
+        {^(?:(?:\\d|\[(?:[0-9](?:-[0-9])?)+\])(?:(?:[*+?]|\{\d+(?:,\d*)?\})[?+]?)?)+$}D
+        REGEX;
+
+    /**
      * What a field's blank value is asked of: Symfony's own validator.
      */
     private ?ValidatorInterface $validator = null;
@@ -130,9 +138,11 @@ final class McpManifestBuilder
                 if (null === $contract->mcp) {
                     continue;
                 }
-                // A tool the application doesn't serve where it is deployed is no tool to publish.
-                if (null !== $contract->mcp->unserved) {
-                    throw new RuntimeException($contract->mcp->unserved);
+                // A tool the application doesn't serve where it is deployed, or whose arguments can't
+                // be read, is no tool to publish.
+                $refused = $contract->mcp->unserved ?? $contract->mcp->unreadable;
+                if (null !== $refused) {
+                    throw new RuntimeException($refused);
                 }
 
                 $tools[] = $this->tool($contract);
@@ -773,7 +783,9 @@ final class McpManifestBuilder
      * any. Read off how it is written: no sample of values shows there is no gap — `\d*[0-46-9]`
      * takes every one a sample would try, and not 5. Any other (`\d{1,4}`, `[2-9]\d*`) is the string
      * the router matches, its pattern saying which, so a tool sends no number the router answers 404
-     * to — or a number, where its pattern can't be carried over, a `%…%` placeholder's included.
+     * to. Where its pattern can't be carried over — `\d` on a route leaving `utf8` to the router's
+     * default, which may read it as any Unicode digit; a `%…%` placeholder — it is as narrow as a
+     * type says: digits alone an integer of at least 0, a signed whole number an integer, else a number.
      *
      * @return array{type: 'integer'|'number'|'string', minimum?: int, pattern?: string}
      */
@@ -792,8 +804,15 @@ final class McpManifestBuilder
         }
 
         $routed = PortableRegex::routePattern($requirement, $utf8);
+        if (null !== $routed) {
+            return ['type' => 'string', 'pattern' => $routed];
+        }
 
-        return null === $routed ? ['type' => 'number'] : ['type' => 'string', 'pattern' => $routed];
+        return match (true) {
+            [] !== $whole && null === $whole['decimal'] => ['type' => 'integer'],
+            1 === preg_match(self::DIGITS, $requirement) => ['type' => 'integer', 'minimum' => 0],
+            default => ['type' => 'number'],
+        };
     }
 
     /**

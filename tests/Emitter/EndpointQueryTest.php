@@ -260,6 +260,19 @@ final class EndpointQueryTest extends TestCase
         (new McpManifestGenerator())->generate($src, TypeBridgeConfig::fromArray(['typeAliases' => ['Money' => 'Dinero']]));
     }
 
+    public function test_what_only_a_tool_reads_of_a_query_fails_the_tool(): void
+    {
+        // `price` is left out of the query as its Endpoint reads it, so Money's null decides nothing
+        // there; but PriceType reads the value whole, which only the tool reads as PriceData's
+        // `_self`, where `amount: Money` can't be left out: the tool fails, the TypeScript doesn't.
+        $src = __DIR__ . '/../Fixture/QueryFieldContractFixtures';
+        self::assertNotEmpty((new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src)));
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Whether the project-wide alias "Money" (`Dinero`) admits null');
+
+        (new McpManifestGenerator())->generate($src, TypeBridgeConfig::fromArray(['typeAliases' => ['Money' => 'Dinero']]));
+    }
+
     public function test_a_bodys_null_is_asked_of_an_alias_only_for_an_mcp_tool(): void
     {
         // The same body, no tool: whether a key is cleared changes no TypeScript, so its alias's

@@ -28,4 +28,35 @@ final class ClassNames
 
         return false === $position ? null : substr($class, 0, $position);
     }
+
+    /**
+     * The class a name written in a file means, as PHP resolves it: the name in full where it starts
+     * with `\`; through the file's `use` statements by its first part (`Input\AddressData` where the
+     * file imports `…\Input`); else in the file's namespace. Whether a class of that name exists is
+     * not asked.
+     *
+     * @param array<string, string> $classImports the file's `use` statements, by the name each gives
+     */
+    public static function resolve(string $written, array $classImports, ?string $namespace): string
+    {
+        if (str_starts_with($written, '\\')) {
+            return ltrim($written, '\\');
+        }
+        $first = explode('\\', $written, 2);
+        if (isset($classImports[$first[0]])) {
+            return $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
+        }
+
+        return null === $namespace || '' === $namespace ? $written : $namespace . '\\' . $written;
+    }
+
+    /**
+     * Whether the name, written in a file, is resolved through one of its `use` statements.
+     *
+     * @param array<string, string> $classImports
+     */
+    public static function imported(string $written, array $classImports): bool
+    {
+        return !str_starts_with($written, '\\') && isset($classImports[explode('\\', $written, 2)[0]]);
+    }
 }

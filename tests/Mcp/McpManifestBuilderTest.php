@@ -1147,12 +1147,14 @@ final class McpManifestBuilderTest extends TestCase
             new CollectedPathParam('from2', 'number', '[2-9]\\d*'),
             new CollectedPathParam('nonzero', 'number', '-?[1-9]\\d*'),
             new CollectedPathParam('either', 'number', '\\d+|x'),
+            new CollectedPathParam('decimal', 'number', '-?[1-9]\\d*(?:\\.\\d+)?'),
         ]);
 
         self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['short']);
         self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['from2']);
         self::assertSame(['type' => 'integer'], $properties['nonzero']);
         self::assertSame(['type' => 'number'], $properties['either']);
+        self::assertSame(['type' => 'number'], $properties['decimal']);
     }
 
     public function testANumberSegmentWhoseRequirementIsNoUnboundedIntegerIsItsPattern(): void

@@ -35,6 +35,18 @@ final class PhpDocTypeHelperScopeTest extends TestCase
         self::assertTrue(ShapeField::admitsNull($union));
     }
 
+    public function test_a_name_is_the_class_php_resolves_it_to(): void
+    {
+        // A `use` names the class whether it exists or not: none of that name is no class, not the
+        // global one PHP never looks at. Unqualified and not imported, a name no class of the
+        // namespace has is still read, leniently, as the global class.
+        $helper = new PhpDocTypeHelper();
+
+        self::assertNull($helper->resolveClassName('DateTimeImmutable', 'App\\Notes\\Note', ['DateTimeImmutable' => 'App\\Missing\\DateTimeImmutable']));
+        self::assertSame('DateTimeImmutable', $helper->resolveClassName('DateTimeImmutable', 'App\\Notes\\Note', []));
+        self::assertSame('PTGS\\TypeBridge\\Support\\ClassNames', $helper->resolveClassName('Support\\ClassNames', 'PTGS\\TypeBridge\\Note', []));
+    }
+
     public function test_a_name_whose_class_cant_be_declared_in_this_install_is_no_class(): void
     {
         // DevOnlyRule's declaration throws without its require-dev interface: a bare name that

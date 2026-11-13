@@ -53,6 +53,9 @@ final class FormTypeInspector
     /** Reads a class's validation metadata, for whether a property cascades ({@see self::cascades()}). */
     private ?ValidatorInterface $validatorMetadata = null;
 
+    /** @var array<class-string, array{dataClass: ?class-string, fields: list<CollectedFormField>}> by form class: each built and read once, however many endpoints take it */
+    private array $inspected = [];
+
     public function __construct(?FormFactoryInterface $formFactory = null)
     {
         // The validator extension makes form-level validation options (constraints,
@@ -71,6 +74,15 @@ final class FormTypeInspector
      * @return array{dataClass: ?class-string, fields: list<CollectedFormField>}
      */
     public function inspect(string $formClass): array
+    {
+        return $this->inspected[$formClass] ??= $this->inspectAnew($formClass);
+    }
+
+    /**
+     * @param class-string $formClass
+     * @return array{dataClass: ?class-string, fields: list<CollectedFormField>}
+     */
+    private function inspectAnew(string $formClass): array
     {
         if (!class_exists($formClass)) {
             throw new RuntimeException(\sprintf('Form class "%s" was not found.', $formClass));

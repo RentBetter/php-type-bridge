@@ -208,6 +208,7 @@ final class EndpointContractCollector
                     $served = $this->routePathResolver?->routeFor($className, $method->getName());
                     $route = $served ?? $this->declaredRoute($className, $method->getName());
                     $httpMethod = self::httpMethodOf($route);
+                    [$request, $unreadable] = $this->resolveRequestContract($method, $route, $srcDir, $classFiles);
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
                         name: $endpointName,
@@ -215,8 +216,8 @@ final class EndpointContractCollector
                         controllerClass: $className,
                         methodName: $method->getName(),
                         responses: $responses,
-                        request: $this->resolveRequestContract($method, $route, $srcDir, $classFiles),
-                        mcp: $this->resolveMcpTool($method, $className, $endpointName, $httpMethod, $route, $served),
+                        request: $request,
+                        mcp: $this->resolveMcpTool($method, $className, $endpointName, $httpMethod, $route, $served, $unreadable),
                         httpMethod: $httpMethod,
                         httpPath: RoutePathResolver::clientPath($route?->getPath() ?? ''),
                     );
@@ -247,7 +248,10 @@ final class EndpointContractCollector
         return ucfirst('' !== $base ? $base : $methodName);
     }
 
-    private function resolveMcpTool(ReflectionMethod $method, string $className, string $endpointName, string $httpMethod, ?Route $route, ?Route $served): ?CollectedMcpTool
+    /**
+     * @param string|null $unreadable why what the tool takes can't be read, if it can't
+     */
+    private function resolveMcpTool(ReflectionMethod $method, string $className, string $endpointName, string $httpMethod, ?Route $route, ?Route $served, ?string $unreadable): ?CollectedMcpTool
     {
         $attributes = $method->getAttributes(McpTool::class);
         if ([] === $attributes) {
@@ -266,6 +270,7 @@ final class EndpointContractCollector
             destructive: $tool->destructive ?? ('GET' !== $httpMethod),
             scopes: $this->resolveMcpScopes($method),
             unserved: $unserved,
+            unreadable: $unreadable,
         );
     }
 
@@ -508,29 +513,63 @@ final class EndpointContractCollector
     /**
      * @param array<string, string> $classFiles
      */
-    private function resolveRequestContract(ReflectionMethod $method, ?Route $route, string $srcDir, array $classFiles): ?CollectedEndpointRequest
+    /**
+     * The request's inputs, and why what only its tool reads of them can't be read
+     * ({@see UnreadableContract}): that fails the tool, and the inputs are read as an endpoint no
+     * tool takes reads them.
+     *
+     * @param array<string, string> $classFiles
+     *
+     * @return array{0: CollectedEndpointRequest|null, 1: string|null}
+     */
+    private function resolveRequestContract(ReflectionMethod $method, ?Route $route, string $srcDir, array $classFiles): array
     {
         $attributes = $method->getAttributes(ApiRequest::class);
         /** @var ApiRequest|null $request */
         $request = [] !== $attributes ? $attributes[0]->newInstance() : null;
 
-        // An explicit class on #[ApiRequest(path:)] wins; otherwise the path params are
-        // derived from the route's placeholders (each a string unless its requirement
-        // refines the type — see PathParam).
+        // An explicit class on #[ApiRequest(path:)] types the Endpoint's path; nothing reads its
+        // keys. The route's placeholders are the tool's path arguments, and the Endpoint's where no
+        // class is named (each a string unless its requirement refines the type — see PathParam).
         $path = null !== $request && null !== $request->path
-            ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles, inQuery: false, nullAsked: false)
+            ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles, inQuery: false, nullAsked: false, readThrough: false)
             : null;
 
         // What only a tool reads — a body's null, an embedded form's keys — is read only for one.
         $tool = [] !== $method->getAttributes(McpTool::class);
+        $unreadable = null;
         $collected = new CollectedEndpointRequest(
-            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles, inQuery: true, tool: $tool) : null,
-            body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles, inQuery: false, tool: $tool) : null,
+            query: null === $request?->query ? null : $this->readInput($request->query, $srcDir, $classFiles, inQuery: true, tool: $tool, unreadable: $unreadable),
+            body: null === $request?->body ? null : $this->readInput($request->body, $srcDir, $classFiles, inQuery: false, tool: $tool, unreadable: $unreadable),
             path: $path,
-            pathParams: null === $path ? $this->derivePathParamsFromRoute($route) : null,
+            pathParams: $this->derivePathParamsFromRoute($route),
         );
 
-        return $collected->hasAnyInput() ? $collected : null;
+        return [$collected->hasAnyInput() ? $collected : null, $unreadable];
+    }
+
+    /**
+     * An input read as its endpoint needs it: for a tool, what the tool alone reads too. Where that
+     * can't be read, the tool can't be described, which fails it, not the run: the input is read as
+     * for no tool — which fails the run where what the TypeScript reads can't be read either.
+     *
+     * @param class-string          $formClass
+     * @param array<string, string> $classFiles
+     * @param string|null           $unreadable why the tool's can't be, the first time
+     */
+    private function readInput(string $formClass, string $srcDir, array $classFiles, bool $inQuery, bool $tool, ?string &$unreadable): CollectedInputReference
+    {
+        try {
+            return $this->resolveFormClass($formClass, $srcDir, $classFiles, $inQuery, $tool);
+        } catch (UnreadableContract $exception) {
+            if (!$tool) {
+                throw $exception;
+            }
+            $input = $this->resolveFormClass($formClass, $srcDir, $classFiles, $inQuery, tool: false);
+            $unreadable ??= $exception->getMessage();
+
+            return $input;
+        }
     }
 
     /**
@@ -1012,7 +1051,7 @@ final class EndpointContractCollector
             return $read['read'];
         }
         if (--$this->readsLeft < 0) {
-            throw new RuntimeException(\sprintf(
+            throw new UnreadableContract(\sprintf(
                 'The request contract of %s names aliases and classes that name one another in more ways than are read through (%d): what its keys are can\'t be said without reading every one. Have fewer of them name one another.',
                 $this->readFor,
                 self::READS,
@@ -1050,7 +1089,7 @@ final class EndpointContractCollector
     {
         $type = $this->typeAliases[$name];
 
-        return $this->configAliasesAdmittingNull[$name] ??= TypeScriptTypes::admitsNull($type, $this->typeAliases) ?? throw new RuntimeException(\sprintf(
+        return $this->configAliasesAdmittingNull[$name] ??= TypeScriptTypes::admitsNull($type, $this->typeAliases) ?? throw new UnreadableContract(\sprintf(
             'Whether the project-wide alias "%s" (`%s`) admits null can\'t be read from its TypeScript, and a key of a request is typed with it: whether that key may be left out, or cleared, turns on it. Write the null out — `%2$s | null` where it admits one, `NonNullable<%2$s>` where it doesn\'t.',
             $name,
             $type,

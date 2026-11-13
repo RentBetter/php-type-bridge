@@ -378,7 +378,7 @@ final class PhpDocTypeHelper
             }
             foreach (['@phpstan-use', '@template-use', '@use'] as $rank => $tagName) {
                 foreach ($node->getUsesTagValues($tagName) as $use) {
-                    $uses[self::traitNamed($use->type->type->name, $classImports, $namespace)][$rank] ??= array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $use->type->genericTypes));
+                    $uses[ClassNames::resolve($use->type->type->name, $classImports, $namespace)][$rank] ??= array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $use->type->genericTypes));
                 }
             }
         }
@@ -396,25 +396,6 @@ final class PhpDocTypeHelper
             'importTags' => $importTags,
             'uses' => $bound,
         ];
-    }
-
-    /**
-     * The class a trait's name written in a file means: fully qualified, through the file's `use`
-     * statements, or in its namespace.
-     *
-     * @param array<string, string> $classImports
-     */
-    private static function traitNamed(string $written, array $classImports, string $namespace): string
-    {
-        if (str_starts_with($written, '\\')) {
-            return ltrim($written, '\\');
-        }
-        $first = explode('\\', $written, 2);
-        if (isset($classImports[$first[0]])) {
-            return $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
-        }
-
-        return '' === $namespace ? $written : $namespace . '\\' . $written;
     }
 
     /**
@@ -696,17 +677,9 @@ final class PhpDocTypeHelper
      */
     public function resolveClassName(string $name, ?string $ownerClass, array $classImports): ?string
     {
-        $candidates = [];
-        if (str_starts_with($name, '\\')) {
-            $candidates[] = ltrim($name, '\\');
-        } else {
-            $first = explode('\\', $name, 2);
-            if (isset($classImports[$first[0]])) {
-                $candidates[] = $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
-            }
-            if (null !== $ownerClass && null !== $namespace = ClassNames::namespaceOf($ownerClass)) {
-                $candidates[] = $namespace . '\\' . $name;
-            }
+        // As PHP resolves it — and, leniently, one it would not, unqualified, as the global class.
+        $candidates = [ClassNames::resolve($name, $classImports, null === $ownerClass ? null : ClassNames::namespaceOf($ownerClass))];
+        if (!str_starts_with($name, '\\') && !ClassNames::imported($name, $classImports)) {
             $candidates[] = $name;
         }
 
@@ -887,23 +860,17 @@ final class PhpDocTypeHelper
         array $shortNameMap,
         array $classImports = [],
     ): string {
-        $trimmed = ltrim($classRef, '\\');
         // As PHP and PHPStan resolve it: a name the file's `use` statements give is that class, ahead
         // of one of the same short name in its namespace.
-        $first = explode('\\', $trimmed, 2);
-        if (!str_starts_with($classRef, '\\') && isset($classImports[$first[0]])) {
-            return $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
+        $resolved = ClassNames::resolve($classRef, $classImports, ClassNames::namespaceOf($ownerClass));
+        if (ClassNames::imported($classRef, $classImports) || isset($classFiles[$resolved])) {
+            return $resolved;
         }
+        // Leniently, where that is no class of the source tree: the name in full, then the one class
+        // there of its short name.
+        $trimmed = ltrim($classRef, '\\');
         if (isset($classFiles[$trimmed])) {
             return $trimmed;
-        }
-
-        $namespace = ClassNames::namespaceOf($ownerClass);
-        if (null !== $namespace) {
-            $candidate = $namespace . '\\' . $trimmed;
-            if (isset($classFiles[$candidate])) {
-                return $candidate;
-            }
         }
 
         $candidates = $shortNameMap[$trimmed] ?? [];
