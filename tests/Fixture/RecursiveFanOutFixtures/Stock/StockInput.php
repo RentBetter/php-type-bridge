@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Fixture\RecursiveFanOutFixtures\Stock;
 
 /**
- * Thirty shelves of forty categories each: what a shelf is, and a category, is the same each time.
+ * Thirty shelves of forty racks of a category each: what a shelf is, a rack and a category, is
+ * the same each time.
  * `memo`, read last, may be cleared.
  *
  * @phpstan-type Memo = string|null

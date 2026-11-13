@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Fixture\AliasCliqueFixtures\Notes;
 
 /**
- * Aliases each naming every other: read through on every path but a bounded number.
+ * Aliases each naming every other: more orders of them than are read through, so its tool fails.
  *
  * @phpstan-type A1 = array{a2?: A2, a3?: A3, a4?: A4, a5?: A5, a6?: A6, a7?: A7, a8?: A8, a9?: A9, a10?: A10}
  * @phpstan-type A2 = array{a1?: A1, a3?: A3, a4?: A4, a5?: A5, a6?: A6, a7?: A7, a8?: A8, a9?: A9, a10?: A10}

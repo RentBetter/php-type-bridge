@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Controller
 
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
+use PTGS\TypeBridge\Attribute\McpTool;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedFilterType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedNoteType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\AliasedProductFilterType;
@@ -189,6 +190,7 @@ final class ReportController
     #[Route('/api/reports/{id}/place', methods: ['PATCH'])]
     #[ApiRequest(body: ReportPlaceType::class)]
     #[ApiResponses([ReportResponse::class])]
+    #[McpTool(description: 'Move a report.')]
     public function updateReportPlace(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
@@ -197,6 +199,7 @@ final class ReportController
     #[Route('/api/reports/{id}/fields', methods: ['PUT'])]
     #[ApiRequest(body: ReportFieldsType::class)]
     #[ApiResponses([ReportResponse::class])]
+    #[McpTool(description: 'Update a report\'s fields.')]
     public function updateReportFields(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
@@ -205,6 +208,7 @@ final class ReportController
     #[Route('/api/reports/{id}/note', methods: ['PUT'])]
     #[ApiRequest(body: ReportNoteType::class)]
     #[ApiResponses([ReportResponse::class])]
+    #[McpTool(description: 'Note a report.')]
     public function updateReportNote(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
@@ -213,6 +217,7 @@ final class ReportController
     #[Route('/api/reports/{id}/aliased-note', methods: ['PUT'])]
     #[ApiRequest(body: AliasedNoteType::class)]
     #[ApiResponses([ReportResponse::class])]
+    #[McpTool(description: 'Note a report, through an alias.')]
     public function updateAliasedNote(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
@@ -221,6 +226,7 @@ final class ReportController
     #[Route('/api/reports/{id}/layered-note', methods: ['PUT'])]
     #[ApiRequest(body: LayeredNoteType::class)]
     #[ApiResponses([ReportResponse::class])]
+    #[McpTool(description: 'Note a report, through layered aliases.')]
     public function updateLayeredNote(): ReportResponse
     {
         throw new \LogicException('Fixture only.');
@@ -229,6 +235,7 @@ final class ReportController
     #[Route('/api/reports/{id}/status', methods: ['PUT'])]
     #[ApiRequest(body: ReportStatusType::class)]
     #[ApiResponses([ReportResponse::class])]
+    #[McpTool(description: 'Set a report\'s status.')]
     public function updateReportStatus(): ReportResponse
     {
         throw new \LogicException('Fixture only.');

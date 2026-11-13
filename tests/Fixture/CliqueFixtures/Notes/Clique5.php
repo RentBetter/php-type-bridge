@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Fixture\CliqueFixtures\Notes;
 
 /**
- * Names every other: read through, its keys are read on every path but a bounded number.
+ * Names every other: more orders of them than are read through, so its tool fails.
  *
  * @phpstan-type _self = array{
  *     c1?: Clique1,

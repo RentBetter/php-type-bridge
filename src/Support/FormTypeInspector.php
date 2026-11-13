@@ -287,15 +287,7 @@ final class FormTypeInspector
                 return true;
             }
         }
-        foreach ([FormEvents::PRE_SUBMIT, FormEvents::SUBMIT] as $event) {
-            foreach ($config->getEventDispatcher()->getListeners($event) as $listener) {
-                if (!\is_array($listener) || !$listener[0] instanceof TrimListener) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return self::rewritesOnSubmit($config, TrimListener::class);
     }
 
     /**
@@ -311,9 +303,21 @@ final class FormTypeInspector
      */
     private static function rewritesChildren(FormConfigInterface $config): bool
     {
+        return self::rewritesOnSubmit($config, TrimListener::class, ResizeFormListener::class);
+    }
+
+    /**
+     * Whether a listener reads what is submitted before it is read (PRE_SUBMIT) or once it is
+     * (SUBMIT), and may rewrite it: any but those known to rewrite nothing that is validated.
+     *
+     * @param FormConfigInterface<mixed> $config
+     * @param class-string              ...$harmless the listeners known not to
+     */
+    private static function rewritesOnSubmit(FormConfigInterface $config, string ...$harmless): bool
+    {
         foreach ([FormEvents::PRE_SUBMIT, FormEvents::SUBMIT] as $event) {
             foreach ($config->getEventDispatcher()->getListeners($event) as $listener) {
-                if (!\is_array($listener) || !($listener[0] instanceof TrimListener || $listener[0] instanceof ResizeFormListener)) {
+                if (!\is_array($listener) || !array_any($harmless, static fn (string $class): bool => $listener[0] instanceof $class)) {
                     return true;
                 }
             }

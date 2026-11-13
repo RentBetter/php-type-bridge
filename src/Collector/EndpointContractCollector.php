@@ -16,6 +16,7 @@ use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\MapType;
@@ -75,14 +76,23 @@ final class EndpointContractCollector
     /** How many aliases and classes one contract reads through, at most. */
     private const int READS = 1000;
 
-    /** How many more the contract being read may read through ({@see self::mayRead()}). */
+    /** How many more the contract being read may read through ({@see self::readDeclared()}). */
     private int $readsLeft = self::READS;
 
-    /** @var array<string, ParsedType> by where it is declared and how it is asked: an alias or a `_self` read in full */
+    /** The class whose contract is being read, which a read past the bound fails naming. */
+    private string $readFor = '';
+
+    /** @var array<string, array{read: ParsedType, through: array<string, true>}> by where it is declared and how it is asked: an alias or a `_self` read, and the names it read through */
     private array $readThrough = [];
 
-    /** How many reads were cut short by a name being read already, or past the bound: a read none of was is kept */
-    private int $cutShort = 0;
+    /** @var list<string> where each read under way was cut short: the name it named that was being read */
+    private array $cutAt = [];
+
+    /** @var array<string, true> the names the read under way has read through */
+    private array $through = [];
+
+    /** @var array<string, array{definition: string, class: string, file: string, name: string}|null> by source directory and class: where its `_self` is declared */
+    private array $selves = [];
 
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
@@ -459,7 +469,8 @@ final class EndpointContractCollector
      * it can fail to supply one are errors rather than fallbacks: a routing file that will not load,
      * or a method the loaded collection does not route — a route confined to another env, or
      * imported in another's section alone, included. Without one it is the route the attributes
-     * declare, which must be served in the env too. Either would otherwise publish a path as if it
+     * declare, which must be declared — one written elsewhere, YAML say, has nowhere to be read —
+     * and served in the env too. Either would otherwise publish a path as if it
      * were served, and a tool pointing at a path the application answers 404 to is worse than no
      * tool. The manifest fails on it; the endpoint's TypeScript, described by its route, does not.
      *
@@ -469,7 +480,11 @@ final class EndpointContractCollector
     {
         $declared = RoutePathResolver::clientPath($route?->getPath() ?? '');
         if (null === $this->routePathResolver) {
-            return [$declared, null !== $route && !$this->declaredRoutes->serves($className, $methodName) ? $this->notServed($className, $methodName, 'what its #[Route]s declare') : null];
+            return [$declared, match (true) {
+                null === $route => \sprintf('Endpoint "%s::%s" is exposed as an MCP tool but no #[Route] declares it, and no `routing` is configured to find the route serving it in.', $className, $methodName),
+                !$this->declaredRoutes->serves($className, $methodName) => $this->notServed($className, $methodName, 'what its #[Route]s declare'),
+                default => null,
+            }];
         }
 
         if (null !== $error = $this->routePathResolver->loadError()) {
@@ -609,6 +624,8 @@ final class EndpointContractCollector
             inQuery: $inQuery,
             // A query's key that can't be left out turns its Endpoint's `query` required, tool or not.
             nullAsked: $inQuery || $tool,
+            // A body's keys are read only for a tool, the one reader of them.
+            readThrough: $inQuery || $tool,
         );
     }
 
@@ -686,6 +703,9 @@ final class EndpointContractCollector
     private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked, string $name = '_self'): array
     {
         $this->readsLeft = self::READS;
+        $this->readFor = $class;
+        $this->cutAt = [];
+        $this->through = [];
         $reading = [$file . "\0" . $name => true];
         $self = $this->parseType($definition);
         if ($self instanceof NameRefType && null === $self->class) {
@@ -704,7 +724,7 @@ final class EndpointContractCollector
      * @param class-string $ownerClass
      * @param list<\PTGS\TypeBridge\Model\CollectedFormField> $fields
      */
-    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = [], bool $inQuery = false, bool $nullAsked = true): CollectedInputReference
+    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = [], bool $inQuery = false, bool $nullAsked = true, bool $readThrough = true): CollectedInputReference
     {
         $file = $classFiles[$ownerClass] ?? null;
         if (null === $file) {
@@ -732,8 +752,11 @@ final class EndpointContractCollector
         }
 
         // The keys it inherits are as much its contract as its own: whether a query may be left out,
-        // and whether a body key is required or may be cleared, is theirs to say too.
-        [$contract, $inherited] = $this->selfContract($definitions['_self'], $ownerClass, $file, $srcDir, $classFiles, $inQuery, $nullAsked);
+        // and whether a body key is required or may be cleared, is theirs to say too. Where nothing
+        // reads them, they are as written.
+        [$contract, $inherited] = $readThrough
+            ? $this->selfContract($definitions['_self'], $ownerClass, $file, $srcDir, $classFiles, $inQuery, $nullAsked)
+            : [ShapeType::declaredBy($this->parseType($definitions['_self'])), null];
 
         return new CollectedInputReference(
             formClass: $formClass,
@@ -779,10 +802,24 @@ final class EndpointContractCollector
         }
 
         $import = $this->files->imports($class, $file, $srcDir, $classFiles)['imports'][$alias] ?? null;
-        $target = null === $import ? null : $classFiles[$import->targetClass] ?? null;
+
+        return null === $import ? null : $this->importedDeclaration($import, $classFiles);
+    }
+
+    /**
+     * Where an imported alias is declared: in the class it is imported from, under the name it has
+     * there. Null where that class is outside the source tree, or declares no such alias.
+     *
+     * @param array<string, string> $classFiles
+     *
+     * @return array{definition: string, class: string, file: string, name: string}|null
+     */
+    private function importedDeclaration(ImportedType $import, array $classFiles): ?array
+    {
+        $target = $classFiles[$import->targetClass] ?? null;
         $definition = null === $target ? null : $this->files->definitions($target)[$import->sourceName()] ?? null;
 
-        return null === $import || null === $target || null === $definition ? null : ['definition' => $definition, 'class' => $import->targetClass, 'file' => $target, 'name' => $import->sourceName()];
+        return null === $target || null === $definition ? null : ['definition' => $definition, 'class' => $import->targetClass, 'file' => $target, 'name' => $import->sourceName()];
     }
 
     /**
@@ -822,9 +859,11 @@ final class EndpointContractCollector
         $read = fn (ParsedType $part, ?bool $asked = null): ParsedType => $this->readAliases($part, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $asked ?? $nullAsked);
 
         return match (true) {
+            // A class's name as PHP resolves it where it is written: `Input\AddressData` from the
+            // file's namespace, or through a `use` of one.
             $type instanceof NameRefType => null === $type->class
                 ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked)
-                : $this->readClass($type, $type->class, $srcDir, $classFiles, $reading, $inQuery, $nullAsked),
+                : $this->readClass($type, $this->docHelper->resolveClassName($type->class, $class, $this->files->classImports($file)) ?? $type->class, $srcDir, $classFiles, $reading, $inQuery, $nullAsked),
             // An explicit null settles the type's own: what else it admits is not asked of it.
             $type instanceof NullableType => new NullableType($read($type->inner, $type->optional && $nullAsked), $type->optional),
             $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member, $nullAsked && !$type->hasNull()), $type->types)),
@@ -869,17 +908,6 @@ final class EndpointContractCollector
     }
 
     /**
-     * Whether one more alias or class may be read through for the contract being read. One read in
-     * full is kept ({@see self::readDeclared()}), but one cut short by a name being read already is
-     * read again on each path it is named on, so classes naming one another unroll into every order
-     * of them. Past a bound no real contract nears, a name stays a name.
-     */
-    private function mayRead(): bool
-    {
-        return --$this->readsLeft >= 0;
-    }
-
-    /**
      * A key typed with a class, as the class is sent and its TypeScript names it: an enum, its values
      * — but one that names its value union otherwise (#[ValueOfName]), whose own name is its `_self`;
      * any other class its `_self`, read where it is declared, as an alias is. As written where the
@@ -911,6 +939,18 @@ final class EndpointContractCollector
      */
     private function selfOf(string $class, string $srcDir, array $classFiles): ?array
     {
+        $key = $srcDir . "\0" . $class;
+
+        return \array_key_exists($key, $this->selves) ? $this->selves[$key] : $this->selves[$key] = $this->findSelf($class, $srcDir, $classFiles);
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     *
+     * @return array{definition: string, class: string, file: string, name: string}|null
+     */
+    private function findSelf(string $class, string $srcDir, array $classFiles): ?array
+    {
         if (!PhpFileClassLocator::loads($class)) {
             return null;
         }
@@ -930,10 +970,9 @@ final class EndpointContractCollector
                 return ['definition' => $scope['definitions']['_self'], 'class' => $candidate, 'file' => $file, 'name' => '_self'];
             }
             $import = $scope['imports']['_self'] ?? null;
-            $target = null === $import ? null : $classFiles[$import->targetClass] ?? null;
-            $definition = null === $target ? null : $this->files->definitions($target)[$import->sourceName()] ?? null;
-            if (null !== $definition) {
-                return ['definition' => $definition, 'class' => $import->targetClass, 'file' => $target, 'name' => $import->sourceName()];
+            $declared = null === $import ? null : $this->importedDeclaration($import, $classFiles);
+            if (null !== $declared) {
+                return $declared;
             }
         }
 
@@ -942,9 +981,16 @@ final class EndpointContractCollector
 
     /**
      * An alias or a class's `_self` read where it is declared, keyed by the name it is declared
-     * under — which an import may give another: as written where it names itself at any remove.
-     * What it makes is the same wherever it is read but where a remove names something being read
-     * already, so it is read once and kept, unless it did.
+     * under — which an import may give another: as written where it names one being read already,
+     * itself at any remove included. What a read makes turns only on which of the names it reaches
+     * are being read, so it is kept, and read back wherever none it read through is: one that named
+     * only itself makes the same wherever it isn't being read, so a class naming itself is read once
+     * however many keys name it. One cut short where it named a read further out is not kept: read
+     * where that one isn't, it reads on.
+     *
+     * Classes naming one another still unroll into every order of them, each cut short at a
+     * different one. Past a bound no real contract nears they fail the read: a name left unread
+     * would publish a tool saying less than its Endpoint — a key its alias lets be cleared, refused.
      *
      * @param array{definition: string, class: string, file: string, name: string} $declared
      * @param array<string, string> $classFiles
@@ -953,14 +999,24 @@ final class EndpointContractCollector
     private function readDeclared(NameRefType $written, array $declared, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked, bool $unwrapOptional): ParsedType
     {
         $key = $declared['file'] . "\0" . $declared['name'];
-        $kept = $key . "\0" . ($inQuery ? 'query' : 'body') . "\0" . ($nullAsked ? 'asked' : 'not');
-        if (isset($this->readThrough[$kept])) {
-            return $this->readThrough[$kept];
-        }
-        if (isset($reading[$key]) || !$this->mayRead()) {
-            ++$this->cutShort;
+        if (isset($reading[$key])) {
+            $this->cutAt[] = $key;
 
             return $written;
+        }
+        $kept = $key . "\0" . ($inQuery ? 'query' : 'body') . "\0" . ($nullAsked ? 'asked' : 'not');
+        $read = $this->readThrough[$kept] ?? null;
+        if (null !== $read && [] === array_intersect_key($read['through'], $reading)) {
+            $this->through += $read['through'] + [$key => true];
+
+            return $read['read'];
+        }
+        if (--$this->readsLeft < 0) {
+            throw new RuntimeException(\sprintf(
+                'The request contract of %s names aliases and classes that name one another in more ways than are read through (%d): what its keys are can\'t be said without reading every one. Have fewer of them name one another.',
+                $this->readFor,
+                self::READS,
+            ));
         }
         $parsed = $this->parseType($declared['definition']);
         if (null === $parsed) {
@@ -968,11 +1024,18 @@ final class EndpointContractCollector
         }
         $parsed = $unwrapOptional && $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
 
-        $cutShort = $this->cutShort;
+        $cutAt = \count($this->cutAt);
+        $outer = $this->through;
+        $this->through = [];
         $read = $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true], $inQuery, $nullAsked);
-        if ($cutShort === $this->cutShort) {
-            $this->readThrough[$kept] = $read;
+        // Cut short where it named itself, it is all there is to read of it; where it named a read
+        // further out, that read is cut short too.
+        $further = array_values(array_filter(\array_slice($this->cutAt, $cutAt), static fn (string $at): bool => $at !== $key));
+        array_splice($this->cutAt, $cutAt, null, $further);
+        if ([] === $further) {
+            $this->readThrough[$kept] ??= ['read' => $read, 'through' => $this->through];
         }
+        $this->through = $outer + $this->through + [$key => true];
 
         return $read;
     }

@@ -56,8 +56,9 @@ use stdClass;
  * same shape the generated TypeScript is typed from, so a tool and a typed client never disagree
  * about one endpoint; the form speaks only for what the contract does not say, and for the values a
  * choice field accepts, which only the built form knows. One exception: the body of a POST — a
- * request that makes something — requires a field its constraints refuse blank (a NotBlank, a NotNull,
- * a Count — whatever refuses what its form makes of a value left out), since a contract the request
+ * request that makes something — and, where the application submits with `clearMissing` on, every
+ * request's body and query require a field its constraints refuse blank (a NotBlank, a NotNull, a
+ * Count — whatever refuses what its form makes of a value left out), since a contract the request
  * shares with an update declares every key optional, and a model would
  * otherwise learn what it can't leave out only from a 422. A body key the contract types `T|null` takes
  * null — an update's "clear this" — where `?T` is only ever left out. A key the contract declares as a scalar or
@@ -82,6 +83,14 @@ final class McpManifestBuilder
     private const array LOWER_BOUNDS = ['minimum', 'exclusiveMinimum', 'minLength', 'minItems'];
 
     /**
+     * A route requirement written as taking every whole number from 0 (`\d+`, `[0-9]+`) or 1
+     * (`[1-9]\d*`, `[1-9][0-9]*`) up, perhaps signed (`-?`) and with a decimal part (`(?:\.\d+)?`).
+     */
+    private const string WHOLE_NUMBERS = <<<'REGEX'
+        {^(?<sign>-\?)?(?:(?<from0>(?:\\d|\[0-9\])\+)|\[1-9\](?:\\d|\[0-9\])\*)(?<decimal>\((?:\?:)?\\\.(?:\\d|\[0-9\])\+\)\?)?$}D
+        REGEX;
+
+    /**
      * What a field's blank value is asked of: Symfony's own validator.
      */
     private ?ValidatorInterface $validator = null;
@@ -96,8 +105,9 @@ final class McpManifestBuilder
      * @param array<string, string> $typeAliases    the project-wide aliases, name => TypeScript: a key
      *                                              typed with one is the JSON type its TypeScript is, where
      *                                              that is a primitive
-     * @param bool                  $clearMissing   whether a body is submitted with Symfony's `clearMissing`
-     *                                              on, so a field left out is submitted blank
+     * @param bool                  $clearMissing   whether a request's forms, its body's and its query's, are
+     *                                              submitted with Symfony's `clearMissing` on, so a field left
+     *                                              out is submitted blank, whatever the method
      *                                              ({@see \PTGS\TypeBridge\Config\TypeBridgeConfig::$clearMissing})
      */
     public function __construct(
@@ -202,12 +212,12 @@ final class McpManifestBuilder
 
             $query = [];
             $body = [];
-            $this->addFields($request->query, $query, $required);
-            // A field left out is submitted blank, and so required where that is refused, on any write
-            // but a PATCH with `clearMissing` on — Symfony's request handler submits so — and on a POST,
-            // which makes something, with it off.
-            $makes = $this->clearMissing ? 'PATCH' !== strtoupper($httpMethod) : 'POST' === strtoupper($httpMethod);
-            $this->addFields($request->body, $body, $required, makes: $makes, json: true);
+            // With `clearMissing` on, a field left out is submitted blank — `$form->submit($data)`
+            // submits a query and a body so, whatever the method — and so required where that is
+            // refused. With it off it isn't submitted, and only a POST, which makes something, holds
+            // it to what its new object refuses.
+            $this->addFields($request->query, $query, $required, makes: $this->clearMissing);
+            $this->addFields($request->body, $body, $required, makes: $this->clearMissing || 'POST' === strtoupper($httpMethod), json: true);
             // One argument of a name fills a path param and a field alike: it holds to both.
             foreach ([$query, $body] as $fields) {
                 foreach ($fields as $name => $schema) {
@@ -242,8 +252,10 @@ final class McpManifestBuilder
      *
      * @param array<array-key, array<string, mixed>> $properties
      * @param list<string>         $required
-     * @param bool                 $makes      whether the request makes something (a POST body), so a
-     *                                         field its constraints refuse blank is one it can't go without
+     * @param bool                 $makes      whether a field left out is held to what refuses it: one
+     *                                         submitted blank with `clearMissing` on, or a POST body's,
+     *                                         which makes something, so one its constraints refuse blank
+     *                                         is one it can't go without
      * @param bool                 $json       whether the fields are sent as JSON (a body), which can carry a
      *                                         null; a query string cannot
      */
@@ -755,27 +767,28 @@ final class McpManifestBuilder
     }
 
     /**
-     * A number path segment as what its requirement lets the router match, asked of the requirement as
-     * the router compiles it. One that takes every whole number from 0 or 1 up — no ceiling, no gap —
-     * is an integer of at least that, or a number where it takes `1.5` too; one that may take
-     * negatives, an integer or a number. Any other (`\d{1,4}`, `[2-9]\d*`) is the string the router
-     * matches, its pattern saying which, so a tool sends no number the router answers 404 to — or a
-     * number, where its pattern can't be carried over, a `%…%` placeholder's included.
+     * A number path segment as what its requirement lets the router match. One written as taking
+     * every whole number from 0 (`\d+`, `[0-9]+`) or 1 (`[1-9]\d*`) up is an integer of at least
+     * that, or a number where it takes a decimal part too (`(?:\.\d+)?`); signed (`-?\d+`), one of
+     * any. Read off how it is written: no sample of values shows there is no gap — `\d*[0-46-9]`
+     * takes every one a sample would try, and not 5. Any other (`\d{1,4}`, `[2-9]\d*`) is the string
+     * the router matches, its pattern saying which, so a tool sends no number the router answers 404
+     * to — or a number, where its pattern can't be carried over, a `%…%` placeholder's included.
      *
      * @return array{type: 'integer'|'number'|'string', minimum?: int, pattern?: string}
      */
     private static function numberHeldTo(string $requirement, ?bool $utf8): array
     {
-        $pattern = '{^(?:' . $requirement . ')$}sD' . (true === $utf8 ? 'u' : '');
-        $matches = static fn (string $value): bool => 1 === preg_match($pattern, $value);
-
-        $from = $matches('0') ? 0 : 1;
-        // A ceiling of digits past any a real id has shows at the last of these.
-        $unbounded = array_all(['1', '2', '9', '10', '99', '100', '1000', '123456789012', str_repeat('9', 64)], $matches);
-        if ($unbounded) {
-            $type = $matches('1.5') ? 'number' : 'integer';
-
-            return $matches('-1') ? ['type' => $type] : ['type' => $type, 'minimum' => $from];
+        if (1 === preg_match(self::WHOLE_NUMBERS, $requirement, $whole, \PREG_UNMATCHED_AS_NULL)) {
+            $type = null === $whole['decimal'] ? 'integer' : 'number';
+            $from = null === $whole['from0'] ? 1 : 0;
+            // Signed, from 1 up leaves out 0.
+            if (null === $whole['sign']) {
+                return ['type' => $type, 'minimum' => $from];
+            }
+            if (0 === $from) {
+                return ['type' => $type];
+            }
         }
 
         $routed = PortableRegex::routePattern($requirement, $utf8);

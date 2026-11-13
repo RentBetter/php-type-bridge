@@ -67,11 +67,12 @@ final readonly class TypeBridgeConfig
      *   a route confined to another (`#[Route(env: 'dev')]`), or a section of the routing config
      *   for one (`when@dev:`), is served there alone. `prod` unless the config says. Mirror
      *   `parameters.typeBridge.routingEnv` in phpstan.neon.
-     * @param bool $clearMissing whether the application submits a request body as Symfony does by
-     *   default (`$form->submit($data)`, `clearMissing` on): a field left out of any write but a
-     *   PATCH is submitted blank, an embedded form's fields each in turn. Off — as before the option
-     *   was — a field left out is not submitted, and a POST requires what refuses its blank. Which
-     *   fields a write can't go without turns on it.
+     * @param bool $clearMissing whether the application submits a request's forms as Symfony does by
+     *   default (`$form->submit($data)`, `clearMissing` on, as the bundled RequestFormProcessor
+     *   does): a field left out of a body or a query is submitted blank, whatever the method — a
+     *   PATCH too — an embedded form's fields each in turn. Off — as before the option was — a field
+     *   left out is not submitted, and a POST requires what refuses its blank. Which fields a request
+     *   can't go without turns on it.
      */
     public function __construct(
         public TypeScriptNaming $typescript = new TypeScriptNaming(),

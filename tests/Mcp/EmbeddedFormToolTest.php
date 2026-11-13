@@ -71,13 +71,35 @@ final class EmbeddedFormToolTest extends TestCase
     public function test_what_a_class_reads_as_is_the_same_whichever_input_reads_it_first(): void
     {
         // AData and BData name each other. Read for AData's input first, BData is cut short where it
-        // names AData again: kept, BData's own input would find AData's `b` read through.
+        // names AData, being read, so it isn't kept: kept, BData's own input would find AData's `b`
+        // read through.
         $src = __DIR__ . '/../Fixture/MutualInputFixtures';
         $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Pairs'];
         $a = $contracts[1]->request?->body?->keys()?->fields[0]->type;
 
         self::assertInstanceOf(ShapeType::class, $a);
         self::assertInstanceOf(NameRefType::class, $a->fields[0]->type, 'BData, being read, is not read again inside AData');
+    }
+
+    public function test_a_read_kept_is_read_back_only_where_what_it_read_through_is_not_being_read(): void
+    {
+        // NData and KData name each other: XInput reads them from NData, YInput from KData. NData,
+        // read for XInput, names only itself at a remove, so it is kept — but read through KData,
+        // which YInput is reading: there NData is read afresh and cut short at KData, as KData is
+        // for XInput. Each input reads the pair two deep, whichever is read first.
+        $src = __DIR__ . '/../Fixture/CrossReadFixtures';
+        $contracts = array_column((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Links'], null, 'name');
+        $n = $contracts['SaveX']->request?->body?->keys()?->fields[0]->type;
+        $k = $contracts['SaveY']->request?->body?->keys()?->fields[0]->type;
+
+        self::assertInstanceOf(ShapeType::class, $n);
+        self::assertInstanceOf(ShapeType::class, $k);
+        $nk = $n->fields[0]->type;
+        $kn = $k->fields[0]->type;
+        self::assertInstanceOf(ShapeType::class, $nk);
+        self::assertInstanceOf(ShapeType::class, $kn);
+        self::assertInstanceOf(NameRefType::class, $nk->fields[0]->type, 'NData, being read, is not read again inside KData');
+        self::assertInstanceOf(NameRefType::class, $kn->fields[0]->type, 'KData, being read, is not read again inside NData');
     }
 
     public function test_a_read_where_null_was_not_asked_is_not_one_where_it_is(): void
@@ -161,8 +183,8 @@ final class EmbeddedFormToolTest extends TestCase
 
     public function test_a_class_naming_itself_is_read_once_wherever_it_is_named(): void
     {
-        // Thirty shelves of forty categories, a category naming itself: what each is, it is
-        // everywhere, so it is read once — not once a key, 1230 reads, past the bound before `memo`.
+        // Thirty shelves of forty racks of a category, a category naming itself: what each is, it is
+        // everywhere, so it is read once — not once a key, 2430 reads, past the bound before `memo`.
         $src = __DIR__ . '/../Fixture/RecursiveFanOutFixtures';
         $contracts = array_column((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Stock'], null, 'name');
         $keys = $contracts['Restock']->request?->body?->keys()?->fields ?? [];
@@ -170,7 +192,9 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertCount(31, $keys);
         $shelf = $keys[29]->type;
         self::assertInstanceOf(ShapeType::class, $shelf);
-        self::assertInstanceOf(ShapeType::class, $shelf->fields[39]->type);
+        $rack = $shelf->fields[39]->type;
+        self::assertInstanceOf(ShapeType::class, $rack);
+        self::assertInstanceOf(ShapeType::class, $rack->fields[0]->type);
         self::assertTrue(ShapeField::admitsNull($keys[30]->type), 'memo, last, is read');
     }
 
