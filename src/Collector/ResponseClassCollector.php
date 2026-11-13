@@ -383,7 +383,7 @@ final class ResponseClassCollector
     /**
      * The generic class or trait's template params as `$writer` binds them (`$args`, in order): what
      * is written read in its file, its own params `$bindings`; one it doesn't bind its default, else
-     * its bound, else mixed.
+     * its bound, else mixed — read in the generic's file, the params before it as they are bound.
      *
      * @param ReflectionClass<object>    $generic
      * @param list<string>               $args
@@ -399,7 +399,8 @@ final class ResponseClassCollector
             $unbound = $param['default'] ?? $param['bound'];
             $bound[$param['name']] = match (true) {
                 isset($args[$i]) => $this->boundType($args[$i], $writer, $bindings, $srcDir, $classFiles),
-                null !== $unbound => $this->boundType($unbound, $generic->getName(), [], $srcDir, $classFiles),
+                // Its default or bound may name a param bound before it (`TList = list<TItem>`).
+                null !== $unbound => $this->boundType($unbound, $generic->getName(), $bound, $srcDir, $classFiles),
                 default => new ScalarType('mixed'),
             };
         }

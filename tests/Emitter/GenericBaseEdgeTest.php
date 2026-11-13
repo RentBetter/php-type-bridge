@@ -45,6 +45,7 @@ final class GenericBaseEdgeTest extends TestCase
         self::assertStringContainsString('data: Record<string, unknown> | unknown[];', $plain);
         self::assertStringContainsString('more: unknown;', $plain);
         self::assertStringContainsString('each: unknown;', $plain);
+        self::assertStringContainsString('rows: unknown[];', $plain);
     }
 
     /**

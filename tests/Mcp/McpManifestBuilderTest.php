@@ -1760,7 +1760,7 @@ final class McpManifestBuilderTest extends TestCase
         $serials = new CollectedFormField(name: 'serials', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: $text, entryBlankValue: new FailedBlank());
 
         $body = $this->toolWithBody('PUT', [$serials], $this->shape('array{serials?: list<string|null>}'))['inputSchema']['properties'];
-        self::assertSame(['type' => 'string'], $body['serials']['items']);
+        self::assertSame(['type' => 'string', 'minLength' => 1], $body['serials']['items']);
     }
 
     public function testABlankItsTransformerFailsIsRefused(): void
@@ -1871,7 +1871,7 @@ final class McpManifestBuilderTest extends TestCase
         self::assertInstanceOf(ShapeType::class, $contract);
 
         $body = $this->toolWithBody('PUT', [$tags, $labels], $contract)['inputSchema']['properties'];
-        self::assertSame(['type' => 'string'], $body['tags']['items']);
+        self::assertSame(['type' => 'string', 'minLength' => 1], $body['tags']['items']);
         self::assertSame(['type' => ['string', 'null']], $body['labels']['items']);
     }
 

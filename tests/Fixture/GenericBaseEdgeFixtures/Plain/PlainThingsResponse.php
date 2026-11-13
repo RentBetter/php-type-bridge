@@ -8,7 +8,8 @@ use PTGS\TypeBridge\Contract\ApiResponse;
 use PTGS\TypeBridge\Status\HttpOk;
 
 /**
- * PHPStan's own keywords, as it reads them: `array` any array, `object` and `iterable` anything.
+ * PHPStan's own keywords, as it reads them: `array` any array, `list` any list, `object` and
+ * `iterable` anything.
  */
 final class PlainThingsResponse implements ApiResponse, HttpOk
 {
@@ -20,4 +21,7 @@ final class PlainThingsResponse implements ApiResponse, HttpOk
 
     /** @var iterable */
     public iterable $each = [];
+
+    /** @var list */
+    public array $rows = [];
 }

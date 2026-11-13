@@ -411,7 +411,7 @@ final class EndpointQueryTest extends TestCase
     public function test_as_query_keeps_a_tuple_a_tuple(): void
     {
         // A tuple is mapped as itself, position by position, not widened to a list of its members.
-        self::assertStringContainsString("  : T extends readonly unknown[]\n    ? { [K in keyof T]: AsQuery<T[K]> }", $this->emit()['Reports']);
+        self::assertStringContainsString("  : T extends readonly unknown[]\n    ? { [K in keyof T]: AsQuery<Exclude<T[K], null>> }", $this->emit()['Reports']);
     }
 
     public function test_as_query_leaves_a_primitive_as_it_is(): void

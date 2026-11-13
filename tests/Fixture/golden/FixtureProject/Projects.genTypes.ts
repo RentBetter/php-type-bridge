@@ -92,11 +92,11 @@ export interface UpdateProjectResponse {
 }
 
 // Endpoint inputs
-/** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out, and only so. A primitive, a branded one included, is as it is, and a list or a tuple stays one. */
+/** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out, and only so — and a list's item is never null. A primitive, a branded one included, is as it is, and a list or a tuple stays one. */
 export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | null | undefined
   ? T
   : T extends readonly unknown[]
-    ? { [K in keyof T]: AsQuery<T[K]> }
+    ? { [K in keyof T]: AsQuery<Exclude<T[K], null>> }
     : T extends object
       ? { [K in keyof T as null extends T[K] ? K : never]?: AsQuery<Exclude<T[K], null>> } & { [K in keyof T as null extends T[K] ? never : K]: AsQuery<T[K]> }
       : T;

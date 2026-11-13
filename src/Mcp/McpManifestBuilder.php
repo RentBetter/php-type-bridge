@@ -735,6 +735,11 @@ final class McpManifestBuilder
         if ([] === $field->entryChildren) {
             \assert(null !== $field->entryTypeClass);
             $schema = ['type' => $this->declaredScalar($item) ?? $this->scalarTypeOf($field->entryTypeClass)];
+            // `""` sent for an entry is submitted as its blank: where that is refused, as a field's is,
+            // at least one character.
+            if ('string' === $schema['type'] && $this->refusesBlankValue($field->entryConstraints, $field->entryBlankValue)) {
+                return [...$schema, 'minLength' => 1];
+            }
 
             // An entry takes null where its contract admits one and nothing it is held to refuses it,
             // as the entry reaches validation: null, '' where its options keep a blank a string,

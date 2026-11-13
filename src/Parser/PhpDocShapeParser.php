@@ -420,6 +420,17 @@ final class PhpDocShapeParser
             }
         }
 
+        // PHPStan's keywords for what says nothing of its contents, as PHPStan reads them: `array`
+        // any array, as a property typed `array` is; `list` any list; `object` and `iterable`
+        // anything, which their JSON may be.
+        foreach (['non-empty-array' => 'array<array-key, mixed>', 'array' => 'array<array-key, mixed>', 'non-empty-list' => 'list<mixed>', 'list' => 'list<mixed>', 'object' => 'mixed', 'iterable' => 'mixed'] as $keyword => $means) {
+            if ($this->lookAhead($keyword) && !$this->continuesName($this->pos + \strlen($keyword))) {
+                $this->pos += \strlen($keyword);
+
+                return (new self())->parse($means);
+            }
+        }
+
         // Boolean literals
         foreach (['true' => true, 'false' => false] as $keyword => $value) {
             if ($this->lookAhead($keyword) && !$this->isIdentChar($this->pos + \strlen($keyword))) {

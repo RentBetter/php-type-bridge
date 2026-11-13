@@ -514,10 +514,11 @@ final class PhpDocTypeHelper
         if ($type instanceof IntersectionType) {
             $base = $this->mapLeaves($type->base, $leaf);
             $extra = $this->mapLeaves($type->extra, $leaf);
-            if (!$base instanceof NameRefType || !$extra instanceof ShapeType) {
+            if (!$extra instanceof ShapeType) {
                 throw new RuntimeException('Resolved intersection type became invalid after import resolution.');
             }
 
+            // A generic's param in the base's place is whatever it is bound to.
             return new IntersectionType(base: $base, extra: $extra);
         }
 

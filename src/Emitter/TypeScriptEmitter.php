@@ -178,6 +178,9 @@ final class TypeScriptEmitter
     /** @var array<string, list<string>> by module, the enums of its own anything emitted names */
     private array $enumsByDomain = [];
 
+    /** @var array<string, array<string, string>> by module, each name it declares or imports for its own, and what claims it ({@see self::buildSymbolMaps()}) */
+    private array $claimedNames = [];
+
     /**
      * @param list<string> $preserveNull entries of the form "ShapeName.fieldName".
      *   Fields listed here must use `T|null` in their @phpstan-type annotation
@@ -418,7 +421,7 @@ final class TypeScriptEmitter
         array &$rootBlocks,
     ): string {
         $imports = $this->collectExternalImports($domain, $collected, $responses, $contracts);
-        $foreignAliases = $this->computeForeignAliases($domain, $collected, $responses, $contracts, $imports);
+        $foreignAliases = $this->computeForeignAliases($domain, $imports);
 
         $context = new EmitContext(
             domain: $domain,
@@ -923,6 +926,7 @@ final class TypeScriptEmitter
                 }
             }
         }
+        $this->claimedNames = $registrations;
 
         return $maps;
     }
@@ -980,19 +984,15 @@ final class TypeScriptEmitter
     }
 
     /**
-     * @param list<CollectedApiResponseClass> $responses
-     * @param list<CollectedEndpointContract> $contracts
+     * The names the module imports others' types under: their own, but where one is a name it takes
+     * itself — every one it claims ({@see self::buildSymbolMaps()}) — the module's prefixed.
+     *
      * @param array<string, list<string>> $imports
      * @return array<string, array<string, string>>
      */
-    private function computeForeignAliases(
-        string $domain,
-        CollectedDomain $collected,
-        array $responses,
-        array $contracts,
-        array $imports,
-    ): array {
-        $usedNames = $this->localEmittedNames($domain, $collected, $responses, $contracts);
+    private function computeForeignAliases(string $domain, array $imports): array
+    {
+        $usedNames = array_map(static fn (): bool => true, $this->claimedNames[$domain] ?? []);
         $aliases = [];
 
         $importDomains = array_keys($imports);
@@ -1016,33 +1016,5 @@ final class TypeScriptEmitter
         }
 
         return $aliases;
-    }
-
-    /**
-     * @param list<CollectedApiResponseClass> $responses
-     * @param list<CollectedEndpointContract> $contracts
-     * @return array<string, true>
-     */
-    private function localEmittedNames(string $domain, CollectedDomain $collected, array $responses, array $contracts): array
-    {
-        $names = [];
-        foreach ($collected->types as $type) {
-            $names[$this->names->typeDeclarationName($type)] = true;
-        }
-        foreach ($responses as $response) {
-            $names[$this->names->responseDeclarationName($response)] = true;
-            $was = $this->names->deprecatedResponseName($response);
-            if (null !== $was) {
-                $names[$was] = true;
-            }
-        }
-        foreach ($this->collectLocalEnums($domain) as $enumClass) {
-            $names[$this->names->enumName($enumClass)] = true;
-        }
-        foreach (EndpointContractEmitter::declaredNames($contracts, $this->naming, $this->includes) as $name) {
-            $names[$name] = true;
-        }
-
-        return $names;
     }
 }
