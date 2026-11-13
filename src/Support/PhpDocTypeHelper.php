@@ -720,7 +720,8 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * A file's `@phpstan-import-type` (and `@psalm-import-type`) tags, as written.
+     * A file's `@phpstan-import-type` tags, as written: TypeBridge reads the `@phpstan-` spellings of
+     * a type alias and its import alone, `@psalm-` ones neither.
      *
      * @return list<TypeAliasImportTagValueNode>
      */

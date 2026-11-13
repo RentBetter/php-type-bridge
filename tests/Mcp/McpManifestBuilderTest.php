@@ -739,7 +739,7 @@ final class McpManifestBuilderTest extends TestCase
             new ShapeField('notes', new ScalarType('string'), optional: true),
         ]);
 
-        self::assertSame(['name'], $this->toolWithBody('POST', $fields, $contract)['inputSchema']['required']);
+        self::assertSame(['name'], $this->toolWithBody('POST', $fields, $contract, clearMissing: true)['inputSchema']['required']);
         self::assertArrayNotHasKey('required', $this->toolWithBody('PUT', $fields, $contract)['inputSchema']);
     }
 
@@ -942,7 +942,7 @@ final class McpManifestBuilderTest extends TestCase
         $contract = (new PhpDocShapeParser())->parse('array{name?: string|null, code?: string|null, notes?: string|null}');
         self::assertInstanceOf(ShapeType::class, $contract);
 
-        $post = $this->toolWithBody('POST', $fields, $contract)['inputSchema'];
+        $post = $this->toolWithBody('POST', $fields, $contract, clearMissing: true)['inputSchema'];
 
         self::assertSame(['type' => 'string'], $post['properties']['name']);
         self::assertSame(['type' => 'string'], $post['properties']['code']);
@@ -1353,7 +1353,7 @@ final class McpManifestBuilderTest extends TestCase
         $contract = (new PhpDocShapeParser())->parse('array{title?: string|null, note?: string|null}');
         self::assertInstanceOf(ShapeType::class, $contract);
 
-        $tool = $this->toolWithBody('POST', [$title, $note], $contract);
+        $tool = $this->toolWithBody('POST', [$title, $note], $contract, clearMissing: true);
         self::assertSame(['title'], $tool['inputSchema']['required']);
         self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['title']);
         // A NotNull takes the '' a null becomes.
@@ -1385,7 +1385,7 @@ final class McpManifestBuilderTest extends TestCase
     {
         $field = new CollectedFormField(name: 'value', formTypeClass: 'App\\ValueType', required: false, mapped: true, compound: false, dataClass: null, constraints: [$constraint], blankValue: $blank);
 
-        $tool = $this->toolWithBody('POST', [$field], $this->shape('array{value?: string|null}'));
+        $tool = $this->toolWithBody('POST', [$field], $this->shape('array{value?: string|null}'), clearMissing: true);
         // A request that makes something can't go without what its form refuses blank; and a null
         // sent is that same blank, published only where it is taken.
         self::assertSame($refused ? ['value'] : [], $tool['inputSchema']['required'] ?? []);
@@ -1410,7 +1410,7 @@ final class McpManifestBuilderTest extends TestCase
         $name = new CollectedFormField(name: 'name', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new Sequentially([new NotBlank(), new Length(max: 40)])]);
         $code = new CollectedFormField(name: 'code', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new NoteCode()], trim: false);
 
-        $tool = $this->toolWithBody('POST', [$name, $code], $this->shape('array{name?: string|null, code?: string|null}'));
+        $tool = $this->toolWithBody('POST', [$name, $code], $this->shape('array{name?: string|null, code?: string|null}'), clearMissing: true);
         self::assertSame(['name', 'code'], $tool['inputSchema']['required']);
         self::assertSame(['type' => 'string', 'maxLength' => 40], $tool['inputSchema']['properties']['name']);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['code']);
@@ -1558,8 +1558,9 @@ final class McpManifestBuilderTest extends TestCase
     {
         // `$form->submit($data)` — the bundled RequestFormProcessor's — submits with `clearMissing`
         // on whatever the method, PATCH too: a PATCH or a PUT without `name` submits it blank,
-        // which its NotBlank refuses. Without it, a POST alone makes something, and requires it.
-        $name = new CollectedFormField(name: 'name', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
+        // which its NotBlank refuses. Without it a field left out isn't submitted: a POST alone
+        // makes its object anew, whose `name` is null, which its property's NotBlank refuses.
+        $name = new CollectedFormField(name: 'name', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()], heldConstraints: [new NotBlank()]);
         $required = static function (string $method, bool $clearMissing) use ($name): ?array {
             $endpoint = new CollectedEndpointContract(
                 name: 'saveProduct',
@@ -1739,7 +1740,7 @@ final class McpManifestBuilderTest extends TestCase
         $fields = array_column((new FormTypeInspector())->inspect(BlankNoteType::class)['fields'], null, 'name');
         $contract = $this->shape('array{serial?: string|null}');
 
-        self::assertSame(['serial'], $this->toolWithBody('POST', [$fields['serial']], $contract)['inputSchema']['required'] ?? []);
+        self::assertSame(['serial'], $this->toolWithBody('POST', [$fields['serial']], $contract, clearMissing: true)['inputSchema']['required'] ?? []);
         self::assertSame(['type' => 'string'], $this->toolWithBody('PUT', [$fields['serial']], $contract)['inputSchema']['properties']['serial']);
     }
 
@@ -1808,7 +1809,7 @@ final class McpManifestBuilderTest extends TestCase
         $contract = $this->shape('array{address: array{line1: string, line2?: string, postcode?: string}}');
 
         self::assertSame(['line1'], $this->toolWithBody('PUT', [$address], $contract)['inputSchema']['properties']['address']['required']);
-        self::assertSame(['line1', 'postcode'], $this->toolWithBody('POST', [$address], $contract)['inputSchema']['properties']['address']['required']);
+        self::assertSame(['line1', 'postcode'], $this->toolWithBody('POST', [$address], $contract, clearMissing: true)['inputSchema']['properties']['address']['required']);
     }
 
     public function testAKeyTypedMixedMayBeLeftOutOfAQuery(): void
@@ -2051,13 +2052,14 @@ final class McpManifestBuilderTest extends TestCase
 
     /**
      * The tool an endpoint becomes when its body form has these fields and its data class declares
-     * this contract.
+     * this contract — submitted with `clearMissing` on, so what a field left out is turns on what its
+     * form makes of a blank, or off.
      *
      * @param list<CollectedFormField> $fields
      *
      * @return array<string, mixed>
      */
-    private function toolWithBody(string $httpMethod, array $fields, ShapeType $contract): array
+    private function toolWithBody(string $httpMethod, array $fields, ShapeType $contract, bool $clearMissing = false): array
     {
         $endpoint = new CollectedEndpointContract(
             name: 'saveProject',
@@ -2071,7 +2073,7 @@ final class McpManifestBuilderTest extends TestCase
             mcp: new CollectedMcpTool(name: 'saveProject', description: 'Save a project.', httpMethod: $httpMethod, httpPath: '/projects', destructive: true),
         );
 
-        return (new McpManifestBuilder())->build(['projects' => [$endpoint]])['tools'][0];
+        return (new McpManifestBuilder(clearMissing: $clearMissing))->build(['projects' => [$endpoint]])['tools'][0];
     }
 
     private function response(int $status): CollectedApiResponseClass

@@ -51,6 +51,13 @@ final readonly class CollectedFormField
      *                                                 TextType's own (which only turns a null into ''), or a
      *                                                 listener rewriting it, its own or a form's holding it. What
      *                                                 a constraint then sees is not what was sent
+     * @param list<Constraint>         $heldConstraints the constraints on the property the field binds, where the
+     *                                                 object it is on is validated — Default group only: all a field
+     *                                                 that is never submitted is held to, its own `constraints`
+     *                                                 option running only when it is
+     * @param mixed                    $initialValue   what a new object of the data class holds at that property:
+     *                                                 its default, or a promoted one's from the constructor; null
+     *                                                 where it declares none, as the validator reads one never set
      */
     public function __construct(
         public string $name,
@@ -79,6 +86,8 @@ final readonly class CollectedFormField
         public mixed $entryBlankValue = null,
         public bool $transformsValue = false,
         public array $formConstraints = [],
+        public array $heldConstraints = [],
+        public mixed $initialValue = null,
     ) {}
 
     /**
@@ -117,6 +126,8 @@ final readonly class CollectedFormField
             entryBlankValue: $this->entryBlankValue,
             transformsValue: $this->transformsValue,
             formConstraints: $this->formConstraints,
+            heldConstraints: $this->heldConstraints,
+            initialValue: $this->initialValue,
         );
     }
 }

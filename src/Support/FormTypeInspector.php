@@ -142,6 +142,7 @@ final class FormTypeInspector
             $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
             $formConstraints = $this->collectConstraints($config, null);
             $constraints = $validated ? $this->collectConstraints($config, $property) : $formConstraints;
+            $heldConstraints = $validated && null !== $property ? array_values(array_filter($this->propertyConstraints($property), HeldConstraints::validatedByDefault(...))) : [];
             // What it holds is validated in turn only where it cascades from a validated object: a
             // Valid among its constraints, or its class's #[Assert\Cascade].
             $cascades = $validated && (array_any(HeldConstraints::always($constraints), static fn (Constraint $constraint): bool => $constraint instanceof Valid)
@@ -177,10 +178,35 @@ final class FormTypeInspector
                 entryBlankValue: null === $entry ? null : $this->blankValue($entry->getFormConfig(), self::mappedFieldNames($entry)),
                 transformsValue: $rewritten || self::transformsValue($config),
                 formConstraints: $formConstraints,
+                heldConstraints: $heldConstraints,
+                initialValue: self::initialValue($property),
             );
         }
 
         return $fields;
+    }
+
+    /**
+     * What a new object of the data class holds at the property: its default, or a promoted one's
+     * from the constructor; null where it declares none, as the validator reads a property never set.
+     */
+    private static function initialValue(?ReflectionProperty $property): mixed
+    {
+        if (null === $property) {
+            return null;
+        }
+        if ($property->hasDefaultValue()) {
+            return $property->getDefaultValue();
+        }
+        if ($property->isPromoted()) {
+            foreach ($property->getDeclaringClass()->getConstructor()?->getParameters() ?? [] as $parameter) {
+                if ($parameter->getName() === $property->getName() && $parameter->isDefaultValueAvailable()) {
+                    return $parameter->getDefaultValue();
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

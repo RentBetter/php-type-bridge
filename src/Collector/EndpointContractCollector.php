@@ -82,7 +82,7 @@ final class EndpointContractCollector
     /** The class whose contract is being read, which a read past the bound fails naming. */
     private string $readFor = '';
 
-    /** @var array<string, array{read: ParsedType, through: array<string, true>}> by where it is declared and how it is asked: an alias or a `_self` read, and the names it read through */
+    /** @var array<string, array{read: ParsedType, through: array<string, true>}> by source directory, where it is declared and how it is asked: an alias or a `_self` read, and the names it read through */
     private array $readThrough = [];
 
     /** @var list<string> where each read under way was cut short: the name it named that was being read */
@@ -510,9 +510,6 @@ final class EndpointContractCollector
         );
     }
 
-    /**
-     * @param array<string, string> $classFiles
-     */
     /**
      * The request's inputs, and why what only its tool reads of them can't be read
      * ({@see UnreadableContract}): that fails the tool, and the inputs are read as an endpoint no
@@ -947,21 +944,20 @@ final class EndpointContractCollector
     }
 
     /**
-     * A key typed with a class, as the class is sent and its TypeScript names it: an enum, its values
-     * — but one that names its value union otherwise (#[ValueOfName]), whose own name is its `_self`;
-     * any other class its `_self`, read where it is declared, as an alias is. As written where the
-     * class declares none, or names itself at any remove.
+     * A key typed with a class, as the class is sent and its TypeScript names it: its `_self`, read
+     * where it is declared, as an alias is — an enum's too, which declaring one sends it as that
+     * shape; else an enum's values, but for one that names its value union otherwise
+     * (#[ValueOfName]). As written where the class declares none, or names itself at any remove.
      *
      * @param array<string, string> $classFiles
      * @param array<string, true>   $reading
      */
     private function readClass(NameRefType $type, string $class, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
-        if (PhpFileClassLocator::loadsEnum($class) && null === ValueOfName::of($class)) {
+        $declared = $this->selfOf($class, $srcDir, $classFiles);
+        if (null === $declared && PhpFileClassLocator::loadsEnum($class) && null === ValueOfName::of($class)) {
             return new ValueOfType($class);
         }
-
-        $declared = $this->selfOf($class, $srcDir, $classFiles);
 
         // A `_self` of `?T` is `T`, as an alias's is.
         return null === $declared ? $type : $this->readDeclared($type, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked, unwrapOptional: true);
@@ -1043,7 +1039,7 @@ final class EndpointContractCollector
 
             return $written;
         }
-        $kept = $key . "\0" . ($inQuery ? 'query' : 'body') . "\0" . ($nullAsked ? 'asked' : 'not');
+        $kept = $srcDir . "\0" . $key . "\0" . ($inQuery ? 'query' : 'body') . "\0" . ($nullAsked ? 'asked' : 'not');
         $read = $this->readThrough[$kept] ?? null;
         if (null !== $read && [] === array_intersect_key($read['through'], $reading)) {
             $this->through += $read['through'] + [$key => true];

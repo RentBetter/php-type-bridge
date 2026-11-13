@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Emitter\Builtin;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\AsTypeBridgeEmitter;
 use PTGS\TypeBridge\Config\IncludeConvention;
+use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Emitter\EmitContext;
 use PTGS\TypeBridge\Emitter\EmittedBlock;
 use PTGS\TypeBridge\Emitter\EmittedType;
@@ -73,6 +74,58 @@ final class EndpointContractEmitter implements TypeEmitter
         TS;
 
     private const array METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+    /**
+     * The helpers a module's endpoints share, by name: declared in the module, or in the root module
+     * and imported.
+     *
+     * @param list<CollectedEndpointContract> $contracts the module's
+     *
+     * @return list<string>
+     */
+    public static function helperNames(array $contracts, IncludeConvention $includes): array
+    {
+        if ([] === $contracts) {
+            return [];
+        }
+
+        return [
+            ...(self::anyTakesQueryForm($contracts) ? ['AsQuery'] : []),
+            ...(self::anyTakesIncludeQuery($contracts, $includes) ? ['IncludeQuery'] : []),
+            'EndpointResult',
+            'Endpoint',
+        ];
+    }
+
+    /**
+     * Every type name a module declares, or imports, for its endpoints: the helpers they share and
+     * each one's inputs, response map and result, as {@see self::emit()} declares them. One list,
+     * read wherever what a module names is asked, so no name it takes is missed.
+     *
+     * @param list<CollectedEndpointContract> $contracts the module's
+     *
+     * @return list<string>
+     */
+    public static function declaredNames(array $contracts, TypeScriptNaming $naming, IncludeConvention $includes): array
+    {
+        $names = self::helperNames($contracts, $includes);
+        foreach ($contracts as $contract) {
+            $request = $contract->request;
+            if (null !== $request?->query || self::takesIncludeQuery($contract, $includes)) {
+                $names[] = $naming->queryAliasName($contract->name);
+            }
+            if (null !== $request?->body) {
+                $names[] = $naming->bodyAliasName($contract->name);
+            }
+            if (null !== $request?->path || null !== $request?->pathParams) {
+                $names[] = $naming->pathAliasName($contract->name);
+            }
+            $names[] = $naming->endpointMapName($contract->name);
+            $names[] = $naming->endpointResultName($contract->name);
+        }
+
+        return $names;
+    }
 
     /**
      * Whether any of the contracts takes a query form, whose type it takes as `AsQuery<T>`.

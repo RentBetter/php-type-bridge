@@ -217,20 +217,26 @@ final class McpManifestGeneratorTest extends TestCase
 
     public function testAFieldLeftOutIsRequiredWhereASubmitOfNothingRefusesIt(): void
     {
-        // What a real submit of nothing refuses. With clearMissing off a field left out isn't
-        // submitted: it keeps what a new OrderData holds there — null for `enabled` and `note`, which
-        // their NotNull refuses, `standard` for `label` — and `memo`, bound to no property, is never
-        // checked. With it on each is submitted blank: `qty` 0, which Positive refuses, `label` null
-        // and `memo` blank, while an unticked `enabled` and a `note` of '' pass. A new filter's
-        // `product` is null either way, which its NotBlank refuses.
+        // What a submit of nothing refuses. With clearMissing off a field left out isn't submitted:
+        // it keeps what a new OrderData holds there — null for `enabled` and `note`, which their
+        // NotNull refuses, `standard` for `label` and `web` for `channel`, from its constructor, and
+        // null for `qty`, which Positive takes. Symfony
+        // checks nothing else of it, so an application submitting that way refuses a create missing
+        // `memo`, whose own NotBlank says it can't go without it, itself. With clearMissing on each is
+        // submitted blank: `qty` 0, which Positive refuses, `label` and `channel` null and `memo`
+        // blank, while an unticked `enabled` and a `note` of '' pass. A new filter's `product` is
+        // null either way, which its NotBlank refuses; its `region`'s own NotBlank holds only where
+        // it is submitted — no application is read as refusing a query's itself.
         $required = static function (bool $clearMissing): array {
             $tools = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/LeftOutFixtures', TypeBridgeConfig::fromArray(['clearMissing' => $clearMissing]))['tools'];
+            // `shipping` isn't cascaded into: its `street`'s NotNull is never validated, sent or not.
+            self::assertArrayNotHasKey('required', $tools[0]['inputSchema']['properties']['shipping']);
 
             return array_column(array_map(static fn (array $tool): array => [$tool['name'], $tool['inputSchema']['required'] ?? []], $tools), 1, 0);
         };
 
-        self::assertSame(['CreateOrder' => ['enabled', 'note'], 'ListOrders' => ['product']], $required(false));
-        self::assertSame(['CreateOrder' => ['qty', 'label', 'memo'], 'ListOrders' => ['product']], $required(true));
+        self::assertSame(['CreateOrder' => ['enabled', 'note', 'memo'], 'ListOrders' => ['product']], $required(false));
+        self::assertSame(['CreateOrder' => ['qty', 'label', 'memo', 'channel'], 'ListOrders' => ['product', 'region']], $required(true));
     }
 
     public function testAToolWhosePathIsAClassTakesItsRoutesPlaceholders(): void

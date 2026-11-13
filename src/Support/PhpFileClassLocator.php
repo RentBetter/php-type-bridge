@@ -88,7 +88,8 @@ final class PhpFileClassLocator
     public static function loads(string $className): bool
     {
         try {
-            return class_exists($className) || interface_exists($className) || trait_exists($className);
+            // The autoloader is asked once: what it loaded is an interface or a trait if not a class.
+            return class_exists($className) || interface_exists($className, false) || trait_exists($className, false);
         } catch (\Error) {
             return false;
         }

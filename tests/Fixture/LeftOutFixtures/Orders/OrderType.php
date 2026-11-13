@@ -24,7 +24,9 @@ final class OrderType extends AbstractFormType
             ->add('qty', IntegerType::class, ['required' => false, 'empty_data' => '0'])
             ->add('note', TextType::class, ['required' => false, 'empty_data' => ''])
             ->add('label', TextType::class, ['required' => false])
-            ->add('memo', TextType::class, ['required' => false, 'mapped' => false, 'constraints' => [new NotBlank()]]);
+            ->add('memo', TextType::class, ['required' => false, 'mapped' => false, 'constraints' => [new NotBlank()]])
+            ->add('channel', TextType::class, ['required' => false])
+            ->add('shipping', ShippingType::class, ['required' => false]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

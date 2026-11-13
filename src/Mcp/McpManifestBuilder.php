@@ -39,6 +39,8 @@ use Symfony\Component\Validator\Constraints\GreaterThanOrEqual;
 use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\LessThan;
 use Symfony\Component\Validator\Constraints\LessThanOrEqual;
+use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\NotNull;
 use Symfony\Component\Validator\Constraints\Range;
 use Symfony\Component\Validator\Constraints\Regex;
 use Symfony\Component\Validator\Validation;
@@ -224,9 +226,9 @@ final class McpManifestBuilder
             $body = [];
             // With `clearMissing` on, a field left out is submitted blank — `$form->submit($data)`
             // submits a query and a body so, whatever the method — and so required where that is
-            // refused. With it off it isn't submitted, and only a POST, which makes something, holds
-            // it to what its new object refuses.
-            $this->addFields($request->query, $query, $required, makes: $this->clearMissing);
+            // refused. With it off it isn't submitted, and is held to what its new object holds:
+            // a query's filter object is new on every request, a body's only on a POST.
+            $this->addFields($request->query, $query, $required, makes: true);
             $this->addFields($request->body, $body, $required, makes: $this->clearMissing || 'POST' === strtoupper($httpMethod), json: true);
             // One argument of a name fills a path param and a field alike: it holds to both.
             foreach ([$query, $body] as $fields) {
@@ -282,7 +284,7 @@ final class McpManifestBuilder
             if ($json && $this->takesNull($key, $field)) {
                 $properties[$field->name] = self::withNull($properties[$field->name]);
             }
-            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($field))) {
+            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($field, body: $json))) {
                 $required[] = $field->name;
             }
         }
@@ -321,22 +323,23 @@ final class McpManifestBuilder
     }
 
     /**
-     * Whether the field left out of a request is refused. With `clearMissing` on — Symfony's
-     * default — it is submitted blank ({@see self::refusesBlank()}). With it off it is not submitted
-     * at all, so Symfony checks nothing of it but its property, which keeps what its object holds; an
-     * application submitting that way holds a field its own constraints require to them itself, or
-     * one left out passes unchecked. So it is refused where what it is held to refuses its blank —
-     * an embedded form's being none — and an embedded form's fields, never submitted, are not asked.
+     * Whether the field left out of a request that makes its object anew is refused. With
+     * `clearMissing` on — Symfony's default — it is submitted blank ({@see self::refusesBlank()}).
+     * With it off it isn't submitted at all: none of its form's own constraints runs, and its
+     * property keeps what a new object holds there, which only the property's constraints are asked
+     * of. Symfony checks nothing else of it, so an application submitting a body that way refuses a
+     * create missing a field it can't go without itself, as clearMissing on would have: one whose own
+     * `constraints` hold a NotBlank or a NotNull. A body's field carrying one is refused too; a
+     * query's isn't.
      */
-    private function refusesLeftOut(CollectedFormField $field): bool
+    private function refusesLeftOut(CollectedFormField $field, bool $body): bool
     {
         if ($this->clearMissing) {
             return $this->refusesBlank($field);
         }
 
-        $embedded = $field->compound && null === $field->entryTypeClass && !$field->multiple;
-
-        return $this->refusesBlankValue($field->constraints, $embedded ? null : $field->blankValue);
+        return $this->refuses($field->heldConstraints, $field->initialValue)
+            || ($body && array_any($field->formConstraints, static fn (Constraint $constraint): bool => $constraint instanceof NotBlank || $constraint instanceof NotNull));
     }
 
     /**
@@ -763,7 +766,7 @@ final class McpManifestBuilder
             $key = $keys[$child->name] ?? null;
             $schema = $this->fieldSchema($child, $key?->type, $json, $makes);
             $properties[$child->name] = $json && $this->takesNull($key, $child) ? self::withNull($schema) : $schema;
-            if ($this->isRequired($child, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($child))) {
+            if ($this->isRequired($child, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($child, body: $json))) {
                 $required[] = $child->name;
             }
         }

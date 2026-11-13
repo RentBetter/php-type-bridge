@@ -895,16 +895,32 @@ final class TypeScriptEmitter
                 );
             }
 
-            // The helper a module with query endpoints declares beside them.
-            if (EndpointContractEmitter::anyTakesQueryForm($contracts[$domain] ?? [])) {
+            // What a module's endpoints declare — their inputs, maps and results, and the helpers they
+            // share, declared here or imported from the root module — no other type of it may be named.
+            foreach (array_unique(EndpointContractEmitter::declaredNames($contracts[$domain] ?? [], $this->naming, $this->includes)) as $name) {
                 $this->registerSymbol(
                     domain: $domain,
                     logicalName: null,
-                    emittedName: 'AsQuery',
-                    descriptor: 'the AsQuery helper of its query endpoints',
+                    emittedName: $name,
+                    descriptor: 'the endpoint type ' . $name,
                     maps: $maps,
                     registrations: $registrations,
                 );
+            }
+        }
+
+        // The helpers are declared once, in the root module, where one is set: none of its own types
+        // may be named as one either.
+        if ($this->domainMapper->hasRootModule()) {
+            $helpers = [];
+            foreach ($contracts as $domainContracts) {
+                $helpers = [...$helpers, ...EndpointContractEmitter::helperNames($domainContracts, $this->includes)];
+            }
+            foreach (array_unique($helpers) as $name) {
+                // Claimed already where the root module's own endpoints take it.
+                if (!str_starts_with($registrations[''][$name] ?? '', 'the endpoint type ')) {
+                    $this->registerSymbol(domain: '', logicalName: null, emittedName: $name, descriptor: 'the endpoint type ' . $name . ', declared in the root module', maps: $maps, registrations: $registrations);
+                }
             }
         }
 
@@ -1023,24 +1039,8 @@ final class TypeScriptEmitter
         foreach ($this->collectLocalEnums($domain) as $enumClass) {
             $names[$this->names->enumName($enumClass)] = true;
         }
-        if (EndpointContractEmitter::anyTakesQueryForm($contracts)) {
-            $names['AsQuery'] = true;
-        }
-        foreach ($contracts as $contract) {
-            $request = $contract->request;
-            if (null !== $request) {
-                if (null !== $request->query) {
-                    $names[$this->naming->queryAliasName($contract->name)] = true;
-                }
-                if (null !== $request->body) {
-                    $names[$this->naming->bodyAliasName($contract->name)] = true;
-                }
-                if (null !== $request->path) {
-                    $names[$this->naming->pathAliasName($contract->name)] = true;
-                }
-            }
-            $names[$this->naming->endpointMapName($contract->name)] = true;
-            $names[$this->naming->endpointResultName($contract->name)] = true;
+        foreach (EndpointContractEmitter::declaredNames($contracts, $this->naming, $this->includes) as $name) {
+            $names[$name] = true;
         }
 
         return $names;
