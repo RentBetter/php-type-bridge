@@ -9,6 +9,7 @@ use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\AliasListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\CodeBatchType;
+use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\CountedBlankType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\TagListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\YearlyTotalsType;
@@ -27,6 +28,16 @@ use Symfony\Component\Validator\Constraints\NotNull;
 
 final class FormTypeInspectorTest extends TestCase
 {
+    public function test_an_inspection_runs_no_application_code_for_a_blank_unless_asked(): void
+    {
+        // What a field left out becomes runs its `empty_data` — application code — which only a
+        // tool reads: the TypeScript and the PHPStan rules inspect forms without it.
+        CountedBlankType::$runs = 0;
+        (new FormTypeInspector())->inspect(CountedBlankType::class);
+
+        self::assertSame(0, CountedBlankType::$runs);
+    }
+
     public function test_it_inspects_contract_form_types_and_nested_custom_forms(): void
     {
         $inspected = (new FormTypeInspector())->inspect(CreateProjectRequestType::class);

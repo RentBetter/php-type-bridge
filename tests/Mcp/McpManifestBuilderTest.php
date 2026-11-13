@@ -1094,12 +1094,16 @@ final class McpManifestBuilderTest extends TestCase
         yield 'bytes: digits' => ['\d{4}', false, '^(?:\d{4})$'];
         // With it, PCRE's \d \w \b are Unicode (UCP); ECMA's stay ASCII.
         yield 'utf8: a negated class' => ['[^/]+', true, '^(?:[^/]+)$'];
-        yield 'utf8: digits' => ['\d{4}', true, null];
-        yield 'utf8: a word' => ['\w+', true, null];
+        // With it, PCRE's \d \w are Unicode (UCP), ECMA's ASCII: published as the ASCII sets, which
+        // take fewer, never one the router refuses; a negated class holding one would take more.
+        yield 'utf8: digits' => ['\d{4}', true, '^(?:[0-9]{4})$'];
+        yield 'utf8: a word' => ['\w+', true, '^(?:[A-Za-z0-9_]+)$'];
+        yield 'utf8: digits in a negated class' => ['[^\d]+', true, null];
         yield 'utf8: ASCII ranges' => ['[a-z0-9]+', true, '^(?:[a-z0-9]+)$'];
         // Not stated on the route — the router's default decides — so only what reads the same both ways.
         yield 'unknown: a negated class' => ['[^/]+', null, null];
-        yield 'unknown: digits' => ['\d{4}', null, null];
+        yield 'unknown: digits' => ['\d{4}', null, '^(?:[0-9]{4})$'];
+        yield 'unknown: a boundary' => ['\bx', null, null];
         yield 'unknown: ASCII ranges' => ['[a-z0-9]+', null, '^(?:[a-z0-9]+)$'];
     }
 
@@ -1133,28 +1137,52 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['digits']);
         self::assertSame(['type' => 'integer', 'minimum' => 1], $properties['positive']);
         self::assertSame(['type' => 'integer'], $properties['signed']);
-        self::assertSame(['type' => 'number', 'minimum' => 0], $properties['decimal']);
+        // A decimal is the string it is: a number a client writes in exponent form (`1e-7`), the
+        // router doesn't match.
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-9]+(?:\.[0-9]+)?)$'], $properties['decimal']);
         self::assertSame(['type' => 'number'], $properties['any']);
     }
 
-    public function testANumberSegmentWhosePatternCantBeCarriedOverIsAsNarrowAsItCanBeSaid(): void
+    public function testANumberSegmentOnARouteLeavingUtf8ToTheRouterIsItsAsciiPattern(): void
     {
-        // A route leaving `utf8` to the router's default may read `\\d` as any Unicode digit, which
-        // no JSON Schema pattern says. What takes nothing but digits is still an integer of at least
-        // 0, and a signed one with no decimal part an integer: no `1.5`, nor `-3` where it can't be.
+        // A route leaving `utf8` to the router's default may read `\\d` as any Unicode digit: the
+        // pattern says ASCII digits, which take fewer, so `42` for `\\d{4}`, 0 for `-?[1-9]\\d*`
+        // and `1e-7` for a decimal are refused as the router refuses them.
         $properties = $this->pathTool([
+            new CollectedPathParam('year', 'number', '\\d{4}'),
             new CollectedPathParam('short', 'number', '\\d{1,4}'),
-            new CollectedPathParam('from2', 'number', '[2-9]\\d*'),
             new CollectedPathParam('nonzero', 'number', '-?[1-9]\\d*'),
             new CollectedPathParam('either', 'number', '\\d+|x'),
             new CollectedPathParam('decimal', 'number', '-?[1-9]\\d*(?:\\.\\d+)?'),
         ]);
 
-        self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['short']);
-        self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['from2']);
-        self::assertSame(['type' => 'integer'], $properties['nonzero']);
-        self::assertSame(['type' => 'number'], $properties['either']);
-        self::assertSame(['type' => 'number'], $properties['decimal']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-9]{4})$'], $properties['year']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-9]{1,4})$'], $properties['short']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:-?[1-9][0-9]*)$'], $properties['nonzero']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-9]+|x)$'], $properties['either']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:-?[1-9][0-9]*(?:\\.[0-9]+)?)$'], $properties['decimal']);
+    }
+
+    public function testAKeyTakingARecordsIdOrNoneTakesNullWhateverItsFieldsRefuse(): void
+    {
+        // `assignee` takes an id, the fields to make one, or null for none. Its form reads what is
+        // sent before it is submitted, so a null is the "none" it declares, which submits none of
+        // its fields: `name`'s NotBlank holds nothing against it. Its own NotNull would.
+        $name = new CollectedFormField(name: 'name', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: true, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()], formConstraints: [new NotBlank()]);
+        $assignee = static fn (array $constraints): CollectedFormField => new CollectedFormField(name: 'assignee', formTypeClass: 'App\\PersonType', required: false, mapped: true, compound: true, dataClass: 'App\\Person', children: [$name], constraints: $constraints);
+        $contract = $this->shape('array{assignee?: string|array{name: string}|null}');
+
+        self::assertContains(['type' => 'null'], $this->toolWithBody('PUT', [$assignee([])], $contract)['inputSchema']['properties']['assignee']['anyOf']);
+        self::assertNotContains(['type' => 'null'], $this->toolWithBody('PUT', [$assignee([new NotNull()])], $contract)['inputSchema']['properties']['assignee']['anyOf']);
+    }
+
+    public function testAStringWhoseBlankIsRefusedRefusesAnEmptyOne(): void
+    {
+        // A PATCH may leave `title` out, but `""` sent for it is submitted as its blank, which its
+        // NotBlank refuses: at least one character.
+        $title = new CollectedFormField(name: 'title', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
+
+        self::assertSame(['type' => 'string', 'minLength' => 1], $this->toolWithBody('PATCH', [$title], $this->shape('array{title?: string}'))['inputSchema']['properties']['title']);
     }
 
     public function testANumberSegmentWhoseRequirementIsNoUnboundedIntegerIsItsPattern(): void

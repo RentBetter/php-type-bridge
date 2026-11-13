@@ -23,8 +23,15 @@ final class PortableRegexTest extends TestCase
         yield 'a group and an escape' => ['(?:SO|BPP)-\d+', false, true];
         yield 'a dot' => ['a.b', false, false];
         yield '\s, whose sets differ' => ['a\sb', false, false];
-        yield '\d under u, which PHP reads as Unicode' => ['\d+', true, false];
-        yield '\d not knowing the mode' => ['\d+', null, false];
+        // PHP reads `\d` and `\w` as Unicode under `u`, ECMA as ASCII: published as their ASCII
+        // sets, which take fewer, never what the server refuses — but not inside a negated class,
+        // where fewer refused is more taken. Their negations and `\b` read the two ways.
+        yield '\d under u, published as [0-9]' => ['\d+', true, true];
+        yield '\d not knowing the mode' => ['\d+', null, true];
+        yield '\w in a class under u' => ['[\w-]+', true, true];
+        yield '\d in a negated class under u' => ['[^\d]+', true, false];
+        yield '\D under u' => ['\D', true, false];
+        yield '\b not knowing the mode' => ['\ba', null, false];
         yield 'a negated class by byte' => ['[^a]+', false, false];
         yield 'a negated class by character' => ['[^a]+', true, true];
         yield 'a range out of order' => ['[z-a]', false, false];
@@ -64,6 +71,17 @@ final class PortableRegexTest extends TestCase
     public function testItReadsAWholeValueRule(string $pattern, ?array $rule): void
     {
         self::assertSame($rule, PortableRegex::wholeValueRule($pattern));
+    }
+
+    public function testAUnicodeDigitOrWordIsPublishedAsItsAsciiSet(): void
+    {
+        // Under `u`, or not knowing the mode, `\d` and `\w` are written out as the ASCII sets ECMA
+        // reads them as, in a class too: what Python's `re`, reading them as Unicode, reads alike.
+        self::assertSame('^(?:[A-Z]+-[0-9]+)$', PortableRegex::routePattern('[A-Z]+-\d+', null));
+        self::assertSame('^(?:[A-Za-z0-9_-]+)$', PortableRegex::routePattern('[\w-]+', true));
+        self::assertSame('^(?:\d+)$', PortableRegex::routePattern('\d+', false), 'by byte it is [0-9] already');
+        self::assertSame(['[0-9]{4}', 'u'], PortableRegex::wholeValueRule('/^\d{4}$/u'));
+        self::assertSame(['\\d', ''], PortableRegex::wholeValueRule('/^\\d$/'), 'an escaped backslash and a d');
     }
 
     public function testARouteRequirementIsAnchoredWhole(): void
