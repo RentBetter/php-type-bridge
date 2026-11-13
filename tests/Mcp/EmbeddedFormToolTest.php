@@ -184,6 +184,18 @@ final class EmbeddedFormToolTest extends TestCase
         $this->assertToolFailsInBoundedTime(__DIR__ . '/../Fixture/AliasCliqueFixtures', 'AliasCliqueData');
     }
 
+    public function test_whether_a_contract_is_read_within_the_bound_turns_on_it_alone(): void
+    {
+        // B reads the wide shape A does and a clique: 1027 reads, past the bound, read alone. Read
+        // after A it is the same — not 326 reads, A's shape kept — or whether its tool is published
+        // would turn on which endpoint is read first.
+        $src = __DIR__ . '/../Fixture/BoundOrderFixtures';
+        $contracts = array_column((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Notes'], null, 'name');
+
+        self::assertNull($contracts['SaveA']->mcp?->unreadable);
+        self::assertNotNull($contracts['SaveB']->mcp?->unreadable);
+    }
+
     public function test_a_class_naming_itself_is_read_once_wherever_it_is_named(): void
     {
         // Thirty shelves of forty racks of a category, a category naming itself: what each is, it is
