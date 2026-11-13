@@ -28,4 +28,13 @@ final class LinkController
     {
         throw new \LogicException('Fixture only.');
     }
+
+    #[Route('/z', methods: ['PUT'])]
+    #[ApiRequest(body: ZType::class)]
+    #[ApiResponses([LinkResponse::class])]
+    #[McpTool(description: 'Save a Z.')]
+    public function saveZAction(): LinkResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
 }

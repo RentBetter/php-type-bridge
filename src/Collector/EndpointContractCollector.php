@@ -82,7 +82,7 @@ final class EndpointContractCollector
     /** The class whose contract is being read, which a read past the bound fails naming. */
     private string $readFor = '';
 
-    /** @var array<string, array{read: ParsedType, through: array<string, true>}> by source directory, where it is declared and how it is asked: an alias or a `_self` read, and the names it read through */
+    /** @var array<string, array{read: ParsedType, through: array<string, true>}> by source directory, where it is declared and how it is asked: an alias or a `_self` the contract being read has read, and the names it read through — kept for that contract alone, so whether one is read within the bound turns on it alone, not on what was read before it */
     private array $readThrough = [];
 
     /** @var list<string> where each read under way was cut short: the name it named that was being read */
@@ -740,6 +740,9 @@ final class EndpointContractCollector
     private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked, string $name = '_self'): array
     {
         $this->readsLeft = self::READS;
+        // What one contract read, the next reads afresh: kept across them, a contract reading what
+        // another kept would be within the bound read after it and past it alone.
+        $this->readThrough = [];
         $this->readFor = $class;
         $this->cutAt = [];
         $this->through = [];
@@ -940,8 +943,7 @@ final class EndpointContractCollector
             return $admitsNull ? new NullableType($alias, optional: false) : $alias;
         }
 
-        // An alias of `?T` is emitted `T`: a key typed with it is no key left out when null.
-        return $this->readDeclared($alias, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked, unwrapOptional: true);
+        return $this->readDeclared($alias, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
     }
 
     /**
@@ -960,8 +962,7 @@ final class EndpointContractCollector
             return new ValueOfType($class);
         }
 
-        // A `_self` of `?T` is `T`, as an alias's is.
-        return null === $declared ? $type : $this->readDeclared($type, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked, unwrapOptional: true);
+        return null === $declared ? $type : $this->readDeclared($type, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
     }
 
     /**
@@ -1032,7 +1033,7 @@ final class EndpointContractCollector
      * @param array<string, string> $classFiles
      * @param array<string, true>   $reading
      */
-    private function readDeclared(NameRefType $written, array $declared, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked, bool $unwrapOptional): ParsedType
+    private function readDeclared(NameRefType $written, array $declared, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
         $key = $declared['file'] . "\0" . $declared['name'];
         if (isset($reading[$key])) {
@@ -1058,7 +1059,9 @@ final class EndpointContractCollector
         if (null === $parsed) {
             return $written;
         }
-        $parsed = $unwrapOptional && $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
+        // Declared `?T`, it is emitted `T`, an alias's and a class's `_self` alike: a key typed with
+        // it is no key left out when null.
+        $parsed = $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
 
         $cutAt = \count($this->cutAt);
         $outer = $this->through;

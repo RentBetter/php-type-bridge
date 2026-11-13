@@ -422,9 +422,11 @@ final class PhpDocShapeParser
 
         // PHPStan's keywords for what says nothing of its contents, as PHPStan reads them: `array`
         // any array, as a property typed `array` is; `list` any list; `object` and `iterable`
-        // anything, which their JSON may be.
+        // anything, which their JSON may be. Bare: `iterable<string>` is a generic, `object{…}` a
+        // shape, as before.
         foreach (['non-empty-array' => 'array<array-key, mixed>', 'array' => 'array<array-key, mixed>', 'non-empty-list' => 'list<mixed>', 'list' => 'list<mixed>', 'object' => 'mixed', 'iterable' => 'mixed'] as $keyword => $means) {
-            if ($this->lookAhead($keyword) && !$this->continuesName($this->pos + \strlen($keyword))) {
+            $after = $this->pos + \strlen($keyword);
+            if ($this->lookAhead($keyword) && !$this->continuesName($after) && !\in_array(substr($this->input, $after, 1), ['<', '{'], true)) {
                 $this->pos += \strlen($keyword);
 
                 return (new self())->parse($means);

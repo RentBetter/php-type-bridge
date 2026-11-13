@@ -83,10 +83,8 @@ final class EmbeddedFormToolTest extends TestCase
 
     public function test_a_read_kept_is_read_back_only_where_what_it_read_through_is_not_being_read(): void
     {
-        // NData and KData name each other: XInput reads them from NData, YInput from KData. NData,
-        // read for XInput, names only itself at a remove, so it is kept — but read through KData,
-        // which YInput is reading: there NData is read afresh and cut short at KData, as KData is
-        // for XInput. Each input reads the pair two deep, whichever is read first.
+        // NData and KData name each other: XInput reads them from NData, YInput from KData, each
+        // two deep, cut short where one names the other being read.
         $src = __DIR__ . '/../Fixture/CrossReadFixtures';
         $contracts = array_column((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Links'], null, 'name');
         $n = $contracts['SaveX']->request?->body?->keys()?->fields[0]->type;
@@ -100,6 +98,14 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertInstanceOf(ShapeType::class, $kn);
         self::assertInstanceOf(NameRefType::class, $nk->fields[0]->type, 'NData, being read, is not read again inside KData');
         self::assertInstanceOf(NameRefType::class, $kn->fields[0]->type, 'KData, being read, is not read again inside NData');
+
+        // ZInput reads both in one contract: NData, kept from `n`, read through KData, which `k` is
+        // reading — so read afresh there, two deep as YInput reads it.
+        $z = $contracts['SaveZ']->request?->body?->keys()?->fields[1]->type;
+        self::assertInstanceOf(ShapeType::class, $z);
+        $zn = $z->fields[0]->type;
+        self::assertInstanceOf(ShapeType::class, $zn);
+        self::assertInstanceOf(NameRefType::class, $zn->fields[0]->type, 'KData, being read, is not read again inside the NData kept');
     }
 
     public function test_a_read_where_null_was_not_asked_is_not_one_where_it_is(): void
