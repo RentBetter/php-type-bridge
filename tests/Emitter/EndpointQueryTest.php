@@ -8,8 +8,10 @@ use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
+use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Mcp\McpManifestBuilder;
+use PTGS\TypeBridge\Mcp\McpManifestGenerator;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Parser\ShapeField;
@@ -248,12 +250,14 @@ final class EndpointQueryTest extends TestCase
 
     public function test_an_alias_whose_null_cant_be_read_is_refused_where_a_body_may_clear_it(): void
     {
-        // In a body the same key may be sent null to clear it, or not: that does turn on Money.
+        // In a tool's body the same key may be sent null to clear it, or not: that does turn on
+        // Money. Only the tool reads it, so the tool fails; the TypeScript is generated.
         $src = __DIR__ . '/../Fixture/OpaqueBodyAliasFixtures';
+        self::assertNotEmpty((new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src)));
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Whether the project-wide alias "Money" (`Dinero`) admits null');
 
-        (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src));
+        (new McpManifestGenerator())->generate($src, TypeBridgeConfig::fromArray(['typeAliases' => ['Money' => 'Dinero']]));
     }
 
     public function test_a_bodys_null_is_asked_of_an_alias_only_for_an_mcp_tool(): void

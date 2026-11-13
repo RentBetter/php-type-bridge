@@ -104,12 +104,14 @@ final class EmbeddedFormToolTest extends TestCase
 
     public function test_a_read_where_null_was_not_asked_is_not_one_where_it_is(): void
     {
-        // FeeData read for a body no tool takes asks nothing of Money; read for a tool's, it must.
+        // FeeData read for a body no tool takes asks nothing of Money; read for a tool's, it must —
+        // which fails the tool, not the TypeScript, which reads neither body's keys.
         $src = __DIR__ . '/../Fixture/AskedReadFixtures';
+        self::assertNotEmpty((new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->statusIndex($src)));
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Whether the project-wide alias "Money"');
 
-        (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->statusIndex($src));
+        (new McpManifestGenerator())->generate($src, TypeBridgeConfig::fromArray(['typeAliases' => ['Money' => 'Dinero']]));
     }
 
     public function test_a_classs_self_is_found_as_its_typescript_finds_it(): void
@@ -167,18 +169,19 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame($properties['ref'], $properties['refs']['items'] ?? null);
     }
 
-    public function test_classes_naming_each_other_past_what_is_read_fail_in_bounded_time(): void
+    public function test_classes_naming_each_other_past_what_is_read_fail_their_tool_in_bounded_time(): void
     {
         // Ten input classes each keyed by every other: unrolled on every path, that is 9! reads of
         // each. A name left unread past the bound would publish a tool saying less than its Endpoint
-        // — a key its alias lets be cleared, refused — so the read fails instead, and soon.
-        $this->assertReadFailsInBoundedTime(__DIR__ . '/../Fixture/CliqueFixtures', 'Clique1');
+        // — a key its alias lets be cleared, refused — so the tool fails instead, and soon. Its
+        // TypeScript reads none of a body's keys, and is generated.
+        $this->assertToolFailsInBoundedTime(__DIR__ . '/../Fixture/CliqueFixtures', 'Clique1');
     }
 
-    public function test_aliases_naming_each_other_past_what_is_read_fail_in_bounded_time(): void
+    public function test_aliases_naming_each_other_past_what_is_read_fail_their_tool_in_bounded_time(): void
     {
         // Ten aliases of one class, each with a key of every other.
-        $this->assertReadFailsInBoundedTime(__DIR__ . '/../Fixture/AliasCliqueFixtures', 'AliasCliqueData');
+        $this->assertToolFailsInBoundedTime(__DIR__ . '/../Fixture/AliasCliqueFixtures', 'AliasCliqueData');
     }
 
     public function test_a_class_naming_itself_is_read_once_wherever_it_is_named(): void
@@ -242,11 +245,12 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame(['street', 'line2'], $this->schema(['AddressData' => 'string'])['properties']['address']['required'] ?? null);
     }
 
-    private function assertReadFailsInBoundedTime(string $src, string $input): void
+    private function assertToolFailsInBoundedTime(string $src, string $input): void
     {
         $started = microtime(true);
+        self::assertNotEmpty((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src)));
         try {
-            (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src));
+            (new McpManifestGenerator())->generate($src, new TypeBridgeConfig());
             self::fail('Read through without failing.');
         } catch (\RuntimeException $exception) {
             self::assertStringContainsString('name one another in more ways than', $exception->getMessage());

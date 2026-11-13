@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Mcp;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Collector\EndpointContractCollector;
+use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Mcp\McpManifestGenerator;
+use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Spec\Param;
 use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use RuntimeException;
@@ -210,6 +213,26 @@ final class McpManifestGeneratorTest extends TestCase
         $this->expectExceptionMessage('NoteController::listNotesAction" is exposed as an MCP tool but no #[Route] declares it');
 
         (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/NoRouteToolFixtures', new TypeBridgeConfig());
+    }
+
+    public function testAToolWhosePathIsAClassTakesItsRoutesPlaceholders(): void
+    {
+        // The class types the Endpoint's path; the tool still takes each placeholder, held to its
+        // requirement as the router holds it.
+        $tool = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/PathClassToolFixtures', new TypeBridgeConfig())['tools'][0];
+
+        self::assertSame(['id' => ['type' => 'integer', 'minimum' => 0]], $tool['inputSchema']['properties'] ?? null);
+        self::assertSame(['id'], $tool['inputSchema']['required'] ?? null);
+    }
+
+    public function testAPathClassIsItsContractAsWritten(): void
+    {
+        // Nothing reads a path class's keys — its TypeScript names it, and the tool takes the route's
+        // placeholders — so it isn't read through.
+        $src = __DIR__ . '/../Fixture/PathClassToolFixtures';
+        $contract = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Notes'][0];
+
+        self::assertInstanceOf(NameRefType::class, $contract->request?->path?->keys()?->fields[0]->type);
     }
 
     public function testFailsWhenTheRoutingFileCannotBeLoaded(): void

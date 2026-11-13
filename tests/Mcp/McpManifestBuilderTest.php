@@ -1137,6 +1137,24 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'number'], $properties['any']);
     }
 
+    public function testANumberSegmentWhosePatternCantBeCarriedOverIsAsNarrowAsItCanBeSaid(): void
+    {
+        // A route leaving `utf8` to the router's default may read `\\d` as any Unicode digit, which
+        // no JSON Schema pattern says. What takes nothing but digits is still an integer of at least
+        // 0, and a signed one with no decimal part an integer: no `1.5`, nor `-3` where it can't be.
+        $properties = $this->pathTool([
+            new CollectedPathParam('short', 'number', '\\d{1,4}'),
+            new CollectedPathParam('from2', 'number', '[2-9]\\d*'),
+            new CollectedPathParam('nonzero', 'number', '-?[1-9]\\d*'),
+            new CollectedPathParam('either', 'number', '\\d+|x'),
+        ]);
+
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['short']);
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['from2']);
+        self::assertSame(['type' => 'integer'], $properties['nonzero']);
+        self::assertSame(['type' => 'number'], $properties['either']);
+    }
+
     public function testANumberSegmentWhoseRequirementIsNoUnboundedIntegerIsItsPattern(): void
     {
         // `\\d{1,4}` takes no 10000, `[2-9]\\d*` no 1: as the string the router matches, which says
