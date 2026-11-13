@@ -1146,12 +1146,19 @@ final class McpManifestBuilderTest extends TestCase
             new CollectedPathParam('from2', 'number', '[2-9]\\d*', false),
             new CollectedPathParam('placeholder', 'number', '%app.id%'),
             new CollectedPathParam('capped', 'number', '[0-9]{1,15}', false),
+            new CollectedPathParam('no5', 'number', '\\d*[0-46-9]', false),
+            new CollectedPathParam('no5s', 'number', '[0-46-9]\\d*', false),
+            new CollectedPathParam('nonzero', 'number', '-?[1-9]\\d*', false),
         ]);
 
         self::assertSame(['type' => 'string', 'pattern' => '^(?:\\d{1,4})$'], $properties['short']);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[2-9]\\d*)$'], $properties['from2']);
         self::assertSame(['type' => 'number'], $properties['placeholder']);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-9]{1,15})$'], $properties['capped'], 'A ceiling past twelve digits is a ceiling');
+        // Each takes every value a sample of them would try, and not 5, 50 or 0.
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:\\d*[0-46-9])$'], $properties['no5']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-46-9]\\d*)$'], $properties['no5s']);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:-?[1-9]\\d*)$'], $properties['nonzero']);
     }
 
     /**
@@ -1527,11 +1534,11 @@ final class McpManifestBuilderTest extends TestCase
         );
     }
 
-    public function testAFieldLeftOutOfAnyWriteButAPatchIsSubmittedBlankWithClearMissing(): void
+    public function testAFieldLeftOutOfAnyWriteIsSubmittedBlankWithClearMissing(): void
     {
-        // Symfony's request handler submits every method but PATCH with `clearMissing` on: a PUT
-        // without `name` submits it blank, which its NotBlank refuses. Without it, a POST alone
-        // makes something, and requires it.
+        // `$form->submit($data)` — the bundled RequestFormProcessor's — submits with `clearMissing`
+        // on whatever the method, PATCH too: a PATCH or a PUT without `name` submits it blank,
+        // which its NotBlank refuses. Without it, a POST alone makes something, and requires it.
         $name = new CollectedFormField(name: 'name', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
         $required = static function (string $method, bool $clearMissing) use ($name): ?array {
             $endpoint = new CollectedEndpointContract(
@@ -1548,9 +1555,33 @@ final class McpManifestBuilderTest extends TestCase
         };
 
         self::assertSame(['name'], $required('PUT', true));
-        self::assertNull($required('PATCH', true));
+        self::assertSame(['name'], $required('PATCH', true));
         self::assertNull($required('PUT', false));
+        self::assertNull($required('PATCH', false));
         self::assertSame(['name'], $required('POST', false));
+    }
+
+    public function testAQueryFieldLeftOutIsSubmittedBlankWithClearMissing(): void
+    {
+        // A query form is submitted as a body is: with `clearMissing` on, a filter left out is
+        // submitted blank, which its NotBlank refuses, whatever the method.
+        $status = new CollectedFormField(name: 'status', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
+        $required = static function (bool $clearMissing) use ($status): ?array {
+            $endpoint = new CollectedEndpointContract(
+                name: 'listProducts',
+                domain: 'products',
+                controllerClass: 'App\\ProductController',
+                methodName: '__invoke',
+                responses: [],
+                request: new CollectedEndpointRequest(query: new CollectedInputReference(null, 'App\\ProductFilter', 'ProductFilter', 'products', [$status], new ShapeType([new ShapeField('status', new ScalarType('string'), optional: true)]))),
+                mcp: new CollectedMcpTool(name: 'listProducts', description: 'List products.', httpMethod: 'GET', httpPath: '/products', destructive: false),
+            );
+
+            return (new McpManifestBuilder(clearMissing: $clearMissing))->build(['products' => [$endpoint]])['tools'][0]['inputSchema']['required'] ?? null;
+        };
+
+        self::assertSame(['status'], $required(true));
+        self::assertNull($required(false));
     }
 
     public function testAProjectWideAliasIsAScalarTheContractDeclares(): void

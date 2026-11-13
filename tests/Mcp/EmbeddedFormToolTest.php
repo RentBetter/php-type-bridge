@@ -145,29 +145,54 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame($properties['ref'], $properties['refs']['items'] ?? null);
     }
 
-    public function test_classes_naming_each_other_are_read_in_bounded_time(): void
+    public function test_classes_naming_each_other_past_what_is_read_fail_in_bounded_time(): void
     {
         // Ten input classes each keyed by every other: unrolled on every path, that is 9! reads of
-        // each. Each contract may read as many as the first did.
-        $src = __DIR__ . '/../Fixture/CliqueFixtures';
-        $started = microtime(true);
-        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Notes'];
-
-        self::assertLessThan(10.0, microtime(true) - $started);
-        self::assertCount(2, $contracts);
-        self::assertEquals($contracts[0]->request?->body?->keys(), $contracts[1]->request?->body?->keys());
-        self::assertInstanceOf(ShapeType::class, $contracts[1]->request?->body?->keys()?->fields[0]->type);
+        // each. A name left unread past the bound would publish a tool saying less than its Endpoint
+        // — a key its alias lets be cleared, refused — so the read fails instead, and soon.
+        $this->assertReadFailsInBoundedTime(__DIR__ . '/../Fixture/CliqueFixtures', 'Clique1');
     }
 
-    public function test_aliases_naming_each_other_are_read_in_bounded_time(): void
+    public function test_aliases_naming_each_other_past_what_is_read_fail_in_bounded_time(): void
     {
         // Ten aliases of one class, each with a key of every other.
-        $src = __DIR__ . '/../Fixture/AliasCliqueFixtures';
-        $started = microtime(true);
-        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Notes'];
+        $this->assertReadFailsInBoundedTime(__DIR__ . '/../Fixture/AliasCliqueFixtures', 'AliasCliqueData');
+    }
 
-        self::assertLessThan(10.0, microtime(true) - $started);
-        self::assertInstanceOf(ShapeType::class, $contracts[0]->request?->body?->keys()?->fields[0]->type);
+    public function test_a_class_naming_itself_is_read_once_wherever_it_is_named(): void
+    {
+        // Thirty shelves of forty categories, a category naming itself: what each is, it is
+        // everywhere, so it is read once — not once a key, 1230 reads, past the bound before `memo`.
+        $src = __DIR__ . '/../Fixture/RecursiveFanOutFixtures';
+        $contracts = array_column((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Stock'], null, 'name');
+        $keys = $contracts['Restock']->request?->body?->keys()?->fields ?? [];
+
+        self::assertCount(31, $keys);
+        $shelf = $keys[29]->type;
+        self::assertInstanceOf(ShapeType::class, $shelf);
+        self::assertInstanceOf(ShapeType::class, $shelf->fields[39]->type);
+        self::assertTrue(ShapeField::admitsNull($keys[30]->type), 'memo, last, is read');
+    }
+
+    public function test_a_body_no_tool_takes_is_its_contract_as_written(): void
+    {
+        // Only a tool reads what a body's keys are; its TypeScript names each as written.
+        $src = __DIR__ . '/../Fixture/RecursiveFanOutFixtures';
+        $contracts = array_column((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Stock'], null, 'name');
+
+        self::assertInstanceOf(NameRefType::class, $contracts['PreviewRestock']->request?->body?->keys()?->fields[0]->type);
+        self::assertInstanceOf(ShapeType::class, $contracts['Restock']->request?->body?->keys()?->fields[0]->type);
+    }
+
+    public function test_a_class_named_from_its_files_namespace_or_a_use_is_read(): void
+    {
+        // `Input\AddressData`, `Parts\AddressData` and the name in full are one class, as PHP and the
+        // TypeScript resolve them: AddressData's `_self` says `line2` may be left out of each.
+        $properties = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/PartlyQualifiedFixtures', new TypeBridgeConfig())['tools'][0]['inputSchema']['properties'];
+
+        foreach (['address', 'billing', 'shipping'] as $key) {
+            self::assertSame(['street'], $properties[$key]['required'] ?? null, $key);
+        }
     }
 
     public function test_an_inputs_key_naming_its_own_class_stays_a_name(): void
@@ -191,6 +216,19 @@ final class EmbeddedFormToolTest extends TestCase
         // `address?: AddressData`, AddressData a config alias too: the alias, as everywhere a name is
         // one — its keys none, so its fields are held to the form's own `required`.
         self::assertSame(['street', 'line2'], $this->schema(['AddressData' => 'string'])['properties']['address']['required'] ?? null);
+    }
+
+    private function assertReadFailsInBoundedTime(string $src, string $input): void
+    {
+        $started = microtime(true);
+        try {
+            (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src));
+            self::fail('Read through without failing.');
+        } catch (\RuntimeException $exception) {
+            self::assertStringContainsString('name one another in more ways than', $exception->getMessage());
+            self::assertStringContainsString($input, $exception->getMessage());
+        }
+        self::assertLessThan(10.0, microtime(true) - $started);
     }
 
     /**

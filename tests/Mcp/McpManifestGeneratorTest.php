@@ -202,6 +202,16 @@ final class McpManifestGeneratorTest extends TestCase
         );
     }
 
+    public function testFailsForAToolNoRouteDeclaresWithNoRoutingToFindOneIn(): void
+    {
+        // Its route, if it has one, is written where the attributes don't say — YAML, say — and with
+        // no routing configured there is nowhere to read it: published, it would be a GET of ''.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('NoteController::listNotesAction" is exposed as an MCP tool but no #[Route] declares it');
+
+        (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/NoRouteToolFixtures', new TypeBridgeConfig());
+    }
+
     public function testFailsWhenTheRoutingFileCannotBeLoaded(): void
     {
         // RoutePathResolver degrades quietly for the PHPStan rules, where a missing file should
