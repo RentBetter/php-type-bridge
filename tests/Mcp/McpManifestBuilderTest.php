@@ -944,8 +944,8 @@ final class McpManifestBuilderTest extends TestCase
 
         $post = $this->toolWithBody('POST', $fields, $contract, clearMissing: true)['inputSchema'];
 
-        self::assertSame(['type' => 'string'], $post['properties']['name']);
-        self::assertSame(['type' => 'string'], $post['properties']['code']);
+        self::assertSame(['type' => 'string', 'minLength' => 1], $post['properties']['name']);
+        self::assertSame(['type' => 'string', 'minLength' => 1], $post['properties']['code']);
         self::assertSame(['type' => ['string', 'null']], $post['properties']['notes']);
         self::assertSame(['name', 'code'], $post['required']);
     }
@@ -1231,8 +1231,8 @@ final class McpManifestBuilderTest extends TestCase
         yield 'bytes: \W' => [[new Regex('/^\W$/')], null];
         yield 'bytes: \D' => [[new Regex('/^\D+$/')], null];
         yield 'utf8: a negated class' => [[new Regex('/^[^<>]{1,3}$/uD')], '^(?:[^<>]{1,3})$'];
-        yield 'utf8: a word' => [[new Regex('/^\w+$/u')], null];
-        yield 'utf8: digits' => [[new Regex('/^\d{4}$/u')], null];
+        yield 'utf8: a word' => [[new Regex('/^\w+$/u')], '^(?:[A-Za-z0-9_]+)\n?$'];
+        yield 'utf8: digits' => [[new Regex('/^\d{4}$/u')], '^(?:[0-9]{4})\n?$'];
         yield 'utf8: a word boundary' => [[new Regex('/^a\b$/u')], null];
         yield 'bracket delimiters' => [[new Regex('{^[a-z]+$}')], '^(?:[a-z]+)\n?$'];
         yield 'an escaped delimiter that is no syntax' => [[new Regex('#^a\#b$#D')], '^(?:a#b)$'];
@@ -1279,7 +1279,8 @@ final class McpManifestBuilderTest extends TestCase
     public function testAStringsRegexConstraintIsItsPatternOnlyWhereJsonSchemaReadsItTheSame(array $constraints, ?string $pattern): void
     {
         // Untrimmed and refused blank, the value the Regex sees is the one sent: the pattern is the
-        // rule alone. Trimming and blank values are testAStringsRegexAllowsWhatTheFormAndValidatorAllow.
+        // rule alone — or, with none, the one character a blank refused takes. Trimming and blank
+        // values are testAStringsRegexAllowsWhatTheFormAndValidatorAllow.
         $field = new CollectedFormField(
             name: 'code',
             formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType',
@@ -1293,7 +1294,7 @@ final class McpManifestBuilderTest extends TestCase
 
         $schema = $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code'];
 
-        self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+        self::assertSame(null === $pattern ? ['type' => 'string', 'minLength' => 1] : ['type' => 'string', 'pattern' => $pattern], $schema);
     }
 
     /**
@@ -1318,7 +1319,8 @@ final class McpManifestBuilderTest extends TestCase
         yield 'as sent, NotBlank' => [false, [new NotBlank()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
         yield 'as sent, NotNull' => [false, [new NotNull()], '/^[A-Z]{2,5}$/', '^(?:[A-Z]{2,5})\n?$'];
         yield 'as sent, NotBlank allowing null' => [false, [new NotBlank(allowNull: true)], '/^[A-Z]{2,5}$/', '^(?:(?:[A-Z]{2,5})\n?)?$'];
-        // A rule that can match what the form trims can't be told apart from the padding.
+        // A rule that can match what the form trims can't be told apart from the padding: no
+        // pattern, and the one character its NotBlank's blank takes.
         yield 'trimmed, the rule matches a space' => [true, [new NotBlank()], '/^[a-z ]+$/', null];
         yield 'trimmed, the rule matches a tab' => [true, [new NotBlank()], '/^a\tb$/', null];
         yield 'trimmed, the rule has a negated class' => [true, [new NotBlank()], '/^[^<>]+$/u', null];
@@ -1344,7 +1346,7 @@ final class McpManifestBuilderTest extends TestCase
 
         $schema = $this->toolWithBody('PUT', [$field], new ShapeType([]))['inputSchema']['properties']['code'];
 
-        self::assertSame(null === $pattern ? ['type' => 'string'] : ['type' => 'string', 'pattern' => $pattern], $schema);
+        self::assertSame(null === $pattern ? ['type' => 'string', 'minLength' => 1] : ['type' => 'string', 'pattern' => $pattern], $schema);
     }
 
     /**
@@ -1383,7 +1385,7 @@ final class McpManifestBuilderTest extends TestCase
 
         $tool = $this->toolWithBody('POST', [$title, $note], $contract, clearMissing: true);
         self::assertSame(['title'], $tool['inputSchema']['required']);
-        self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['title']);
+        self::assertSame(['type' => 'string', 'minLength' => 1], $tool['inputSchema']['properties']['title']);
         // A NotNull takes the '' a null becomes.
         self::assertSame(['type' => ['string', 'null']], $tool['inputSchema']['properties']['note']);
     }
@@ -1440,7 +1442,7 @@ final class McpManifestBuilderTest extends TestCase
 
         $tool = $this->toolWithBody('POST', [$name, $code], $this->shape('array{name?: string|null, code?: string|null}'), clearMissing: true);
         self::assertSame(['name', 'code'], $tool['inputSchema']['required']);
-        self::assertSame(['type' => 'string', 'maxLength' => 40], $tool['inputSchema']['properties']['name']);
+        self::assertSame(['type' => 'string', 'maxLength' => 40, 'minLength' => 1], $tool['inputSchema']['properties']['name']);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+)$'], $tool['inputSchema']['properties']['code']);
     }
 
@@ -1718,7 +1720,7 @@ final class McpManifestBuilderTest extends TestCase
 
         $properties = $this->toolWithBody('POST', [$word, $class, $after], $this->shape('array{word?: string, class?: string, after?: string}'))['inputSchema']['properties'];
         self::assertSame(['type' => 'string', 'pattern' => '^(?:\\bfoo\\b)$'], $properties['word']);
-        self::assertSame(['type' => 'string'], $properties['class']);
+        self::assertSame(['type' => 'string', 'minLength' => 1], $properties['class']);
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+\\b)$'], $properties['after'], 'A boundary after a class closes');
     }
 
@@ -1765,11 +1767,11 @@ final class McpManifestBuilderTest extends TestCase
     {
         // Submitted blank, the serial's transformer fails: the form is invalid, a 422. So a POST
         // requires it, and no update may send it null — whatever its contract says.
-        $fields = array_column((new FormTypeInspector())->inspect(BlankNoteType::class)['fields'], null, 'name');
+        $fields = array_column((new FormTypeInspector())->inspect(BlankNoteType::class, blanks: true)['fields'], null, 'name');
         $contract = $this->shape('array{serial?: string|null}');
 
         self::assertSame(['serial'], $this->toolWithBody('POST', [$fields['serial']], $contract, clearMissing: true)['inputSchema']['required'] ?? []);
-        self::assertSame(['type' => 'string'], $this->toolWithBody('PUT', [$fields['serial']], $contract)['inputSchema']['properties']['serial']);
+        self::assertSame(['type' => 'string', 'minLength' => 1], $this->toolWithBody('PUT', [$fields['serial']], $contract)['inputSchema']['properties']['serial']);
     }
 
     public function testAKeyAnIntersectionRequiresOnEitherSideIsRequired(): void

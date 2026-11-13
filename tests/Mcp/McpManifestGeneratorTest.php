@@ -65,12 +65,13 @@ final class McpManifestGeneratorTest extends TestCase
     public function testWhetherARouteMatchesByCharacterIsWhatTheRouterServes(): void
     {
         // The method says `utf8: false`; the import that loads it says `utf8: true`, and the import
-        // wins. Matched by character, `\w` is Unicode in PCRE and ASCII in JSON Schema: no pattern.
+        // wins. Matched by character, `\w` is Unicode in PCRE and ASCII in JSON Schema: published as
+        // the ASCII set, which takes fewer — by byte it would be `\w` as written.
         $dir = __DIR__ . '/../Fixture/Utf8RoutedMcpFixtures';
         $manifest = (new McpManifestGenerator())->generate($dir, TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], $dir));
 
         $code = array_column($manifest['tools'], 'inputSchema', 'name')['ShowCode']['properties']['code'] ?? null;
-        self::assertSame(['type' => 'string'], $code);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Za-z0-9_]+)$'], $code);
     }
 
     public function testWhatAPathParamMustLookLikeIsWhatTheRouterServes(): void

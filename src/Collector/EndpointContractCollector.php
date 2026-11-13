@@ -643,7 +643,8 @@ final class EndpointContractCollector
             ));
         }
 
-        $resolvedForm = $this->formTypeInspector->inspect($formClass);
+        // A field's blank, which runs its `empty_data`, only a tool reads.
+        $resolvedForm = $this->formTypeInspector->inspect($formClass, blanks: $tool);
         if (null === $resolvedForm['dataClass']) {
             throw new RuntimeException(\sprintf(
                 'Form "%s" must configure a non-null data_class for TypeBridge request contracts.',

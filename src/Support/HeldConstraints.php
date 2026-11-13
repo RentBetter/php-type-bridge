@@ -82,6 +82,16 @@ final class HeldConstraints
     }
 
     /**
+     * What an All holds each of its entries to: its nested constraints, Default group alone.
+     *
+     * @return list<Constraint>
+     */
+    public static function eachOf(All $all): array
+    {
+        return array_values(array_filter(self::nested($all), self::validatedByDefault(...)));
+    }
+
+    /**
      * @return list<Constraint>
      */
     private static function nested(Composite $constraint): array

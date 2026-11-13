@@ -38,7 +38,9 @@ final readonly class CollectedFormField
      *                                                 this is what its form makes of that: null for most; '' for a
      *                                                 text field whose `empty_data` is '', which TextType keeps a
      *                                                 string; [] for a collection or a multiple choice; false for a
-     *                                                 checkbox
+     *                                                 checkbox. Read only where asked
+     *                                                 ({@see \PTGS\TypeBridge\Support\FormTypeInspector::inspect()}):
+     *                                                 an MCP tool's form; null otherwise
      * @param list<Constraint>         $entryConstraints what each entry of a collection is validated against: its
      *                                                 `entry_options` constraints and an All on its property
      * @param mixed                    $entryBlankValue what a collection entry reaches validation as when it is

@@ -33,9 +33,14 @@ final class FormTypeInspectorTest extends TestCase
         // What a field left out becomes runs its `empty_data` — application code — which only a
         // tool reads: the TypeScript and the PHPStan rules inspect forms without it.
         CountedBlankType::$runs = 0;
-        (new FormTypeInspector())->inspect(CountedBlankType::class);
+        $inspector = new FormTypeInspector();
+        $inspector->inspect(CountedBlankType::class);
+        self::assertSame(0, CountedBlankType::$runs, "Neither the label's nor an entry's");
 
-        self::assertSame(0, CountedBlankType::$runs);
+        // Asked, by the same inspector: read anew, not the inspection that skipped them.
+        $fields = $inspector->inspect(CountedBlankType::class, blanks: true)['fields'];
+        self::assertSame('none', $fields[0]->blankValue);
+        self::assertSame('none', $fields[1]->entryBlankValue);
     }
 
     public function test_it_inspects_contract_form_types_and_nested_custom_forms(): void
@@ -100,7 +105,7 @@ final class FormTypeInspectorTest extends TestCase
     {
         // Left out of a request, sent as null or sent blank, a field is submitted null; what its
         // constraints are then asked about is what its form makes of that.
-        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class, blanks: true)['fields'], null, 'name');
 
         self::assertNull($fields['title']->blankValue, 'A blank text field reaches validation as null');
         self::assertSame('', $fields['code']->blankValue, "With empty_data '', TextType keeps it ''");
@@ -135,7 +140,7 @@ final class FormTypeInspectorTest extends TestCase
 
     public function test_a_field_rebuilt_with_its_declared_contracts_keeps_what_the_form_does_to_it(): void
     {
-        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class, blanks: true)['fields'], null, 'name');
 
         self::assertSame('', $fields['code']->withDeclared([], [], null)->blankValue);
         self::assertFalse($fields['pinned']->withDeclared([], [], null)->blankValue);
@@ -144,7 +149,7 @@ final class FormTypeInspectorTest extends TestCase
 
     public function test_it_records_what_a_blank_entry_reaches_validation_as(): void
     {
-        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class)['fields'], null, 'name');
+        $fields = array_column((new FormTypeInspector())->inspect(NoteType::class, blanks: true)['fields'], null, 'name');
 
         self::assertSame('', $fields['codes']->entryBlankValue, "Its entry_options give each entry empty_data ''");
         self::assertNull($fields['tags']->entryBlankValue);

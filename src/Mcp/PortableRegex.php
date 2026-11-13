@@ -49,11 +49,12 @@ final class PortableRegex
         }
         $inner = substr($body, 1, -1);
 
-        if (!self::readsTheSame($inner, alternationOutsideGroups: false, unicode: str_contains($flags, 'u'))) {
+        $unicode = str_contains($flags, 'u');
+        if (!self::readsTheSame($inner, alternationOutsideGroups: false, unicode: $unicode)) {
             return null;
         }
 
-        return [$inner, $flags];
+        return [self::published($inner, $unicode), $flags];
     }
 
     /**
@@ -71,7 +72,43 @@ final class PortableRegex
             return null;
         }
 
-        return '^(?:' . $requirement . ')$';
+        return '^(?:' . self::published($requirement, $utf8) . ')$';
+    }
+
+    /**
+     * The fragment as it is published: by byte as written; read as Unicode — under `u`, or not
+     * knowing the mode — with `\d` and `\w` written out as the ASCII sets ECMA reads them as,
+     * `[0-9]` and `[A-Za-z0-9_]`, bare in a class. PHP reads more into them there: published so,
+     * they take fewer, never a value the server refuses, and Python's `re`, which reads them as
+     * Unicode too, reads them alike.
+     */
+    private static function published(string $fragment, ?bool $unicode): string
+    {
+        if (false === $unicode) {
+            return $fragment;
+        }
+
+        $published = '';
+        $inClass = false;
+        $length = \strlen($fragment);
+        for ($i = 0; $i < $length; ++$i) {
+            $char = $fragment[$i];
+            if ('\\' === $char) {
+                $escaped = $fragment[++$i] ?? '';
+                $set = ['d' => '0-9', 'w' => 'A-Za-z0-9_'][$escaped] ?? null;
+                $published .= null === $set ? $char . $escaped : ($inClass ? $set : '[' . $set . ']');
+
+                continue;
+            }
+            if (!$inClass && '[' === $char) {
+                $inClass = true;
+            } elseif ($inClass && ']' === $char) {
+                $inClass = false;
+            }
+            $published .= $char;
+        }
+
+        return $published;
     }
 
     /**
@@ -93,8 +130,10 @@ final class PortableRegex
      *
      * And what PCRE's mode changes. Without `u` it matches bytes, ECMA code points: alike only where
      * nothing can match a byte of a multibyte character — no negated class, `\D` or `\W`. With `u`,
-     * PHP's PCRE reads `\d \w \b` and their negations as Unicode (UCP), ECMA as ASCII: none of them.
-     * Not knowing the mode (`$unicode` null), neither.
+     * PHP's PCRE reads `\d \w \b` and their negations as Unicode (UCP), ECMA as ASCII: `\d` and `\w`
+     * are published as the ASCII sets ({@see self::published()}), which take fewer — but not in a
+     * negated class, where fewer refused is more taken — and `\D \W \b \B` not at all. Not knowing
+     * the mode (`$unicode` null), neither's refusals.
      */
     public static function readsTheSame(string $fragment, bool $alternationOutsideGroups, ?bool $unicode): bool
     {
@@ -103,13 +142,12 @@ final class PortableRegex
         }
 
         $byteSafe = true !== $unicode;
-        $classEscapes = 'dDwW';
+        $classEscapes = $byteSafe ? 'dw' : 'dDwW';
         $boundaries = 'bB';
-        if ($byteSafe) {
-            $classEscapes = str_replace(['D', 'W'], '', $classEscapes);
-        }
-        if (false !== $unicode) {
-            $classEscapes = '';
+        // Read as Unicode, only `\d` and `\w`, published as their ASCII sets.
+        $widened = false !== $unicode;
+        if ($widened) {
+            $classEscapes = 'dw';
             $boundaries = '';
         }
 
@@ -137,7 +175,7 @@ final class PortableRegex
             }
 
             if ('[' === $char) {
-                $close = self::classEnd($fragment, $i, $classEscapes, negatable: !$byteSafe);
+                $close = self::classEnd($fragment, $i, $classEscapes, negatable: !$byteSafe, widened: $widened);
                 if (null === $close) {
                     return false;
                 }
@@ -257,16 +295,20 @@ final class PortableRegex
      * Where the class opening at `$open` closes, when every part of it reads the same in both
      * dialects: literals, escaped syntax characters and `\n \r \t \f \b \-`, the class escapes the
      * mode allows (`$classEscapes`), and ranges between two literals in order — and negated only
-     * where the mode matches code points (`$negatable`). Null otherwise: a `[` inside (a POSIX class,
-     * or nesting), a range from or to a class escape, an empty class.
+     * where the mode matches code points (`$negatable`), and then with no class escape published as
+     * a narrower set (`$widened`), which refusing fewer would take more. Null otherwise: a `[`
+     * inside (a POSIX class, or nesting), a range from or to a class escape, an empty class.
      */
-    private static function classEnd(string $fragment, int $open, string $classEscapes, bool $negatable): ?int
+    private static function classEnd(string $fragment, int $open, string $classEscapes, bool $negatable, bool $widened): ?int
     {
         $length = \strlen($fragment);
         $i = $open + 1;
         if ('^' === ($fragment[$i] ?? '')) {
             if (!$negatable) {
                 return null;
+            }
+            if ($widened) {
+                $classEscapes = '';
             }
             ++$i;
         }

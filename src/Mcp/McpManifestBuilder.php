@@ -86,18 +86,10 @@ final class McpManifestBuilder
 
     /**
      * A route requirement written as taking every whole number from 0 (`\d+`, `[0-9]+`) or 1
-     * (`[1-9]\d*`, `[1-9][0-9]*`) up, perhaps signed (`-?`) and with a decimal part (`(?:\.\d+)?`).
+     * (`[1-9]\d*`, `[1-9][0-9]*`) up, perhaps signed (`-?`).
      */
     private const string WHOLE_NUMBERS = <<<'REGEX'
-        {^(?<sign>-\?)?(?:(?<from0>(?:\\d|\[0-9\])\+)|\[1-9\](?:\\d|\[0-9\])\*)(?<decimal>\((?:\?:)?\\\.(?:\\d|\[0-9\])\+\)\?)?$}D
-        REGEX;
-
-    /**
-     * A route requirement that takes nothing but digits: `\d` and classes of digits (`[0-46-9]`),
-     * each quantified any way at all (`{1,4}`, `*`, `+?`).
-     */
-    private const string DIGITS = <<<'REGEX'
-        {^(?:(?:\\d|\[(?:[0-9](?:-[0-9])?)+\])(?:(?:[*+?]|\{\d+(?:,\d*)?\})[?+]?)?)+$}D
+        {^(?<sign>-\?)?(?:(?<from0>(?:\\d|\[0-9\])\+)|\[1-9\](?:\\d|\[0-9\])\*)$}D
         REGEX;
 
     /**
@@ -390,9 +382,10 @@ final class McpManifestBuilder
         // null sent for the form is an empty array that clears each of them — a 422 from a child's
         // NotBlank, or a record of nulls. A list's null is an empty list, which does clear it; and
         // a form that takes a record's id as well (`string|array{…}|null`) reads what is sent
-        // itself, before it is submitted, so its null is the "none" it declares.
-        if ($field->compound && [] !== $field->children && [] === $this->declaredScalars($key->type)) {
-            return false;
+        // itself, before it is submitted, so its null is the "none" it declares — submitting none
+        // of its fields, so only what the field itself is held to can refuse it.
+        if ($field->compound && [] !== $field->children) {
+            return [] !== $this->declaredScalars($key->type) && !$this->refuses($field->constraints, null);
         }
 
         // A contract one create and one update share says `string|null`; a NotNull, or a NotBlank
@@ -462,6 +455,12 @@ final class McpManifestBuilder
         if (isset($pattern['minLength'])) {
             $bounds['minLength'] = max($bounds['minLength'] ?? 0, $pattern['minLength']);
             unset($pattern['minLength']);
+        }
+        // `""` is submitted as the field's blank: where that is refused, at least one character —
+        // unless its pattern refuses `""` already (it is given one where it doesn't), or its value is
+        // one of its choices.
+        if ('string' === $schema['type'] && null === $field->choiceValues && !isset($pattern['pattern']) && $this->refusesBlank($field)) {
+            $bounds['minLength'] = max($bounds['minLength'] ?? 0, 1);
         }
         // A blank the server takes is submitted null, which a Length skips: its minimum holds the
         // values that aren't blank.
@@ -781,41 +780,31 @@ final class McpManifestBuilder
 
     /**
      * A number path segment as what its requirement lets the router match. One written as taking
-     * every whole number from 0 (`\d+`, `[0-9]+`) or 1 (`[1-9]\d*`) up is an integer of at least
-     * that, or a number where it takes a decimal part too (`(?:\.\d+)?`); signed (`-?\d+`), one of
-     * any. Read off how it is written: no sample of values shows there is no gap — `\d*[0-46-9]`
-     * takes every one a sample would try, and not 5. Any other (`\d{1,4}`, `[2-9]\d*`) is the string
-     * the router matches, its pattern saying which, so a tool sends no number the router answers 404
-     * to. Where its pattern can't be carried over — `\d` on a route leaving `utf8` to the router's
-     * default, which may read it as any Unicode digit; a `%…%` placeholder — it is as narrow as a
-     * type says: digits alone an integer of at least 0, a signed whole number an integer, else a number.
+     * every whole number from 0 (`\d+`, `[0-9]+`) or 1 (`[1-9]\d*`) up is an integer of at least that;
+     * signed (`-?\d+`), one of any. Read off how it is written: no sample of values shows there is no
+     * gap — `\d*[0-46-9]` takes every one a sample would try, and not 5. Any other (`\d{1,4}`,
+     * `[2-9]\d*`, a decimal, which a client may write in exponent form) is the string the router
+     * matches, its pattern saying which, so a tool sends no number the router answers 404 to — or a
+     * number, where its pattern can't be carried over, a `%…%` placeholder's included.
      *
      * @return array{type: 'integer'|'number'|'string', minimum?: int, pattern?: string}
      */
     private static function numberHeldTo(string $requirement, ?bool $utf8): array
     {
         if (1 === preg_match(self::WHOLE_NUMBERS, $requirement, $whole, \PREG_UNMATCHED_AS_NULL)) {
-            $type = null === $whole['decimal'] ? 'integer' : 'number';
             $from = null === $whole['from0'] ? 1 : 0;
-            // Signed, from 1 up leaves out 0.
             if (null === $whole['sign']) {
-                return ['type' => $type, 'minimum' => $from];
+                return ['type' => 'integer', 'minimum' => $from];
             }
+            // Signed, from 1 up leaves out 0, which its pattern says.
             if (0 === $from) {
-                return ['type' => $type];
+                return ['type' => 'integer'];
             }
         }
 
         $routed = PortableRegex::routePattern($requirement, $utf8);
-        if (null !== $routed) {
-            return ['type' => 'string', 'pattern' => $routed];
-        }
 
-        return match (true) {
-            [] !== $whole && null === $whole['decimal'] => ['type' => 'integer'],
-            1 === preg_match(self::DIGITS, $requirement) => ['type' => 'integer', 'minimum' => 0],
-            default => ['type' => 'number'],
-        };
+        return null === $routed ? ['type' => 'number'] : ['type' => 'string', 'pattern' => $routed];
     }
 
     /**

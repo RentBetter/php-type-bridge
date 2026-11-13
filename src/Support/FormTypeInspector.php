@@ -53,7 +53,7 @@ final class FormTypeInspector
     /** Reads a class's validation metadata, for whether a property cascades ({@see self::cascades()}). */
     private ?ValidatorInterface $validatorMetadata = null;
 
-    /** @var array<class-string, array{dataClass: ?class-string, fields: list<CollectedFormField>}> by form class: each built and read once, however many endpoints take it */
+    /** @var array<string, array{dataClass: ?class-string, fields: list<CollectedFormField>}> by form class, and whether its blanks are asked: each built and read once, however many endpoints take it */
     private array $inspected = [];
 
     public function __construct(?FormFactoryInterface $formFactory = null)
@@ -71,18 +71,21 @@ final class FormTypeInspector
 
     /**
      * @param class-string $formClass
+     * @param bool         $blanks    whether each field's blank is read ({@see CollectedFormField::$blankValue}):
+     *                                its `empty_data`, application code, is run for it, which only an MCP
+     *                                tool's schema needs — null otherwise
      * @return array{dataClass: ?class-string, fields: list<CollectedFormField>}
      */
-    public function inspect(string $formClass): array
+    public function inspect(string $formClass, bool $blanks = false): array
     {
-        return $this->inspected[$formClass] ??= $this->inspectAnew($formClass);
+        return $this->inspected[$formClass . ($blanks ? "\0blanks" : '')] ??= $this->inspectAnew($formClass, $blanks);
     }
 
     /**
      * @param class-string $formClass
      * @return array{dataClass: ?class-string, fields: list<CollectedFormField>}
      */
-    private function inspectAnew(string $formClass): array
+    private function inspectAnew(string $formClass, bool $blanks): array
     {
         if (!class_exists($formClass)) {
             throw new RuntimeException(\sprintf('Form class "%s" was not found.', $formClass));
@@ -110,7 +113,7 @@ final class FormTypeInspector
 
         return [
             'dataClass' => $dataClass,
-            'fields' => $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig()), validated: true),
+            'fields' => $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig()), validated: true, blanks: $blanks),
         ];
     }
 
@@ -125,7 +128,7 @@ final class FormTypeInspector
      *
      * @return list<CollectedFormField>
      */
-    private function collectFields(FormBuilderInterface $builder, bool $rewritten, bool $validated): array
+    private function collectFields(FormBuilderInterface $builder, bool $rewritten, bool $validated, bool $blanks): array
     {
         $fields = [];
         $ownerClass = $builder->getFormConfig()->getDataClass();
@@ -167,15 +170,15 @@ final class FormTypeInspector
                 // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
                 // what is sent itself, and none of them is a field a request sends — as a field, or
                 // as each entry of a collection.
-                children: self::isChoice($config) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades),
-                entryChildren: null !== $entry && $entry->getCompound() && !self::isChoice($entry->getFormConfig()) ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()), $cascades) : [],
+                children: self::isChoice($config) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks),
+                entryChildren: null !== $entry && $entry->getCompound() && !self::isChoice($entry->getFormConfig()) ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()), $cascades, $blanks) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
                 trim: false !== $this->resolveOption($config, 'trim'),
-                blankValue: $this->blankValue($config, self::mappedFieldNames($child)),
+                blankValue: $blanks ? $this->blankValue($config, self::mappedFieldNames($child)) : null,
                 entryConstraints: $this->entryConstraints($entry, $constraints),
-                entryBlankValue: null === $entry ? null : $this->blankValue($entry->getFormConfig(), self::mappedFieldNames($entry)),
+                entryBlankValue: null === $entry || !$blanks ? null : $this->blankValue($entry->getFormConfig(), self::mappedFieldNames($entry)),
                 transformsValue: $rewritten || self::transformsValue($config),
                 formConstraints: $formConstraints,
                 heldConstraints: $heldConstraints,
@@ -379,8 +382,7 @@ final class FormTypeInspector
         $held = null === $entry ? [] : $this->collectConstraints($entry->getFormConfig(), null);
         foreach (HeldConstraints::always($constraints) as $constraint) {
             if ($constraint instanceof All) {
-                $nested = \is_array($constraint->constraints) ? $constraint->constraints : [$constraint->constraints];
-                $held = [...$held, ...array_values(array_filter($nested, static fn(mixed $one): bool => $one instanceof Constraint && HeldConstraints::validatedByDefault($one)))];
+                $held = [...$held, ...HeldConstraints::eachOf($constraint)];
             }
         }
 
