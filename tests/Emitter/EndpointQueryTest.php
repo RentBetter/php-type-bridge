@@ -293,14 +293,14 @@ final class EndpointQueryTest extends TestCase
         self::assertSame([], $tool['inputSchema']['required'] ?? []);
     }
 
-    public function test_a_key_typed_with_an_alias_whose_null_its_typescript_cannot_say_is_refused(): void
+    public function test_a_key_typed_with_an_alias_whose_null_its_typescript_cannot_say_is_required_where_no_tool_reads_it(): void
     {
-        // `Nullable<string>` admits null as tsc evaluates it, which a reading of its text can't: the
-        // Endpoint's AsQuery<T> and the tool would read the key two ways. Saying so beats guessing.
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Whether the project-wide alias "MaybeText" (`Nullable<string>`) admits null');
+        // `Nullable<string>` admits null as tsc evaluates it, which a reading of its text can't. With
+        // no tool to read the key another way, all it decides is whether the Endpoint's query may be
+        // left out — and a query required is one any call can send: AsQuery<T> still says each key.
+        $contracts = (new EndpointContractCollector(typeAliases: ['MaybeText' => 'Nullable<string>']))->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
 
-        (new EndpointContractCollector(typeAliases: ['MaybeText' => 'Nullable<string>']))->collect(self::SRC, (new ResponseClassCollector())->collectIndex(self::SRC));
+        self::assertFalse(self::contract($contracts, 'listConfigProductReports')->request?->query?->keys()?->fields[0]->mayBeLeftOut(inQuery: true));
     }
 
     public function test_an_input_whose_self_is_an_alias_of_a_shape_has_that_shapes_keys(): void

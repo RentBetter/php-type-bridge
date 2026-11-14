@@ -1710,11 +1710,34 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'string', 'description' => 'Opt-in parts.'], $tool['inputSchema']['properties']['include']);
     }
 
+    public function testAFieldItsContractRequiresButTheServerDoesntIsLeftToTheArgumentAnotherPlaceTakes(): void
+    {
+        // A PUT's body declares `id: string`, but with `clearMissing` off nothing refuses it left out:
+        // a call without it succeeds. The argument fills the path; the field is left out.
+        $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
+        $endpoint = new CollectedEndpointContract(
+            name: 'renameNote',
+            domain: 'notes',
+            controllerClass: 'App\\NoteController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                body: new CollectedInputReference(null, 'App\\NoteData', 'NoteData', 'notes', [$id], $this->shape('array{id: string}')),
+                pathParams: [new CollectedPathParam('id', 'string')],
+            ),
+            mcp: new CollectedMcpTool(name: 'renameNote', description: 'Rename a note.', httpMethod: 'PUT', httpPath: '/notes/{id}', destructive: false),
+        );
+
+        $schema = (new McpManifestBuilder())->build(['notes' => [$endpoint]])['tools'][0]['inputSchema'];
+        self::assertSame(['id' => ['type' => 'string']], $schema['properties']);
+        self::assertSame(['id'], $schema['required']);
+    }
+
     public function testAFieldThatCantGoWithoutAnArgumentAnotherPlaceTakesFailsNamingBoth(): void
     {
-        // The body's `id` is a key its contract requires, and the argument of its name fills the path:
-        // no call the tool makes can succeed.
-        $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
+        // The POST's body refuses `id` left out — its own NotBlank — and the argument of its name
+        // fills the path: no call the tool makes can succeed.
+        $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()], formConstraints: [new NotBlank()], refusedMissing: true);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('The MCP tool saveThing takes the body field "id", which it can never send: the argument of that name fills the path param {id}. Rename one of them, or take the field out of the body.');
