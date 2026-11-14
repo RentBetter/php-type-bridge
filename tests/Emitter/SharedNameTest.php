@@ -173,6 +173,25 @@ final class SharedNameTest extends TestCase
         $this->emit('UnusedHelperNamedFixtures', new OutputStructure(rootModule: 'genTypes.ts'), ['Shop'], new IncludeConvention(['included'], refTypes: ['ref']));
     }
 
+    public function test_with_a_root_module_a_config_alias_named_as_a_helper_it_declares_is_a_collision(): void
+    {
+        // The root module has no types of its own: what it declares for every module claims its names.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "": "ListItem" is emitted by both config type alias ListItem and the root module\'s expanding helper ListItem.');
+
+        $this->emit('RootAliasClashFixtures', new OutputStructure(rootModule: 'genTypes.ts'), includes: new IncludeConvention(refTypes: ['ref']), typeAliases: ['ListItem' => 'string']);
+    }
+
+    public function test_a_module_that_declares_the_expanding_helpers_beside_its_endpoint_ref_claims_them_all(): void
+    {
+        // Its endpoint `Ref` keeps the helpers in the module, not imported from the root module: a
+        // type of its own of one of their names is two declarations.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": "ListItem" is emitted by both the expanding helper ListItem the module declares beside its endpoint Ref and type ');
+
+        $this->emit('RefEndpointFixtures', new OutputStructure(rootModule: 'genTypes.ts'), includes: new IncludeConvention(refTypes: ['ref']));
+    }
+
     /**
      * @param list<string> $rootSources
      * @param array<string, string> $typeAliases

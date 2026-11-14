@@ -478,6 +478,32 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString("export interface ListTraitTagsResponse {\n  tags: CommonTag[];\n}", $notes);
     }
 
+    public function test_a_class_written_in_full_is_that_class_whatever_alias_shares_its_short_name(): void
+    {
+        // Notes declares a `Money` of its own; a native type, and a docblock or a shape naming the
+        // class in full, mean Common's class whatever alias of the module has its short name.
+        $notes = self::emit(self::fixtures('QualifiedClassFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  total: CommonMoney;\n  price: CommonMoney;\n}", $notes);
+        self::assertStringContainsString("export interface NoteTotals {\n  total: CommonMoney;\n  own: Money;\n}", $notes);
+    }
+
+    public function test_an_inherited_array_of_values_is_keyed_by_any_key(): void
+    {
+        // PHPStan reads `array<V>` as `array<array-key, V>`.
+        $things = self::emit(self::fixtures('InheritedArrayValueFixtures'))['Things'];
+
+        self::assertStringContainsString("export interface ShowThingResponse {\n  name: string;\n  warnings: Record<string, string> | string[];\n}", $things);
+    }
+
+    public function test_an_inherited_type_the_parser_cannot_read_fails_naming_the_property(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('The PTGS\\TypeBridge\\Tests\\Fixture\\InheritedUnreadableFixtures\\Things\\ShowKindResponse property PTGS\\TypeBridge\\Tests\\Fixture\\InheritedUnreadableFixtures\\Things\\BaseKindResponse::$kind');
+
+        self::emit(self::fixtures('InheritedUnreadableFixtures'));
+    }
+
     public function test_self_in_a_traits_property_is_the_class_using_it(): void
     {
         // As PHP and PHPStan read it: a trait's `self::` is whichever class uses the trait, so its

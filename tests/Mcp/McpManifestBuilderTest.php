@@ -844,17 +844,44 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame($strings, $properties['byNumber']);
     }
 
+    public function testAMapWithAnIntAmongItsKeysTakesAList(): void
+    {
+        // A list decodes to the ints 0..n, which a key of an int or a literal, or an int literal,
+        // takes: the server does.
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape("array{withTotal: array<int|'total', string>, firstTwo: array<0|1, string>, named: array<'a'|'b', string>}"));
+
+        $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
+        $strings = ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]];
+        self::assertSame($strings, $properties['withTotal']);
+        self::assertSame($strings, $properties['firstTwo']);
+        self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'string']], $properties['named']);
+    }
+
+    public function testAMapKeyedByAnAliasOfTheDataClassIsReadAsItIsDeclared(): void
+    {
+        // `byCode: array<Code, int>`, `Code` an alias of `'a'|'b'`: the shape keeps its keys.
+        $srcDir = __DIR__ . '/../Fixture/MapKeyMcpFixtures';
+        $contracts = (new EndpointContractCollector())->collect($srcDir, (new ResponseClassCollector())->collectIndex($srcDir));
+
+        $spec = (new McpManifestBuilder())->build($contracts)['tools'][0]['inputSchema']['properties']['spec'];
+        self::assertSame(['name', 'byCode'], $spec['required'] ?? null);
+        self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'integer']], $spec['properties']['byCode'] ?? null);
+    }
+
     public function testAMapKeyedByANameIsKeyedAsTheNameReads(): void
     {
-        // A project-wide alias of a number is an int's key, of a string a string's; an alias the
-        // builder can't read here leaves the map, as any part of a shape it can't read, open.
+        // A project-wide alias of a number is an int's key, of a string a string's; a name the
+        // builder can't read here may be either, so the map takes a list too.
         $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{byNum: array<Num, string>, byStr: array<Str, string>}'));
         $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]), typeAliases: ['Num' => 'number', 'Str' => 'string'])['inputSchema']['properties']['spec']['properties'];
         self::assertSame(['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]], $properties['byNum']);
         self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'string']], $properties['byStr']);
 
         $unread = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{byCode: array<Code, string>}'));
-        self::assertSame(['type' => 'object'], $this->toolWithBody('PUT', [$unread], new ShapeType([]))['inputSchema']['properties']['spec']);
+        self::assertSame(
+            ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]],
+            $this->toolWithBody('PUT', [$unread], new ShapeType([]))['inputSchema']['properties']['spec']['properties']['byCode'] ?? null,
+        );
     }
 
     public function testANullableMapTakesNullBesideEither(): void
