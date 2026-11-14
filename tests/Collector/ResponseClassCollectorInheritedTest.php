@@ -466,6 +466,17 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertMatchesRegularExpression('/import type \\{[^}]*\\bErrorBody\\b[^}]*\\} from \'[^\']*Common[^\']*\';/', $notes);
     }
 
+    public function test_a_property_a_class_redeclares_is_read_in_its_own_file_though_the_trait_writes_it_alike(): void
+    {
+        // PHP takes the class's declaration where the two agree, the doc comment included: its names
+        // are what the class's file imports, not the trait's.
+        $notes = self::emit(self::fixtures('RedeclaredTraitFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ListTagsResponse {\n  tags: Tag[];\n}", $notes);
+        self::assertStringContainsString("export interface ListPromotedLabelsResponse {\n  labels: Tag[];\n}", $notes);
+        self::assertStringNotContainsString('CommonTag', $notes);
+    }
+
     public function test_self_in_a_traits_property_is_the_class_using_it(): void
     {
         // As PHP and PHPStan read it: a trait's `self::` is whichever class uses the trait, so its

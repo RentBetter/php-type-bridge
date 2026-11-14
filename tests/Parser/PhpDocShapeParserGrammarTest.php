@@ -76,6 +76,26 @@ final class PhpDocShapeParserGrammarTest extends TestCase
         self::assertSame('array-key', $map->key->type);
     }
 
+    public function test_a_key_of_every_kind_an_array_has_is_any_key(): void
+    {
+        // An int and a string both: PHP's own `array-key`, which a JSON list is sent as too.
+        foreach (['array<int|string, string>', 'iterable<string|int, string>', 'array<int|non-empty-string, string>'] as $input) {
+            $map = (new PhpDocShapeParser())->parse($input);
+            self::assertInstanceOf(MapType::class, $map);
+            self::assertInstanceOf(ScalarType::class, $map->key, $input);
+            self::assertSame('array-key', $map->key->type, $input);
+        }
+    }
+
+    public function test_a_map_built_with_a_key_no_array_has_is_keyed_by_any_key(): void
+    {
+        // As a template param bound to one puts it in a base's `array<TKey, V>`.
+        self::assertSame('array-key', self::scalarKey(new MapType(new ScalarType('mixed'), new ScalarType('string'))));
+        self::assertSame('array-key', self::scalarKey(new MapType(new UnionType([new ScalarType('int'), new ScalarType('null')]), new ScalarType('string'))));
+        self::assertSame('array-key', self::scalarKey(new MapType(new UnionType([new ScalarType('int'), new ScalarType('string')]), new ScalarType('string'))));
+        self::assertSame('int', self::scalarKey(new MapType(new ScalarType('int'), new ScalarType('string'))));
+    }
+
     public function test_a_key_an_array_is_keyed_by_is_kept(): void
     {
         $parser = new PhpDocShapeParser();
@@ -233,5 +253,12 @@ final class PhpDocShapeParserGrammarTest extends TestCase
         self::assertInstanceOf(ClassConstantType::class, $type);
         self::assertSame('\\Acme\\Review\\Result', $type->class);
         self::assertSame('APPROVED', $type->pattern);
+    }
+
+    private static function scalarKey(MapType $map): string
+    {
+        self::assertInstanceOf(ScalarType::class, $map->key);
+
+        return $map->key->type;
     }
 }

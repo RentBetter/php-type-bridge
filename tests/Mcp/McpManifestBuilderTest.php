@@ -830,7 +830,7 @@ final class McpManifestBuilderTest extends TestCase
     {
         // A JSON list decodes to the array 0..n keys it, which an int or any key takes — the
         // TypeScript says so, and the server takes it. A map of string keys takes only an object.
-        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{tags: array<array-key, string>, ids: array<int, string>, any: iterable<string>, byName: array<string, int>}'));
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{tags: array<array-key, string>, ids: array<int, string>, any: iterable<string>, byName: array<string, int>, either: array<int|string, string>, byFloat: array<float, string>}'));
 
         $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
         $strings = ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]];
@@ -838,6 +838,22 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame($strings, $properties['ids']);
         self::assertSame($strings, $properties['any']);
         self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'integer']], $properties['byName']);
+        // Every key an array has is any key; PHP keys a float as the int it truncates to.
+        self::assertSame($strings, $properties['either']);
+        self::assertSame($strings, $properties['byFloat']);
+    }
+
+    public function testAMapKeyedByANameIsKeyedAsTheNameReads(): void
+    {
+        // A project-wide alias of a number is an int's key, of a string a string's; an alias the
+        // builder can't read here leaves the map, as any part of a shape it can't read, open.
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{byNum: array<Num, string>, byStr: array<Str, string>}'));
+        $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]), typeAliases: ['Num' => 'number', 'Str' => 'string'])['inputSchema']['properties']['spec']['properties'];
+        self::assertSame(['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]], $properties['byNum']);
+        self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'string']], $properties['byStr']);
+
+        $unread = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{byCode: array<Code, string>}'));
+        self::assertSame(['type' => 'object'], $this->toolWithBody('PUT', [$unread], new ShapeType([]))['inputSchema']['properties']['spec']);
     }
 
     public function testANullableMapTakesNullBesideEither(): void
@@ -2111,10 +2127,11 @@ final class McpManifestBuilderTest extends TestCase
      * form makes of a blank, or off.
      *
      * @param list<CollectedFormField> $fields
+     * @param array<string, string>    $typeAliases
      *
      * @return array<string, mixed>
      */
-    private function toolWithBody(string $httpMethod, array $fields, ShapeType $contract, bool $clearMissing = false): array
+    private function toolWithBody(string $httpMethod, array $fields, ShapeType $contract, bool $clearMissing = false, array $typeAliases = []): array
     {
         $endpoint = new CollectedEndpointContract(
             name: 'saveProject',
@@ -2128,7 +2145,7 @@ final class McpManifestBuilderTest extends TestCase
             mcp: new CollectedMcpTool(name: 'saveProject', description: 'Save a project.', httpMethod: $httpMethod, httpPath: '/projects', destructive: true),
         );
 
-        return (new McpManifestBuilder(clearMissing: $clearMissing))->build(['projects' => [$endpoint]])['tools'][0];
+        return (new McpManifestBuilder(clearMissing: $clearMissing, typeAliases: $typeAliases))->build(['projects' => [$endpoint]])['tools'][0];
     }
 
     private function response(int $status): CollectedApiResponseClass

@@ -127,6 +127,30 @@ final class SharedNameTest extends TestCase
         $this->emit('IncludePathNamedTypeFixtures', includes: new IncludeConvention(['included']));
     }
 
+    public function test_a_module_that_declares_no_helper_may_name_a_type_as_one(): void
+    {
+        // Shop has no reference and no key sent only when asked for: the helpers are Checks' alone.
+        $output = $this->emit('UnusedHelperNamedFixtures', includes: new IncludeConvention(['included'], refTypes: ['ref']));
+
+        self::assertStringContainsString('export interface ListItem {', $output['Shop']);
+        self::assertStringContainsString('export interface Ref {', $output['Shop']);
+        self::assertStringContainsString('export interface IncludePath {', $output['Shop']);
+        self::assertStringNotContainsString('WithExpands', $output['Shop']);
+        self::assertStringNotContainsString('WithIncludes', $output['Shop']);
+        self::assertStringContainsString('export type WithExpands<', $output['Checks']);
+        self::assertStringContainsString('export type WithIncludes<', $output['Checks']);
+    }
+
+    public function test_with_a_root_module_a_module_that_imports_no_helper_may_name_a_type_as_one(): void
+    {
+        $output = $this->emit('UnusedHelperNamedFixtures', new OutputStructure(rootModule: 'genTypes.ts'), includes: new IncludeConvention(['included'], refTypes: ['ref']));
+
+        self::assertStringContainsString('export interface Ref {', $output['Shop']);
+        self::assertStringNotContainsString('import type', $output['Shop']);
+        self::assertStringContainsString("import type { Ref } from '../genTypes';", $output['Checks']);
+        self::assertStringContainsString('export type WithExpands<', $output['']);
+    }
+
     /**
      * @param list<string> $rootSources
      * @param array<string, string> $typeAliases
