@@ -512,6 +512,23 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::emit(self::fixtures('UnreadableBoundFixtures'));
     }
 
+    public function test_each_class_of_a_file_binds_a_trait_its_own_way(): void
+    {
+        // TagBase and CountBase share a file, each with its own `@use HasItems<…>`.
+        $notes = self::emit(self::fixtures('SharedFileTraitFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ListTagsResponse {\n  items: string[];\n}", $notes);
+        self::assertStringContainsString("export interface ListCountsResponse {\n  items: number[];\n}", $notes);
+    }
+
+    public function test_an_inherited_property_typed_with_a_class_of_no_shape_fails_naming_the_property(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('The PTGS\\TypeBridge\\Tests\\Fixture\\InheritedClassTypedFixtures\\Things\\ShowStampResponse property PTGS\\TypeBridge\\Tests\\Fixture\\InheritedClassTypedFixtures\\Things\\BaseStampResponse::$at');
+
+        self::emit(self::fixtures('InheritedClassTypedFixtures'));
+    }
+
     public function test_self_in_a_traits_property_is_the_class_using_it(): void
     {
         // As PHP and PHPStan read it: a trait's `self::` is whichever class uses the trait, so its

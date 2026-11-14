@@ -1664,6 +1664,41 @@ final class McpManifestBuilderTest extends TestCase
         );
     }
 
+    public function testAPathParamAndAFieldOfOneNameButNotOneTypeTakeTheFieldsTypeHeldToTheRoute(): void
+    {
+        // `/seq/{id}` requires `[0-9]+`, published alone as a whole number; the body's `id` is a
+        // string. No value is both: the argument is the field's type, its text — which is what the
+        // path takes — held to the route's requirement.
+        $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null);
+        $endpoint = new CollectedEndpointContract(
+            name: 'saveSeq',
+            domain: 'seqs',
+            controllerClass: 'App\\SeqController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                body: new CollectedInputReference(null, 'App\\SeqData', 'SeqData', 'seqs', [$id], $this->shape('array{id?: string}')),
+                pathParams: [new CollectedPathParam('id', 'number', '[0-9]+', false)],
+            ),
+            mcp: new CollectedMcpTool(name: 'saveSeq', description: 'Save a sequence.', httpMethod: 'PUT', httpPath: '/seq/{id}', destructive: false),
+        );
+
+        $schema = (new McpManifestBuilder())->build(['seqs' => [$endpoint]])['tools'][0]['inputSchema'];
+        self::assertSame(['allOf' => [['pattern' => '^(?:[0-9]+)$'], ['type' => 'string']]], $schema['properties']['id']);
+        self::assertSame(['id'], $schema['required']);
+    }
+
+    public function testAFieldsOwnNotBlankInASequenceRefusesItLeftOut(): void
+    {
+        // With `clearMissing` off a POST body's field left out isn't submitted, and only its own
+        // constraints refuse that — one a Sequentially holds as much as one on its own.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $plain = new CollectedFormField(name: 'plain', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, formConstraints: [new NotBlank()]);
+        $nested = new CollectedFormField(name: 'nested', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, formConstraints: [new Sequentially([new NotBlank(), new Length(max: 5)])]);
+
+        self::assertSame(['plain', 'nested'], $this->toolWithBody('POST', [$plain, $nested], $this->shape('array{plain?: string, nested?: string}'))['inputSchema']['required'] ?? null);
+    }
+
     public function testAFieldLeftOutOfAnyWriteIsSubmittedBlankWithClearMissing(): void
     {
         // `$form->submit($data)` — the bundled RequestFormProcessor's — submits with `clearMissing`
