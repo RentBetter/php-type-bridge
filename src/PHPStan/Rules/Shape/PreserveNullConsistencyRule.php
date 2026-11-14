@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\PHPStan\Rules\Shape;
 
 use PhpParser\Node;
-use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\Enum_;
 use PHPStan\Analyser\Scope;
@@ -23,8 +22,8 @@ use Throwable;
 /**
  * Enforces the TypeBridge `preserveNull` invariant on @phpstan-type shapes.
  *
- * For each nullable field declared in a @phpstan-type alias on a class or an enum, under the name
- * its shape is emitted as:
+ * For each nullable field declared in a @phpstan-type alias on a class, an enum, an interface or a
+ * trait — each collected and emitted alike — under the name its shape is emitted as:
  *
  *   - If the field is listed in `preserveNull` config, its annotation MUST be `T|null`
  *     (will emit as `field: T | null`).
@@ -58,10 +57,6 @@ final class PreserveNullConsistencyRule implements Rule
 
     public function processNode(Node $node, Scope $scope): array
     {
-        if (!$node instanceof Class_ && !$node instanceof Enum_) {
-            return [];
-        }
-
         $docComment = $node->getDocComment();
         if (null === $docComment) {
             return [];
@@ -106,7 +101,7 @@ final class PreserveNullConsistencyRule implements Rule
      * Whether the declaration names its value union otherwise, with a {@see ValueOfName}: read off its
      * attributes, as the source is analysed rather than loaded.
      */
-    private static function namesItsValues(Class_|Enum_ $node, Scope $scope): bool
+    private static function namesItsValues(ClassLike $node, Scope $scope): bool
     {
         foreach ($node->attrGroups as $group) {
             foreach ($group->attrs as $attribute) {

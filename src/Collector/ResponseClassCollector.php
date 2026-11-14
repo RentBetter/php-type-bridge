@@ -512,8 +512,9 @@ final class ResponseClassCollector
      * may hold is all it says, so it is what is sent. A null it admits is kept — `?string` is
      * `string|null`, written whether null or not. A class is the one Reflection names, written whole,
      * so it is read as that class wherever the property is written. `array` is a list or an object of
-     * anything, as json_encode writes one, and so is `iterable`; `object` is anything but null, as
-     * the same keywords in a docblock are. An intersection says nothing of the JSON it makes.
+     * anything, as json_encode writes one, and so is `iterable` — in a union too, where PHP reflects it
+     * as `Traversable|array`; `object` is anything but null, as the same keywords in a docblock are. An
+     * intersection says nothing of the JSON it makes.
      */
     private static function nativeType(?ReflectionType $type, ReflectionProperty $property): string
     {
@@ -524,9 +525,16 @@ final class ResponseClassCollector
         }
 
         if ($type instanceof ReflectionUnionType) {
+            // PHP reflects `iterable` in a union as `Traversable|array`: the array it is sent as.
+            $members = $type->getTypes();
+            $names = array_map(static fn (ReflectionType $member): string => $member instanceof ReflectionNamedType ? strtolower($member->getName()) : '', $members);
+            if (\in_array('array', $names, true)) {
+                $members = array_filter($members, static fn (ReflectionType $member): bool => !$member instanceof ReflectionNamedType || 'traversable' !== strtolower($member->getName()));
+            }
+
             return implode('|', array_map(
                 static fn (ReflectionType $member): string => $member instanceof ReflectionNamedType ? self::namedType($member, $property) : 'mixed',
-                $type->getTypes(),
+                $members,
             ));
         }
 

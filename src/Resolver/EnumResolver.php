@@ -101,8 +101,14 @@ final class EnumResolver
         return $values;
     }
 
+    /**
+     * The enum a name means: a short name the one the tree declares, a whole one itself — written
+     * with its leading `\` or without, it is one enum, in one module.
+     */
     public function resolveFqcn(string $className): string
     {
+        $className = ltrim($className, '\\');
+
         return $this->classMap[$className] ?? $className;
     }
 

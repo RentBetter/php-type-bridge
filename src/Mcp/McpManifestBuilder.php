@@ -617,7 +617,15 @@ final class McpManifestBuilder
                 return null;
             }
 
-            return $type instanceof ListType ? ['type' => 'array', 'items' => $items] : ['type' => 'object', 'additionalProperties' => $items];
+            if ($type instanceof ListType) {
+                return ['type' => 'array', 'items' => $items];
+            }
+            $object = ['type' => 'object', 'additionalProperties' => $items];
+
+            // A JSON list decodes to the array its 0..n keys key: one an int may key takes it too.
+            return $type->key instanceof ScalarType && \in_array($type->key->base(), ['int', 'array-key'], true)
+                ? ['anyOf' => [$object, ['type' => 'array', 'items' => $items]]]
+                : $object;
         }
 
         return match (true) {

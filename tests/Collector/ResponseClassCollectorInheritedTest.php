@@ -535,6 +535,15 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString("  maybeItems: Record<string, unknown> | unknown[] | null;\n  alsoMaybeItems: Record<string, unknown> | unknown[] | null;\n  itemsOrName: Record<string, unknown> | unknown[] | string;\n", $things);
     }
 
+    public function test_a_native_traversable_with_no_array_beside_it_is_the_class(): void
+    {
+        // Only `iterable` is the array: a Traversable alone is an object, which says nothing of its JSON.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('A shape names Traversable as a type');
+
+        self::emit(self::fixtures('NativeTraversableFixtures'));
+    }
+
     public function test_a_native_parent_type_is_the_parent_class(): void
     {
         self::assertStringContainsString("export interface ShowNoteVersionResponse {\n  previous: NoteVersion | null;\n  number: number;\n}", self::emit(self::fixtures('NativeTypedFixtures'))['Notes']);

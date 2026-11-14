@@ -80,9 +80,6 @@ final class TypeScriptEmitter
     /** The generic a `ref<T>` field emits as. */
     public const string REF_TYPE = 'Ref';
 
-    /** What a name an endpoint helper takes is, said when another takes it too. */
-    private const string ENDPOINT_HELPER = 'the endpoint helper ';
-
     /**
      * `Ref<T>`, and `WithExpands<T, P>`: a type as sent when the request expanded paths P, with
      * each reference they name swapped for the record it points at. P is checked against
@@ -924,7 +921,7 @@ final class TypeScriptEmitter
             // nor any of them as another.
             $domainContracts = $contracts[$domain] ?? [];
             foreach (EndpointContractEmitter::helperNames($domainContracts, $this->includes) as $name) {
-                $this->registerSymbol(domain: $domain, logicalName: null, emittedName: $name, descriptor: self::ENDPOINT_HELPER . $name, maps: $maps, registrations: $registrations);
+                $this->registerSymbol(domain: $domain, logicalName: null, emittedName: $name, descriptor: 'the endpoint helper ' . $name, maps: $maps, registrations: $registrations);
             }
             foreach ($domainContracts as $contract) {
                 foreach (EndpointContractEmitter::endpointNames($contract, $this->naming, $this->includes) as [$name, $what]) {
@@ -940,11 +937,10 @@ final class TypeScriptEmitter
             foreach ($contracts as $domainContracts) {
                 $helpers = [...$helpers, ...EndpointContractEmitter::helperNames($domainContracts, $this->includes)];
             }
-            foreach (array_unique($helpers) as $name) {
-                // Claimed already, as the helper, where the root module's own endpoints take it.
-                if (self::ENDPOINT_HELPER . $name !== ($registrations[''][$name] ?? null)) {
-                    $this->registerSymbol(domain: '', logicalName: null, emittedName: $name, descriptor: "the root module's endpoint helper {$name}", maps: $maps, registrations: $registrations);
-                }
+            // Claimed already, as the helper, where the root module's own endpoints take it.
+            $claimed = EndpointContractEmitter::helperNames($contracts[''] ?? [], $this->includes);
+            foreach (array_diff(array_unique($helpers), $claimed) as $name) {
+                $this->registerSymbol(domain: '', logicalName: null, emittedName: $name, descriptor: "the root module's endpoint helper {$name}", maps: $maps, registrations: $registrations);
             }
         }
         $this->claimedNames = $registrations;

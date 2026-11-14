@@ -61,6 +61,7 @@ final class PhpDocShapeParserGrammarTest extends TestCase
         yield 'an array of scalar keys' => ['array<scalar, string>'];
         yield 'an array of bool keys' => ['array<bool, string>'];
         yield 'an array of nullable keys' => ['array<int|null, string>'];
+        yield 'an array of int or bool keys' => ['array<int|bool, string>'];
     }
 
     #[DataProvider('keysNoArrayHas')]
