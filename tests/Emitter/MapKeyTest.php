@@ -71,6 +71,16 @@ final class MapKeyTest extends TestCase
         self::assertStringContainsString("export interface Keyed {\n  byAny: Record<string, string> | string[];\n  byText: Record<Text, string>;\n}", $rows);
     }
 
+    public function test_a_key_whose_aliases_together_name_every_key_is_any_key(): void
+    {
+        // `Text|int` is a string's key and an int's; `AnyOf` names `Key`, which is both; `Grouped`
+        // is both in brackets. `Text|Code` — a string, and two of them — is no int's.
+        $aliases = ['Text' => 'string', 'Key' => 'string | number', 'AnyOf' => 'Key | symbol', 'Grouped' => '(string | number)', 'Code' => "'a' | 'b'"];
+        $rows = self::emit(__DIR__ . '/../Fixture/ConfigAliasUnionKeyFixtures', $aliases)['Rows'];
+
+        self::assertStringContainsString("export interface Mixed {\n  byTextOrInt: Record<string, string> | string[];\n  byNested: Record<string, string> | string[];\n  byGrouped: Record<string, string> | string[];\n  byTextOrCode: Record<Text | Code, string>;\n}", $rows);
+    }
+
     /**
      * @param array<string, string> $typeAliases
      *
