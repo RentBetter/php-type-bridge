@@ -1710,6 +1710,10 @@ final class McpManifestBuilderTest extends TestCase
 
         self::assertSame(['pattern' => '^(?:[0-9]+)$'], $schema['properties']['id']['allOf'][0] ?? null);
         self::assertArrayHasKey('anyOf', $schema['properties']['id']['allOf'][1] ?? []);
+
+        // One whose id is a whole number takes the segment as it is: a branch of it is the path's type.
+        $schema = $this->pathAndBodyTool([new CollectedPathParam('id', 'number', '[0-9]+', false)], [$id], $this->shape('array{id?: int|array{name?: string}}'));
+        self::assertSame(['type' => 'integer', 'minimum' => 0], $schema['properties']['id']['allOf'][0] ?? null);
     }
 
     public function testAQueryFieldAndABodyFieldOfOneNameHoldToBoth(): void
@@ -1721,6 +1725,11 @@ final class McpManifestBuilderTest extends TestCase
 
         $schema = $this->pathAndBodyTool([], [$bodyMode], $this->shape('array{mode?: int}'), [$queryMode], $this->shape('array{mode?: string}'));
         self::assertSame(['allOf' => [['type' => 'string'], ['type' => 'integer']]], $schema['properties']['mode']);
+
+        // A whole number is a number: a whole-number segment beside a field taking any number holds.
+        $amount = new CollectedFormField(name: 'mode', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\NumberType', required: false, mapped: true, compound: false, dataClass: null);
+        $schema = $this->pathAndBodyTool([new CollectedPathParam('mode', 'number', '[0-9]+', false)], [$amount], $this->shape('array{mode?: float}'));
+        self::assertSame(['allOf' => [['type' => 'integer', 'minimum' => 0], ['type' => 'number']]], $schema['properties']['mode']);
 
         // With a path param of the name too, the path is judged beside both fields.
         $schema = $this->pathAndBodyTool([new CollectedPathParam('mode', 'string', '[a-z]+', false)], [$bodyMode], $this->shape('array{mode?: int}'), [$queryMode], $this->shape('array{mode?: string}'));

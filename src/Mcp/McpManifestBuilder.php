@@ -202,17 +202,18 @@ final class McpManifestBuilder
 
         $request = $contract->request;
         if (null !== $request) {
-            $pathParams = [];
+            // By path param, its route requirement as a pattern of the whole segment, where it reads alike.
+            $routePatterns = [];
             foreach ($request->pathParams ?? [] as $param) {
-                $pathParams[$param->name] = $param;
+                $routed = null === $param->requirement ? null : PortableRegex::routePattern($param->requirement, $param->utf8);
+                $routePatterns[$param->name] = $routed;
                 // A path segment is always required. A string's route requirement says what it must
                 // look like, so a model learns a ticket is `SO-12` before the router's 404.
                 $properties[$param->name] = 'number' === $param->schemaType() && null !== $param->requirement
-                    ? self::numberHeldTo($param->requirement, $param->utf8)
+                    ? self::numberHeldTo($param->requirement, $routed)
                     : ['type' => $param->schemaType()];
-                $pattern = 'string' === $param->schemaType() && null !== $param->requirement ? PortableRegex::routePattern($param->requirement, $param->utf8) : null;
-                if (null !== $pattern) {
-                    $properties[$param->name]['pattern'] = $pattern;
+                if ('string' === $param->schemaType() && null !== $routed) {
+                    $properties[$param->name]['pattern'] = $routed;
                 }
                 $required[] = $param->name;
             }
@@ -225,12 +226,18 @@ final class McpManifestBuilder
             // a query's filter object is new on every request, a body's only on a POST.
             $this->addFields($request->query, $query, $required, makes: true);
             $this->addFields($request->body, $body, $required, makes: $this->clearMissing || 'POST' === strtoupper($httpMethod), json: true);
-            // One argument of a name fills a path param and a field alike: it holds to both.
-            foreach ([$query, $body] as $fields) {
-                foreach ($fields as $name => $schema) {
-                    $path = isset($pathParams[$name], $properties[$name]) ? self::pathHeldBeside($pathParams[$name], $properties[$name], $schema) : [];
-                    $properties[$name] = [] === $path ? $schema : ['allOf' => [$path, $schema]];
+            // One argument of a name fills a path param and the fields of that name alike: it holds
+            // to each.
+            $fields = [];
+            foreach ([$query, $body] as $inputs) {
+                foreach ($inputs as $name => $schema) {
+                    $fields[$name][] = $schema;
                 }
+            }
+            foreach ($fields as $name => $schemas) {
+                $path = \array_key_exists($name, $routePatterns) ? self::pathHeldBeside($properties[$name], $routePatterns[$name], $schemas) : [];
+                $parts = [] === $path ? $schemas : [$path, ...$schemas];
+                $properties[$name] = 1 === \count($parts) ? $parts[0] : ['allOf' => $parts];
             }
         }
 
@@ -325,7 +332,8 @@ final class McpManifestBuilder
      * property keeps what a new object holds there, which only the property's constraints are asked
      * of. Symfony checks nothing else of it, so an application submitting a body that way refuses a
      * create missing a field it can't go without itself, as clearMissing on would have: one whose own
-     * `constraints` hold a NotBlank or a NotNull. A body's field carrying one is refused too; a
+     * `constraints` hold a NotBlank or a NotNull at their top, in any group
+     * ({@see CollectedFormField::$refusedMissing}). A body's field carrying one is refused too; a
      * query's isn't.
      */
     private function refusesLeftOut(CollectedFormField $field, bool $body): bool
@@ -335,7 +343,7 @@ final class McpManifestBuilder
         }
 
         return $this->refuses($field->heldConstraints, $field->initialValue)
-            || ($body && array_any(HeldConstraints::always($field->formConstraints), static fn (Constraint $constraint): bool => $constraint instanceof NotBlank || $constraint instanceof NotNull));
+            || ($body && $field->refusedMissing);
     }
 
     /**
@@ -823,9 +831,12 @@ final class McpManifestBuilder
      * matches, its pattern saying which, so a tool sends no number the router answers 404 to — or a
      * number, where its pattern can't be carried over, a `%…%` placeholder's included.
      *
+     * @param string|null $routed the requirement as a pattern of the whole segment, where it reads
+     *                            alike ({@see PortableRegex::routePattern()})
+     *
      * @return array{type: 'integer'|'number'|'string', minimum?: int, pattern?: string}
      */
-    private static function numberHeldTo(string $requirement, ?bool $utf8): array
+    private static function numberHeldTo(string $requirement, ?string $routed): array
     {
         if (1 === preg_match(self::WHOLE_NUMBERS, $requirement, $whole, \PREG_UNMATCHED_AS_NULL)) {
             $from = null === $whole['from0'] ? 1 : 0;
@@ -838,37 +849,50 @@ final class McpManifestBuilder
             }
         }
 
-        $routed = PortableRegex::routePattern($requirement, $utf8);
-
         return null === $routed ? ['type' => 'number'] : ['type' => 'string', 'pattern' => $routed];
     }
 
     /**
-     * What a path param holds an argument to that a field of its name fills too. The path takes the
-     * argument's text, so where the field is of another type — a string `id` beside a `[0-9]+`
-     * segment, published alone as a whole number — no value could be both: the argument is the
-     * field's type, and the path holds only its text to the route's requirement (`pattern`, which
-     * only a string is held to).
+     * What a path param holds an argument to that fields of its name fill too. The path takes the
+     * argument's text, so where a field can't be of the path's type — a string `id`, or an id or
+     * the fields to make one, beside a `[0-9]+` segment published alone as a whole number — no value
+     * could pass both: the argument is the fields' type, and the path holds only its text to the
+     * route's requirement (`pattern`, which only a string is held to).
      *
-     * @param array<string, mixed> $path  what the path param is published as alone
-     * @param array<string, mixed> $field
+     * @param array<string, mixed>       $path        what the path param is published as alone
+     * @param list<array<string, mixed>> $fields
      *
      * @return array<string, mixed>
      */
-    private static function pathHeldBeside(CollectedPathParam $param, array $path, array $field): array
+    private static function pathHeldBeside(array $path, ?string $routePattern, array $fields): array
     {
-        $pathType = $path['type'] ?? null;
-        $fieldTypes = (array) ($field['type'] ?? []);
-        $agree = !\is_string($pathType) || [] === $fieldTypes || \in_array($pathType, $fieldTypes, true)
-            || ('integer' === $pathType && \in_array('number', $fieldTypes, true))
-            || ('number' === $pathType && \in_array('integer', $fieldTypes, true));
-        if ($agree) {
+        $type = $path['type'] ?? null;
+        if (\is_string($type) && array_all($fields, static fn (array $field): bool => self::takesType($field, $type))) {
             return $path;
         }
 
-        $pattern = $path['pattern'] ?? (null === $param->requirement ? null : PortableRegex::routePattern($param->requirement, $param->utf8));
+        $pattern = $path['pattern'] ?? $routePattern;
 
-        return null === $pattern ? [] : ['pattern' => $pattern];
+        return \is_string($pattern) ? ['pattern' => $pattern] : [];
+    }
+
+    /**
+     * Whether a value of the type can pass the schema: its `type` names the type, or one of its
+     * `anyOf` branches' does — an integer being a number, and a whole number an integer. One that
+     * names no type says nothing of it, and is taken to refuse it.
+     *
+     * @param array<string, mixed> $schema
+     */
+    private static function takesType(array $schema, string $type): bool
+    {
+        $types = (array) ($schema['type'] ?? []);
+        foreach (\is_array($schema['anyOf'] ?? null) ? $schema['anyOf'] : [] as $branch) {
+            $types = [...$types, ...(\is_array($branch) ? (array) ($branch['type'] ?? []) : [])];
+        }
+
+        return \in_array($type, $types, true)
+            || ('integer' === $type && \in_array('number', $types, true))
+            || ('number' === $type && \in_array('integer', $types, true));
     }
 
     /**

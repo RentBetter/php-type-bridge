@@ -35,6 +35,8 @@ use Symfony\Component\OptionsResolver\Exception\ExceptionInterface as OptionsExc
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\All;
 use Symfony\Component\Validator\Constraints\Choice;
+use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\NotNull;
 use Symfony\Component\Validator\Constraints\Valid;
 use Symfony\Component\Validator\Mapping\CascadingStrategy;
 use Symfony\Component\Validator\Mapping\ClassMetadataInterface;
@@ -78,6 +80,11 @@ final class FormTypeInspector
      */
     public function inspect(string $formClass, bool $blanks = false): array
     {
+        // One read with the blanks has all one without them has.
+        if (!$blanks && isset($this->inspected[$formClass . "\0blanks"])) {
+            return $this->inspected[$formClass . "\0blanks"];
+        }
+
         return $this->inspected[$formClass . ($blanks ? "\0blanks" : '')] ??= $this->inspectAnew($formClass, $blanks);
     }
 
@@ -183,6 +190,7 @@ final class FormTypeInspector
                 formConstraints: $formConstraints,
                 heldConstraints: $heldConstraints,
                 initialValue: self::initialValue($property),
+                refusedMissing: $this->refusedMissing($config),
             );
         }
 
@@ -453,6 +461,20 @@ final class FormTypeInspector
         }
 
         return array_values(array_filter($constraints, HeldConstraints::validatedByDefault(...)));
+    }
+
+    /**
+     * Whether the field's own `constraints` option holds a NotBlank or a NotNull at its top, in any
+     * group: what a processor submitting with `clearMissing` off checks of a field left out, and all
+     * it checks — not one a Sequentially holds, which only validating a submitted value reaches.
+     *
+     * @param FormConfigInterface<mixed> $config
+     */
+    private function refusedMissing(FormConfigInterface $config): bool
+    {
+        $option = $this->resolveOption($config, 'constraints');
+
+        return array_any(\is_array($option) ? $option : [$option], static fn (mixed $constraint): bool => $constraint instanceof NotBlank || $constraint instanceof NotNull);
     }
 
     /**

@@ -39,9 +39,14 @@ final class FormTypeInspectorTest extends TestCase
         self::assertSame(0, CountedBlankType::$runs, "Neither the label's nor an entry's");
 
         // Asked, by the same inspector: read anew, not the inspection that skipped them.
-        $fields = $inspector->inspect(CountedBlankType::class, blanks: true)['fields'];
+        $withBlanks = $inspector->inspect(CountedBlankType::class, blanks: true);
+        $fields = $withBlanks['fields'];
         self::assertSame('none', $fields[0]->blankValue);
         self::assertSame('none', $fields[1]->entryBlankValue);
+
+        // An inspection with them has all one without has: a form inspected for both is read once,
+        // the one without the blanks answered by the one with them.
+        self::assertSame($withBlanks, $inspector->inspect(CountedBlankType::class));
     }
 
     public function test_a_field_is_refused_missing_where_its_own_constraints_hold_a_not_blank_at_their_top(): void

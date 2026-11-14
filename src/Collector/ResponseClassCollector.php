@@ -380,7 +380,8 @@ final class ResponseClassCollector
 
         $bindings = $user->getName() === $response->getName() ? [] : $this->templateBindings($response, $user->getName(), $srcDir, $classFiles);
         foreach ($this->traitPath($property) as $trait) {
-            $bindings = $this->paramsBound($trait, $this->files->usesArgs($classFiles[$user->getName()] ?? $this->fileOf($user->getName()), $trait->getName(), $user), $user->getName(), $bindings, $srcDir, $classFiles);
+            // `self::` in a binding a trait writes, or in a trait's default, is the class using it.
+            $bindings = $this->paramsBound($trait, $this->files->usesArgs($classFiles[$user->getName()] ?? $this->fileOf($user->getName()), $trait->getName(), $user), $user->getName(), $bindings, $srcDir, $classFiles, $property->getDeclaringClass()->getName());
             $user = $trait;
         }
 
@@ -396,18 +397,20 @@ final class ResponseClassCollector
      * @param list<string>               $args
      * @param array<string, ParsedType>  $bindings
      * @param array<string, string>      $classFiles
+     * @param string|null                $selfClass the class `self::` is, where it is not the one that writes
+     *                                              it: for a trait, the class using it, as PHP reads it
      *
      * @return array<string, ParsedType>
      */
-    private function paramsBound(ReflectionClass $generic, array $args, string $writer, array $bindings, string $srcDir, array $classFiles): array
+    private function paramsBound(ReflectionClass $generic, array $args, string $writer, array $bindings, string $srcDir, array $classFiles, ?string $selfClass = null): array
     {
         $bound = [];
         foreach ($this->docHelper->templateParams((string) $generic->getDocComment()) as $i => $param) {
             $unbound = $param['default'] ?? $param['bound'];
             $bound[$param['name']] = match (true) {
-                isset($args[$i]) => $this->boundType($args[$i], $writer, $bindings, $srcDir, $classFiles),
+                isset($args[$i]) => $this->boundType($args[$i], $writer, $bindings, $srcDir, $classFiles, $selfClass),
                 // Its default or bound may name a param bound before it (`TList = list<TItem>`).
-                null !== $unbound => $this->boundType($unbound, $generic->getName(), $bound, $srcDir, $classFiles),
+                null !== $unbound => $this->boundType($unbound, $generic->getName(), $bound, $srcDir, $classFiles, $selfClass),
                 default => new ScalarType('mixed'),
             };
         }
@@ -423,8 +426,9 @@ final class ResponseClassCollector
      *
      * @param array<string, ParsedType> $bindings the writing class's own params
      * @param array<string, string>     $classFiles
+     * @param string|null               $selfClass the class `self::` is, where it is not `$class`
      */
-    private function boundType(string $written, string $class, array $bindings, string $srcDir, array $classFiles): ParsedType
+    private function boundType(string $written, string $class, array $bindings, string $srcDir, array $classFiles, ?string $selfClass = null): ParsedType
     {
         $context = $this->typeContext($class, $classFiles[$class] ?? $this->fileOf($class), $srcDir, $classFiles);
         if (null === $context) {
@@ -444,7 +448,7 @@ final class ResponseClassCollector
 
         // Its own params first: what they are bound to is scoped where that is written.
         return $this->docHelper->scoped(
-            $this->docHelper->substituted($this->readInFile($type, $class, $context, $classFiles, array_keys($bindings), $where), $bindings),
+            $this->docHelper->substituted($this->readInFile($type, $class, $context, $classFiles, array_keys($bindings), $where, $selfClass), $bindings),
             array_values($context['imports']),
             $context['domain'],
         );
