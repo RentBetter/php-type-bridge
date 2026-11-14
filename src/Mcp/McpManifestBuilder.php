@@ -9,6 +9,7 @@ use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
+use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Model\FailedBlank;
 use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
@@ -201,7 +202,9 @@ final class McpManifestBuilder
 
         $request = $contract->request;
         if (null !== $request) {
+            $pathParams = [];
             foreach ($request->pathParams ?? [] as $param) {
+                $pathParams[$param->name] = $param;
                 // A path segment is always required. A string's route requirement says what it must
                 // look like, so a model learns a ticket is `SO-12` before the router's 404.
                 $properties[$param->name] = 'number' === $param->schemaType() && null !== $param->requirement
@@ -225,7 +228,8 @@ final class McpManifestBuilder
             // One argument of a name fills a path param and a field alike: it holds to both.
             foreach ([$query, $body] as $fields) {
                 foreach ($fields as $name => $schema) {
-                    $properties[$name] = isset($properties[$name]) ? ['allOf' => [$properties[$name], $schema]] : $schema;
+                    $path = isset($pathParams[$name], $properties[$name]) ? self::pathHeldBeside($pathParams[$name], $properties[$name], $schema) : [];
+                    $properties[$name] = [] === $path ? $schema : ['allOf' => [$path, $schema]];
                 }
             }
         }
@@ -331,7 +335,7 @@ final class McpManifestBuilder
         }
 
         return $this->refuses($field->heldConstraints, $field->initialValue)
-            || ($body && array_any($field->formConstraints, static fn (Constraint $constraint): bool => $constraint instanceof NotBlank || $constraint instanceof NotNull));
+            || ($body && array_any(HeldConstraints::always($field->formConstraints), static fn (Constraint $constraint): bool => $constraint instanceof NotBlank || $constraint instanceof NotNull));
     }
 
     /**
@@ -837,6 +841,34 @@ final class McpManifestBuilder
         $routed = PortableRegex::routePattern($requirement, $utf8);
 
         return null === $routed ? ['type' => 'number'] : ['type' => 'string', 'pattern' => $routed];
+    }
+
+    /**
+     * What a path param holds an argument to that a field of its name fills too. The path takes the
+     * argument's text, so where the field is of another type — a string `id` beside a `[0-9]+`
+     * segment, published alone as a whole number — no value could be both: the argument is the
+     * field's type, and the path holds only its text to the route's requirement (`pattern`, which
+     * only a string is held to).
+     *
+     * @param array<string, mixed> $path  what the path param is published as alone
+     * @param array<string, mixed> $field
+     *
+     * @return array<string, mixed>
+     */
+    private static function pathHeldBeside(CollectedPathParam $param, array $path, array $field): array
+    {
+        $pathType = $path['type'] ?? null;
+        $fieldTypes = (array) ($field['type'] ?? []);
+        $agree = !\is_string($pathType) || [] === $fieldTypes || \in_array($pathType, $fieldTypes, true)
+            || ('integer' === $pathType && \in_array('number', $fieldTypes, true))
+            || ('number' === $pathType && \in_array('integer', $fieldTypes, true));
+        if ($agree) {
+            return $path;
+        }
+
+        $pattern = $path['pattern'] ?? (null === $param->requirement ? null : PortableRegex::routePattern($param->requirement, $param->utf8));
+
+        return null === $pattern ? [] : ['pattern' => $pattern];
     }
 
     /**

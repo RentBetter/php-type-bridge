@@ -727,9 +727,13 @@ final class TypeScriptEmitter
             foreach ($response->properties as $property) {
                 // Each property imports what the file it is written in imports, and the aliases of
                 // that file's module it names bare.
-                $this->appendImportedTypes($domain, ImportedType::usedIn($property->imports, $property->parsed), $imports);
-                $this->appendExternalEnums($domain, $property->parsed, $imports);
-                $this->appendClassTypes($domain, $property->parsed, $imports, $property->imports, $property->writtenInDomain);
+                try {
+                    $this->appendImportedTypes($domain, ImportedType::usedIn($property->imports, $property->parsed), $imports);
+                    $this->appendExternalEnums($domain, $property->parsed, $imports);
+                    $this->appendClassTypes($domain, $property->parsed, $imports, $property->imports, $property->writtenInDomain);
+                } catch (RuntimeException $e) {
+                    throw ResponseClassEmitter::failedProperty($response, $property, $e);
+                }
             }
         }
 

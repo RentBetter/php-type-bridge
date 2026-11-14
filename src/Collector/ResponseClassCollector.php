@@ -380,7 +380,7 @@ final class ResponseClassCollector
 
         $bindings = $user->getName() === $response->getName() ? [] : $this->templateBindings($response, $user->getName(), $srcDir, $classFiles);
         foreach ($this->traitPath($property) as $trait) {
-            $bindings = $this->paramsBound($trait, $this->files->usesArgs($classFiles[$user->getName()] ?? $this->fileOf($user->getName()), $trait->getName()), $user->getName(), $bindings, $srcDir, $classFiles);
+            $bindings = $this->paramsBound($trait, $this->files->usesArgs($classFiles[$user->getName()] ?? $this->fileOf($user->getName()), $trait->getName(), $user), $user->getName(), $bindings, $srcDir, $classFiles);
             $user = $trait;
         }
 

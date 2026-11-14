@@ -23,7 +23,7 @@ use ReflectionClass;
  */
 final class ClassFileTypes
 {
-    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}|false> by file; false where it can't be read */
+    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<array{from: int, to: int, doc: string, rank: int, args: list<string>}>>}|false> by file; false where it can't be read */
     private array $files = [];
 
     /** @var array<string, bool> by class */
@@ -153,14 +153,26 @@ final class ClassFileTypes
     }
 
     /**
-     * The types the file binds a trait's template params to where it uses the trait
-     * ({@see PhpDocTypeHelper::readFile()}): none where it binds none, or can't be read.
+     * The types a class or trait binds a trait's template params to where it uses the trait
+     * ({@see PhpDocTypeHelper::readFile()}), the best-ranked: a binding in its own body, or in its
+     * own doc comment — not another's of the same file. None where it binds none, or its file can't
+     * be read.
+     *
+     * @param ReflectionClass<object> $user
      *
      * @return list<string>
      */
-    public function usesArgs(string $file, string $trait): array
+    public function usesArgs(string $file, string $trait, ReflectionClass $user): array
     {
-        return ('' === $file ? false : $this->read($file))['uses'][$trait] ?? [];
+        $best = null;
+        foreach (('' === $file ? false : $this->read($file))['uses'][$trait] ?? [] as $use) {
+            $own = ($use['from'] >= $user->getStartLine() && $use['to'] <= $user->getEndLine()) || $use['doc'] === $user->getDocComment();
+            if ($own && (null === $best || $use['rank'] < $best['rank'])) {
+                $best = $use;
+            }
+        }
+
+        return $best['args'] ?? [];
     }
 
     /**
@@ -183,7 +195,7 @@ final class ClassFileTypes
     /**
      * What the file declares, imports and `use`s, read out of it once.
      *
-     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}|false
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<array{from: int, to: int, doc: string, rank: int, args: list<string>}>>}|false
      */
     private function read(string $file): array|false
     {

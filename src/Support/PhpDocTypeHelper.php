@@ -356,9 +356,10 @@ final class PhpDocTypeHelper
      * And the types it binds a trait's template params to where a class or trait in it uses the
      * trait — `@use Trait<…>` on the `use` statement (or the class), ranked as PHPStan ranks them:
      * `@phpstan-use`, `@template-use`, `@use` — by the trait the name means, as PHP resolves it
-     * there: through the file's `use` statements, else in its namespace.
+     * there: through the file's `use` statements, else in its namespace; each with where it is
+     * written, which says whose binding it is ({@see ClassFileTypes::usesArgs()}).
      *
-     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<array{from: int, to: int, doc: string, rank: int, args: list<string>}>>}
      */
     public function readFile(string $content): array
     {
@@ -381,23 +382,23 @@ final class PhpDocTypeHelper
             }
             foreach (['@phpstan-use', '@template-use', '@use'] as $rank => $tagName) {
                 foreach ($node->getUsesTagValues($tagName) as $use) {
-                    $uses[ClassNames::resolve($use->type->type->name, $classImports, $namespace)][$rank] ??= array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $use->type->genericTypes));
+                    // Where it is written, so each class of the file reads its own.
+                    $uses[ClassNames::resolve($use->type->type->name, $classImports, $namespace)][] = [
+                        'from' => $token->line,
+                        'to' => $token->line + substr_count($token->text, "\n"),
+                        'doc' => $token->text,
+                        'rank' => $rank,
+                        'args' => array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $use->type->genericTypes)),
+                    ];
                 }
             }
-        }
-
-        // Of a trait's bindings, the best-ranked.
-        $bound = [];
-        foreach ($uses as $trait => $ranked) {
-            ksort($ranked);
-            $bound[$trait] = reset($ranked);
         }
 
         return [
             'definitions' => $definitions,
             'classImports' => $classImports,
             'importTags' => $importTags,
-            'uses' => $bound,
+            'uses' => $uses,
         ];
     }
 
