@@ -56,6 +56,7 @@ final class MapKeyTest extends TestCase
             . "  byLoose: Record<string, string> | string[];\n"
             . "  byAnything: Record<string, string> | string[];\n"
             . "  byMaybeOrX: Record<string, string> | string[];\n"
+            . "  byArrayKey: Record<string, string> | string[];\n"
             . '}',
             $rows,
         );

@@ -192,6 +192,40 @@ final class SharedNameTest extends TestCase
         $this->emit('RefEndpointFixtures', new OutputStructure(rootModule: 'genTypes.ts'), includes: new IncludeConvention(refTypes: ['ref']));
     }
 
+    public function test_a_type_named_as_a_typescript_global_the_module_uses_is_a_collision(): void
+    {
+        // Its `Record<string, string>` would read the module's `Record`, which takes no arguments.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": "Record" is both TypeScript\'s global Record, which the module\'s code uses, and type PTGS\\TypeBridge\\Tests\\Fixture\\GlobalNamedFixtures\\Notes\\Record.');
+
+        $this->emit('GlobalNamedFixtures');
+    }
+
+    public function test_a_type_named_as_a_typescript_global_is_imported_under_another_name(): void
+    {
+        $notes = $this->emit('GlobalImportedFixtures')['Notes'];
+
+        self::assertMatchesRegularExpression("~^import type \\{ Record as CommonRecord \\} from '\\.\\./Common/genTypes';$~m", $notes);
+        self::assertStringContainsString("export interface NoteData {\n  record: CommonRecord;\n  tags: Record<string, string>;\n}", $notes);
+    }
+
+    public function test_a_config_alias_declares_the_config_aliases_it_names(): void
+    {
+        $notes = $this->emit('ChainedAliasFixtures', typeAliases: ['NoteId' => 'UuidStr', 'UuidStr' => 'string'])['Notes'];
+
+        self::assertStringContainsString('export type NoteId = UuidStr;', $notes);
+        self::assertStringContainsString('export type UuidStr = string;', $notes);
+    }
+
+    public function test_with_a_root_module_a_config_alias_named_by_another_is_declared_there_and_not_imported(): void
+    {
+        $output = $this->emit('ChainedAliasFixtures', new OutputStructure(rootModule: 'genTypes.ts'), typeAliases: ['NoteId' => 'UuidStr', 'UuidStr' => 'string']);
+
+        self::assertStringContainsString('export type NoteId = UuidStr;', $output['']);
+        self::assertStringContainsString('export type UuidStr = string;', $output['']);
+        self::assertMatchesRegularExpression("~^import type \\{ NoteId \\} from '\\.\\./genTypes';$~m", $output['Notes']);
+    }
+
     /**
      * @param list<string> $rootSources
      * @param array<string, string> $typeAliases

@@ -79,8 +79,9 @@ final class PhpDocShapeParserGrammarTest extends TestCase
     public function test_a_key_of_every_kind_an_array_has_is_any_key(): void
     {
         // An int — a float is keyed as the int it truncates to, a numeric string as the int it
-        // spells — and a string both: PHP's own `array-key`, which a JSON list is sent as too.
-        foreach (['array<int|string, string>', 'iterable<string|int, string>', 'array<int|non-empty-string, string>', 'array<float|string, string>', 'array<numeric-string, string>'] as $input) {
+        // spells, where it spells one — and a string both: PHP's own `array-key`, which a JSON
+        // list is sent as too. `numeric` is a numeric string as well as an int.
+        foreach (['array<int|string, string>', 'iterable<string|int, string>', 'array<int|non-empty-string, string>', 'array<float|string, string>', 'array<numeric-string, string>', 'array<numeric, string>'] as $input) {
             $map = (new PhpDocShapeParser())->parse($input);
             self::assertInstanceOf(MapType::class, $map);
             self::assertInstanceOf(ScalarType::class, $map->key, $input);

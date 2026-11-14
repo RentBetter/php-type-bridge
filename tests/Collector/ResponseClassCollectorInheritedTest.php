@@ -504,6 +504,14 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::emit(self::fixtures('InheritedUnreadableFixtures'));
     }
 
+    public function test_a_template_bound_the_parser_cannot_read_fails_naming_the_param(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('The template param PTGS\\TypeBridge\\Tests\\Fixture\\UnreadableBoundFixtures\\Things\\BaseBoxResponse binds to `\\Countable&\\Traversable`');
+
+        self::emit(self::fixtures('UnreadableBoundFixtures'));
+    }
+
     public function test_self_in_a_traits_property_is_the_class_using_it(): void
     {
         // As PHP and PHPStan read it: a trait's `self::` is whichever class uses the trait, so its
