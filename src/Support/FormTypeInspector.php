@@ -150,8 +150,9 @@ final class FormTypeInspector
             $name = (string) $name;
             $propertyPath = $this->resolvePropertyPath($config, $name);
             $property = $config->getMapped() ? $this->boundProperty($ownerClass, $propertyPath) : null;
-            $formConstraints = $this->collectConstraints($config, null);
-            $constraints = $validated ? $this->collectConstraints($config, $property) : $formConstraints;
+            $own = $this->ownConstraints($config);
+            $formConstraints = $this->collectConstraints($own, null);
+            $constraints = $validated ? $this->collectConstraints($own, $property) : $formConstraints;
             $heldConstraints = $validated && null !== $property ? array_values(array_filter($this->propertyConstraints($property), HeldConstraints::validatedByDefault(...))) : [];
             // What it holds is validated in turn only where it cascades from a validated object: a
             // Valid among its constraints, or its class's #[Assert\Cascade].
@@ -190,7 +191,7 @@ final class FormTypeInspector
                 formConstraints: $formConstraints,
                 heldConstraints: $heldConstraints,
                 initialValue: self::initialValue($property),
-                refusedMissing: $this->refusedMissing($config),
+                refusedMissing: self::refusedMissing($own),
             );
         }
 
@@ -382,7 +383,7 @@ final class FormTypeInspector
      */
     private function entryConstraints(?FormBuilderInterface $entry, array $constraints): array
     {
-        $held = null === $entry ? [] : $this->collectConstraints($entry->getFormConfig(), null);
+        $held = null === $entry ? [] : $this->collectConstraints($this->ownConstraints($entry->getFormConfig()), null);
         foreach (HeldConstraints::always($constraints) as $constraint) {
             if ($constraint instanceof All) {
                 $held = [...$held, ...HeldConstraints::eachOf($constraint)];
@@ -437,25 +438,33 @@ final class FormTypeInspector
     }
 
     /**
+     * The field's own `constraints` option, as the list it is or the one constraint it holds: read
+     * once, for what validating it holds it to and what a processor checks of it left out.
+     *
+     * @param FormConfigInterface<mixed> $config
+     *
+     * @return list<mixed>
+     */
+    private function ownConstraints(FormConfigInterface $config): array
+    {
+        $option = $this->resolveOption($config, 'constraints');
+
+        return \is_array($option) ? array_values($option) : (null === $option ? [] : [$option]);
+    }
+
+    /**
      * The constraints a submitted value is held to: the field's own `constraints` option, then
      * the constraint attributes on the data-class property it binds. A constraint confined to
      * groups other than Default is left out — a request may never be validated against it.
      *
-     * @param FormConfigInterface<mixed> $config
-     * @param ReflectionProperty|null    $property the data-class property the field binds, if any
+     * @param list<mixed>             $own      the field's own `constraints` option ({@see self::ownConstraints()})
+     * @param ReflectionProperty|null $property the data-class property the field binds, if any
      *
      * @return list<Constraint>
      */
-    private function collectConstraints(FormConfigInterface $config, ?ReflectionProperty $property): array
+    private function collectConstraints(array $own, ?ReflectionProperty $property): array
     {
-        $constraints = [];
-        $option = $this->resolveOption($config, 'constraints');
-        foreach (\is_array($option) ? $option : [$option] as $constraint) {
-            if ($constraint instanceof Constraint) {
-                $constraints[] = $constraint;
-            }
-        }
-
+        $constraints = array_values(array_filter($own, static fn (mixed $constraint): bool => $constraint instanceof Constraint));
         if (null !== $property) {
             $constraints = [...$constraints, ...$this->propertyConstraints($property)];
         }
@@ -468,13 +477,11 @@ final class FormTypeInspector
      * group: what a processor submitting with `clearMissing` off checks of a field left out, and all
      * it checks — not one a Sequentially holds, which only validating a submitted value reaches.
      *
-     * @param FormConfigInterface<mixed> $config
+     * @param list<mixed> $own the field's own `constraints` option ({@see self::ownConstraints()})
      */
-    private function refusedMissing(FormConfigInterface $config): bool
+    private static function refusedMissing(array $own): bool
     {
-        $option = $this->resolveOption($config, 'constraints');
-
-        return array_any(\is_array($option) ? $option : [$option], static fn (mixed $constraint): bool => $constraint instanceof NotBlank || $constraint instanceof NotNull);
+        return array_any($own, static fn (mixed $constraint): bool => $constraint instanceof NotBlank || $constraint instanceof NotNull);
     }
 
     /**

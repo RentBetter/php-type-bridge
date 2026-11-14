@@ -81,6 +81,13 @@ use stdClass;
 final class McpManifestBuilder
 {
     /**
+     * The largest whole number a JSON client writes exactly, 2^53 - 1: past it a JavaScript number
+     * is one near it, and from 1e21 it is written in exponent form (`1e+21`), which a route's digits
+     * refuse — the path a client builds of it is a 404.
+     */
+    private const int LARGEST_EXACT_INTEGER = 9007199254740991;
+
+    /**
      * The bounds where the tighter of two is the larger value; for the rest it is the smaller.
      */
     private const array LOWER_BOUNDS = ['minimum', 'exclusiveMinimum', 'minLength', 'minItems'];
@@ -172,8 +179,10 @@ final class McpManifestBuilder
         }
         $tool['inputSchema'] = $this->inputSchema($contract, $mcp->httpMethod);
 
+        // A name a path param takes is the path's ({@see self::inputSchema()}).
         $query = array_map(static fn (CollectedFormField $field): string => $field->name, $contract->request?->query->fields ?? []);
-        $query = array_values(array_unique([...$query, ...array_keys($this->includeQuery($contract))]));
+        $path = array_map(static fn (CollectedPathParam $param): string => $param->name, $contract->request->pathParams ?? []);
+        $query = array_values(array_diff(array_unique([...$query, ...array_keys($this->includeQuery($contract))]), $path));
         if ([] !== $query) {
             $tool['query'] = $query;
         }
@@ -200,13 +209,14 @@ final class McpManifestBuilder
         $properties = [];
         $required = [];
 
+        // Each argument goes to one place, as a client sends it: the path where it names a path param,
+        // the query string where the tool lists it a query parameter, the body otherwise. By name,
+        // the place an argument goes to, once one does.
+        $taken = [];
         $request = $contract->request;
         if (null !== $request) {
-            // By path param, its route requirement as a pattern of the whole segment, where it reads alike.
-            $routePatterns = [];
             foreach ($request->pathParams ?? [] as $param) {
                 $routed = null === $param->requirement ? null : PortableRegex::routePattern($param->requirement, $param->utf8);
-                $routePatterns[$param->name] = $routed;
                 // A path segment is always required. A string's route requirement says what it must
                 // look like, so a model learns a ticket is `SO-12` before the router's 404.
                 $properties[$param->name] = 'number' === $param->schemaType() && null !== $param->requirement
@@ -216,29 +226,24 @@ final class McpManifestBuilder
                     $properties[$param->name]['pattern'] = $routed;
                 }
                 $required[] = $param->name;
+                $taken[$param->name] = '{' . $param->name . '}';
             }
 
             $query = [];
+            $queryRequired = [];
             $body = [];
+            $bodyRequired = [];
             // With `clearMissing` on, a field left out is submitted blank — `$form->submit($data)`
             // submits a query and a body so, whatever the method — and so required where that is
             // refused. With it off it isn't submitted, and is held to what its new object holds:
             // a query's filter object is new on every request, a body's only on a POST.
-            $this->addFields($request->query, $query, $required, makes: true);
-            $this->addFields($request->body, $body, $required, makes: $this->clearMissing || 'POST' === strtoupper($httpMethod), json: true);
-            // One argument of a name fills a path param and the fields of that name alike: it holds
-            // to each.
-            $fields = [];
-            foreach ([$query, $body] as $inputs) {
-                foreach ($inputs as $name => $schema) {
-                    $fields[$name][] = $schema;
-                }
+            $this->addFields($request->query, $query, $queryRequired, makes: true);
+            $this->addFields($request->body, $body, $bodyRequired, makes: $this->clearMissing || 'POST' === strtoupper($httpMethod), json: true);
+            self::place($contract, 'query', $query, $queryRequired, $properties, $required, $taken);
+            foreach ([...array_keys($query), ...array_keys($this->includeQuery($contract))] as $name) {
+                $taken[$name] ??= 'the query parameter ' . $name;
             }
-            foreach ($fields as $name => $schemas) {
-                $path = \array_key_exists($name, $routePatterns) ? self::pathHeldBeside($properties[$name], $routePatterns[$name], $schemas) : [];
-                $parts = [] === $path ? $schemas : [$path, ...$schemas];
-                $properties[$name] = 1 === \count($parts) ? $parts[0] : ['allOf' => $parts];
-            }
+            self::place($contract, 'body', $body, $bodyRequired, $properties, $required, $taken);
         }
 
         foreach ($this->includeQuery($contract) as $name => $description) {
@@ -825,7 +830,8 @@ final class McpManifestBuilder
     /**
      * A number path segment as what its requirement lets the router match. One written as taking
      * every whole number from 0 (`\d+`, `[0-9]+`) or 1 (`[1-9]\d*`) up is an integer of at least that;
-     * signed (`-?\d+`), one of any. Read off how it is written: no sample of values shows there is no
+     * signed (`-?\d+`), one of any — each one a JSON client writes digit for digit
+     * ({@see self::LARGEST_EXACT_INTEGER}). Read off how it is written: no sample of values shows there is no
      * gap — `\d*[0-46-9]` takes every one a sample would try, and not 5. Any other (`\d{1,4}`,
      * `[2-9]\d*`, a decimal, which a client may write in exponent form) is the string the router
      * matches, its pattern saying which, so a tool sends no number the router answers 404 to — or a
@@ -834,18 +840,18 @@ final class McpManifestBuilder
      * @param string|null $routed the requirement as a pattern of the whole segment, where it reads
      *                            alike ({@see PortableRegex::routePattern()})
      *
-     * @return array{type: 'integer'|'number'|'string', minimum?: int, pattern?: string}
+     * @return array{type: 'integer'|'number'|'string', minimum?: int, maximum?: int, pattern?: string}
      */
     private static function numberHeldTo(string $requirement, ?string $routed): array
     {
         if (1 === preg_match(self::WHOLE_NUMBERS, $requirement, $whole, \PREG_UNMATCHED_AS_NULL)) {
             $from = null === $whole['from0'] ? 1 : 0;
             if (null === $whole['sign']) {
-                return ['type' => 'integer', 'minimum' => $from];
+                return ['type' => 'integer', 'minimum' => $from, 'maximum' => self::LARGEST_EXACT_INTEGER];
             }
             // Signed, from 1 up leaves out 0, which its pattern says.
             if (0 === $from) {
-                return ['type' => 'integer'];
+                return ['type' => 'integer', 'minimum' => -self::LARGEST_EXACT_INTEGER, 'maximum' => self::LARGEST_EXACT_INTEGER];
             }
         }
 
@@ -853,46 +859,35 @@ final class McpManifestBuilder
     }
 
     /**
-     * What a path param holds an argument to that fields of its name fill too. The path takes the
-     * argument's text, so where a field can't be of the path's type — a string `id`, or an id or
-     * the fields to make one, beside a `[0-9]+` segment published alone as a whole number — no value
-     * could pass both: the argument is the fields' type, and the path holds only its text to the
-     * route's requirement (`pattern`, which only a string is held to).
+     * The fields of an input as the arguments a client sends to it: each but one whose name an
+     * argument another place takes has already ({@see self::inputSchema()}), which is never sent
+     * here — and fails, naming both, where the field can't go without it: no call could succeed.
      *
-     * @param array<string, mixed>       $path        what the path param is published as alone
-     * @param list<array<string, mixed>> $fields
-     *
-     * @return array<string, mixed>
+     * @param 'query'|'body'                         $input
+     * @param array<array-key, array<string, mixed>> $fields
+     * @param list<string>                           $fieldsRequired
+     * @param array<array-key, array<string, mixed>> $properties
+     * @param list<string>                           $required
+     * @param array<array-key, string>               $taken          by name, the place its argument goes to
      */
-    private static function pathHeldBeside(array $path, ?string $routePattern, array $fields): array
+    private static function place(CollectedEndpointContract $contract, string $input, array $fields, array $fieldsRequired, array &$properties, array &$required, array $taken): void
     {
-        $type = $path['type'] ?? null;
-        if (\is_string($type) && array_all($fields, static fn (array $field): bool => self::takesType($field, $type))) {
-            return $path;
+        foreach ($fields as $name => $schema) {
+            if (!isset($taken[$name])) {
+                $properties[$name] = $schema;
+            } elseif (\in_array((string) $name, $fieldsRequired, true)) {
+                throw new RuntimeException(\sprintf(
+                    'The MCP tool %s takes the %s field "%s", which it can never send: the argument of that name fills %s. Rename one of them, or take the field out of the %s.',
+                    $contract->mcp->name ?? $contract->name,
+                    $input,
+                    $name,
+                    str_starts_with($taken[$name], '{') ? 'the path param ' . $taken[$name] : $taken[$name],
+                    $input,
+                ));
+            }
         }
-
-        $pattern = $path['pattern'] ?? $routePattern;
-
-        return \is_string($pattern) ? ['pattern' => $pattern] : [];
-    }
-
-    /**
-     * Whether a value of the type can pass the schema: its `type` names the type, or one of its
-     * `anyOf` branches' does — an integer being a number, and a whole number an integer. One that
-     * names no type says nothing of it, and is taken to refuse it.
-     *
-     * @param array<string, mixed> $schema
-     */
-    private static function takesType(array $schema, string $type): bool
-    {
-        $types = (array) ($schema['type'] ?? []);
-        foreach (\is_array($schema['anyOf'] ?? null) ? $schema['anyOf'] : [] as $branch) {
-            $types = [...$types, ...(\is_array($branch) ? (array) ($branch['type'] ?? []) : [])];
-        }
-
-        return \in_array($type, $types, true)
-            || ('integer' === $type && \in_array('number', $types, true))
-            || ('number' === $type && \in_array('integer', $types, true));
+        // Each one left is placed: a required one taken by another place failed above.
+        $required = [...$required, ...$fieldsRequired];
     }
 
     /**

@@ -1692,16 +1692,34 @@ final class McpManifestBuilderTest extends TestCase
         self::assertArrayNotHasKey('query', $tool);
     }
 
+    public function testAnIncludeParameterTakesTheArgumentOfItsNameFromABodyField(): void
+    {
+        // `include` is a query parameter the tool lists: a body field of that name is never sent.
+        $include = new CollectedFormField(name: 'include', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\IntegerType', required: false, mapped: true, compound: false, dataClass: null);
+        $contract = new CollectedEndpointContract(
+            name: 'saveThing',
+            domain: 'things',
+            controllerClass: 'App\\ThingController',
+            methodName: '__invoke',
+            responses: [$this->response(200)],
+            request: new CollectedEndpointRequest(body: new CollectedInputReference(null, 'App\\ThingData', 'ThingData', 'things', [$include], $this->shape('array{include?: int}'))),
+            mcp: new CollectedMcpTool(name: 'saveThing', description: 'Save a thing.', httpMethod: 'POST', httpPath: '/things', destructive: false),
+        );
+
+        $tool = (new McpManifestBuilder(new IncludeConvention(query: ['include' => 'Opt-in parts.'])))->build(['things' => [$contract]])['tools'][0];
+        self::assertSame(['type' => 'string', 'description' => 'Opt-in parts.'], $tool['inputSchema']['properties']['include']);
+    }
+
     public function testAFieldThatCantGoWithoutAnArgumentAnotherPlaceTakesFailsNamingBoth(): void
     {
-        // The body's `id` is refused left out, and the argument of its name fills the path: no call
-        // the tool makes can succeed.
+        // The body's `id` is a key its contract requires, and the argument of its name fills the path:
+        // no call the tool makes can succeed.
         $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('The MCP tool saveThing takes the body field "id", which it can never send: the argument of that name fills the path param {id}. Rename one of them, or take the field out of the body.');
 
-        $this->pathAndBodyTool([new CollectedPathParam('id', 'string')], [$id], $this->shape('array{id?: string}'));
+        $this->pathAndBodyTool([new CollectedPathParam('id', 'string')], [$id], $this->shape('array{id: string}'));
     }
 
     public function testAFieldLeftOutOfAnyWriteIsSubmittedBlankWithClearMissing(): void
