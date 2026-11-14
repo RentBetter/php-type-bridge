@@ -52,19 +52,22 @@ final class EmbeddedFormToolTest extends TestCase
         // TripType is not required, so neither is a form it holds, whatever its own `required`
         // says: `leg` left out is null, which its Valid passes, not a new LegData whose `note` is
         // refused. Sent, a leg's `stop` left out is null too — refused by its NotNull — and so is
-        // each of `legs`'.
+        // each of `legs`'. A tag sent blank is the null its `empty_data` makes where it isn't
+        // required, which its NotNull refuses.
         $schema = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/NonRequiredRootFixtures', TypeBridgeConfig::fromArray(['clearMissing' => true]))['tools'][0]['inputSchema'];
 
         self::assertArrayNotHasKey('required', $schema);
         self::assertSame(['note', 'stop'], $schema['properties']['leg']['required'] ?? null);
         self::assertSame(['note', 'stop'], $schema['properties']['legs']['items']['required'] ?? null);
+        self::assertSame(1, $schema['properties']['tags']['items']['minLength'] ?? null);
     }
 
     public function test_a_valid_among_a_forms_own_constraints_cascades_wherever_it_is_submitted(): void
     {
         // Each item's `entry_options` constraints hold a Valid, and so do `lid`'s own, under a
         // `shell` nothing cascades into: what each holds is validated, so `x` and `y` are refused
-        // left out and blank — and with `y` refused, a `lid` left out, and a `shell`.
+        // left out and blank — and with `y` refused, a `lid` left out, and a `shell`. Each of `bags`
+        // is not required, so its `lid` left out is null, which its NotNull refuses.
         $schema = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/OwnValidFixtures', TypeBridgeConfig::fromArray(['clearMissing' => true]))['tools'][0]['inputSchema'];
         $items = $schema['properties']['items']['items'];
         $shell = $schema['properties']['shell'];
@@ -75,6 +78,7 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame(1, $shell['properties']['lid']['properties']['y']['minLength'] ?? null);
         self::assertSame(['lid'], $shell['required'] ?? null);
         self::assertSame(['shell'], $schema['required'] ?? null);
+        self::assertSame(['lid'], $schema['properties']['bags']['items']['required'] ?? null);
     }
 
     public function test_a_self_its_class_imports_is_its_shape(): void

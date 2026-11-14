@@ -6,8 +6,11 @@ namespace PTGS\TypeBridge\Tests\Fixture\NonRequiredRootFixtures\Trips;
 
 use PTGS\TypeBridge\Form\AbstractFormType;
 use Symfony\Component\Form\Extension\Core\Type\CollectionType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
+use Symfony\Component\Validator\Constraints\NotNull;
 
 /**
  * Not required, as a form whose fields may all be left out is: every form it holds is not either,
@@ -21,7 +24,9 @@ final class TripType extends AbstractFormType
     {
         $builder
             ->add('leg', LegType::class)
-            ->add('legs', CollectionType::class, ['entry_type' => LegType::class, 'allow_add' => true]);
+            ->add('legs', CollectionType::class, ['entry_type' => LegType::class, 'allow_add' => true])
+            // A tag sent blank is what its `empty_data` makes of it, which asks whether it is required.
+            ->add('tags', CollectionType::class, ['entry_type' => TextType::class, 'entry_options' => ['empty_data' => static fn (FormInterface $form): ?string => $form->isRequired() ? 'none' : null, 'constraints' => [new NotNull()]], 'allow_add' => true]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

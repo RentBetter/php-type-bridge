@@ -10,6 +10,7 @@ use Symfony\Component\Validator\Constraints as Assert;
  * @phpstan-type _self = array{
  *     leg?: LegData,
  *     legs?: list<LegData>,
+ *     tags?: list<string>,
  * }
  */
 final class TripData
@@ -21,4 +22,7 @@ final class TripData
     /** @var list<LegData> */
     #[Assert\Valid]
     public array $legs = [];
+
+    /** @var list<string> */
+    public array $tags = [];
 }

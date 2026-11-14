@@ -65,21 +65,27 @@ final class TypeScriptTypes
     }
 
     /**
-     * Whether the type is every key an array has, as `Record<K, V>` reads its K: a union of a
-     * `string` and a `number`, read through the config's aliases — `string | number`, `PropertyKey` —
-     * or anything at all (`any`, `unknown`).
+     * Which key the type is, as `Record<K, V>` reads its K, read through the config's aliases and
+     * out of brackets: 'any' for every key an array has — a `string` and a `number` both,
+     * `PropertyKey`, or anything at all (`any`, `unknown`); 'string' or 'number' for one of them
+     * alone; null for any other, a literal's or a template's among them.
      *
      * @param array<string, string> $aliases the config's aliases, name => TypeScript
+     *
+     * @return 'any'|'string'|'number'|null
      */
-    public static function isAnyKey(string $type, array $aliases = []): bool
+    public static function keyKind(string $type, array $aliases = []): ?string
     {
-        $members = [];
-        foreach (self::split(self::standsFor($type, $aliases) ?? trim($type), '|') as $member) {
-            $member = trim($member);
-            $members[self::standsFor($member, $aliases) ?? $member] = true;
+        $members = self::keyMembers($type, $aliases, 0);
+        if (isset($members['PropertyKey']) || isset($members['any']) || isset($members['unknown']) || (isset($members['string']) && isset($members['number']))) {
+            return 'any';
         }
 
-        return isset($members['PropertyKey']) || isset($members['any']) || isset($members['unknown']) || (isset($members['string']) && isset($members['number']));
+        return match (array_keys($members)) {
+            ['string'] => 'string',
+            ['number'] => 'number',
+            default => null,
+        };
     }
 
     /**
@@ -171,6 +177,37 @@ final class TypeScriptTypes
         }
 
         return \in_array($name, self::NEVER_NULL, true) ? false : null;
+    }
+
+    /**
+     * A union's members, each alias among them and each one in brackets read for its own.
+     *
+     * @param array<string, string> $aliases
+     *
+     * @return array<string, true>
+     */
+    private static function keyMembers(string $type, array $aliases, int $depth): array
+    {
+        $members = [];
+        foreach (self::split(trim($type), '|') as $member) {
+            $inner = $depth > 8 ? null : (self::inBrackets($member) ?? $aliases[$member] ?? null);
+            if (null !== $inner) {
+                $members += self::keyMembers($inner, $aliases, $depth + 1);
+            } elseif ('' !== $member) {
+                $members[$member] = true;
+            }
+        }
+
+        return $members;
+    }
+
+    /**
+     * What a type wholly in brackets holds: `(string | number)`, not `(A) & (B)`; null for a type
+     * that isn't.
+     */
+    private static function inBrackets(string $type): ?string
+    {
+        return str_starts_with($type, '(') && str_ends_with($type, ')') && '' === trim(substr(self::topLevel($type), 1, -1)) ? substr($type, 1, -1) : null;
     }
 
     /**

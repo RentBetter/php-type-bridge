@@ -21,7 +21,10 @@ final class BoxType extends AbstractFormType
     {
         $builder
             ->add('items', CollectionType::class, ['entry_type' => ItemType::class, 'entry_options' => ['constraints' => [new Valid()]], 'allow_add' => true])
-            ->add('shell', ShellType::class);
+            ->add('shell', ShellType::class)
+            // Its entries not required: one left with every field blank is null, and one with a field
+            // sent has its `lid` null where it is left out.
+            ->add('bags', CollectionType::class, ['entry_type' => BagType::class, 'entry_options' => ['required' => false, 'constraints' => [new Valid()]], 'allow_add' => true]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

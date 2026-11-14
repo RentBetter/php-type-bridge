@@ -23,7 +23,8 @@ use PTGS\TypeBridge\Support\TypeScriptTypes;
  * where the alias stands for one no array has, or for every one an array has; by the alias where it
  * stands for a key an array has. The parser can't tell, an alias being declared elsewhere — another
  * class, another module — and the emitter can, where every module's aliases are known. A project-wide
- * alias is read by its TypeScript: any key where that is (`string | number`). A class's name is kept.
+ * alias is read by its TypeScript, in a union too: any key where that is (`string | number`), or where
+ * with what is beside it it is (`Text|int`, `Text` a `string`). A class's name is kept.
  */
 final class AliasedMapKeys
 {
@@ -142,17 +143,35 @@ final class AliasedMapKeys
         if ($type instanceof MapType) {
             // A key no name is in was keyed as it was built; one a name is in, as what it stands for:
             // any key where that is one no array has, or every one an array has.
-            $standsFor = $this->standsFor($keyed[0], $imports, $domain, []);
-            $keyedAs = MapType::keyOf($standsFor);
-            // A project-wide alias's TypeScript says what it is: `string | number` is any key.
-            $anyKey = $standsFor instanceof NameRefType && null === $standsFor->class && isset($this->typeAliases[$standsFor->name])
-                && TypeScriptTypes::isAnyKey($this->typeAliases[$standsFor->name], $this->typeAliases);
-            if ($anyKey || ($keyedAs instanceof ScalarType && 'array-key' === $keyedAs->type)) {
+            $keyedAs = MapType::keyOf($this->asKeys($this->standsFor($keyed[0], $imports, $domain, [])));
+            if ($keyedAs instanceof ScalarType && 'array-key' === $keyedAs->type) {
                 $keyed[0] = new ScalarType('array-key');
             }
         }
 
         return $keyed === $children ? $type : ParsedTypes::withChildren($type, $keyed);
+    }
+
+    /**
+     * The key with each project-wide alias in it the key its TypeScript is ({@see TypeScriptTypes::keyKind()}):
+     * any key, a string's or a number's — so `Text|int`, `Text` a `string`, is any key. One that is
+     * none of them is kept.
+     */
+    private function asKeys(ParsedType $key): ParsedType
+    {
+        if ($key instanceof UnionType) {
+            return new UnionType(array_map($this->asKeys(...), $key->types));
+        }
+        if (!$key instanceof NameRefType || null !== $key->class || !isset($this->typeAliases[$key->name])) {
+            return $key;
+        }
+
+        return match (TypeScriptTypes::keyKind($this->typeAliases[$key->name], $this->typeAliases)) {
+            'any' => new ScalarType('array-key'),
+            'string' => new ScalarType('string'),
+            'number' => new ScalarType('int'),
+            null => $key,
+        };
     }
 
     /**

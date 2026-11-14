@@ -13,6 +13,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\ConfigAliasUnionKeyFixtures\Rows;
  *     byNested: array<AnyOf, string>,
  *     byGrouped: array<Grouped, string>,
  *     byTextOrCode: array<Text|Code, string>,
+ *     byNumOrString: array<Num|string, string>,
  * }
  */
 final class KeyView {}

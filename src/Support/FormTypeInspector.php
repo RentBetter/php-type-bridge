@@ -11,6 +11,7 @@ use PTGS\TypeBridge\Model\FailedBlank;
 use ReflectionAttribute;
 use ReflectionProperty;
 use RuntimeException;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\Form\ChoiceList\ChoiceListInterface;
 use Symfony\Component\Form\Exception\ExceptionInterface as FormException;
 use Symfony\Component\Form\Exception\TransformationFailedException;
@@ -22,6 +23,7 @@ use Symfony\Component\Form\Extension\Core\Type\CollectionType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
 use Symfony\Component\Form\Form;
+use Symfony\Component\Form\FormConfigBuilder;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormConfigInterface;
 use Symfony\Component\Form\FormEvents;
@@ -54,6 +56,14 @@ final class FormTypeInspector
 
     /** Reads a class's validation metadata, for whether a property cascades ({@see self::cascades()}). */
     private ?ValidatorInterface $validatorMetadata = null;
+
+    /**
+     * A form not required, to hold one whose `empty_data` is run where a form holding it isn't
+     * required ({@see self::blankValue()}).
+     *
+     * @var Form<mixed>|null
+     */
+    private ?Form $notRequired = null;
 
     /** @var array<string, array{dataClass: ?class-string, fields: list<CollectedFormField>}> by form class, and whether its blanks are asked: each built and read once, however many endpoints take it */
     private array $inspected = [];
@@ -120,7 +130,7 @@ final class FormTypeInspector
 
         return [
             'dataClass' => $dataClass,
-            'fields' => $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig()), validated: true, blanks: $blanks),
+            'fields' => $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig()), validated: true, blanks: $blanks, required: $builder->getFormConfig()->getRequired()),
         ];
     }
 
@@ -132,10 +142,13 @@ final class FormTypeInspector
      *                                               validated: Symfony validates the root's data, and an embedded
      *                                               object only where its property cascades (#[Assert\Valid]) — a
      *                                               field's own `constraints` option holds wherever it is submitted
+     * @param bool                        $required  whether the form is required as Symfony's Form::isRequired()
+     *                                               reads it: it and every form holding it — one that isn't makes
+     *                                               none it holds required, whatever their own `required` says
      *
      * @return list<CollectedFormField>
      */
-    private function collectFields(FormBuilderInterface $builder, bool $rewritten, bool $validated, bool $blanks): array
+    private function collectFields(FormBuilderInterface $builder, bool $rewritten, bool $validated, bool $blanks, bool $required): array
     {
         $fields = [];
         $ownerClass = $builder->getFormConfig()->getDataClass();
@@ -154,11 +167,14 @@ final class FormTypeInspector
             $formConstraints = $this->collectConstraints($own, null);
             $constraints = $validated ? $this->collectConstraints($own, $property) : $formConstraints;
             $heldConstraints = $validated && null !== $property ? array_values(array_filter($this->propertyConstraints($property), HeldConstraints::validatedByDefault(...))) : [];
-            // What it holds is validated in turn only where it cascades from a validated object: a
-            // Valid among its constraints, or its class's #[Assert\Cascade].
-            $cascades = $validated && (array_any(HeldConstraints::always($constraints), static fn (Constraint $constraint): bool => $constraint instanceof Valid)
-                || (null !== $property && null !== $ownerClass && $this->cascades($ownerClass, $property->getName())));
+            // What it holds is validated in turn where it cascades: a Valid among its own
+            // `constraints`, which hold wherever it is submitted; or, from a validated object, one on
+            // its property, or its class's #[Assert\Cascade].
+            $cascades = self::holdsValid($formConstraints) || ($validated && (self::holdsValid($constraints)
+                || (null !== $property && null !== $ownerClass && $this->cascades($ownerClass, $property->getName()))));
             $entry = $this->entryBuilder($config);
+            $entryOwn = null === $entry ? [] : $this->collectConstraints($this->ownConstraints($entry->getFormConfig()), null);
+            $fieldRequired = $required && $config->getRequired();
 
             $fields[] = new CollectedFormField(
                 name: $name,
@@ -178,15 +194,21 @@ final class FormTypeInspector
                 // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
                 // what is sent itself, and none of them is a field a request sends — as a field, or
                 // as each entry of a collection.
-                children: self::isOfType($config, ChoiceType::class) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks),
-                entryChildren: null !== $entry && $entry->getCompound() && !self::isOfType($entry->getFormConfig(), ChoiceType::class) ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()), $cascades, $blanks) : [],
+                children: self::isOfType($config, ChoiceType::class) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks, $fieldRequired),
+                entryChildren: null !== $entry && $entry->getCompound() && !self::isOfType($entry->getFormConfig(), ChoiceType::class) ? $this->collectFields(
+                    $entry,
+                    $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()),
+                    $cascades || self::holdsValid($entryOwn),
+                    $blanks,
+                    $fieldRequired && $entry->getFormConfig()->getRequired(),
+                ) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
                 trim: false !== $this->resolveOption($config, 'trim'),
-                blankValue: $blanks ? $this->blankValue($config, self::mappedFieldNames($child)) : null,
-                entryConstraints: $this->entryConstraints($entry, $constraints),
-                entryBlankValue: null === $entry || !$blanks ? null : $this->blankValue($entry->getFormConfig(), self::mappedFieldNames($entry)),
+                blankValue: $blanks ? $this->blankValue($config, self::mappedFieldNames($child), $required) : null,
+                entryConstraints: self::entryConstraints($entryOwn, $constraints),
+                entryBlankValue: null === $entry || !$blanks ? null : $this->blankValue($entry->getFormConfig(), self::mappedFieldNames($entry), $fieldRequired),
                 transformsValue: $rewritten || self::transformsValue($config),
                 formConstraints: $formConstraints,
                 heldConstraints: $heldConstraints,
@@ -233,14 +255,17 @@ final class FormTypeInspector
      *
      * A compound field is what its type makes it: a collection is emptied, []; an expanded choice
      * chooses none; an embedded form is a new object of its data class where it is required, null
-     * where it isn't, and with no data class the array its fields are written into, each blank. A
+     * where it isn't — nor the form holding it, nor any holding that, as Form::isRequired() reads
+     * it — and with no data class the array its fields are written into, each blank. A
      * choice a loader fills is never loaded here. One whose transformer fails a blank is a
      * {@see FailedBlank}: the form is invalid, as Symfony submits it.
      *
      * @param FormConfigInterface<mixed> $config
      * @param list<string>               $fieldNames the fields an embedded form writes into its data
+     * @param bool                       $held       whether the form holding the field is required, and every
+     *                                               one holding that
      */
-    private function blankValue(FormConfigInterface $config, array $fieldNames = []): mixed
+    private function blankValue(FormConfigInterface $config, array $fieldNames, bool $held): mixed
     {
         if ($config->getCompound()) {
             if (self::isOfType($config, CollectionType::class) || $this->isMultipleChoice($config)) {
@@ -253,7 +278,13 @@ final class FormTypeInspector
         try {
             $value = $config->getEmptyData();
             if ($value instanceof Closure) {
-                $value = $value(new Form($config), null);
+                $form = new Form($config);
+                if (!$held) {
+                    // Form::isRequired() asks the form holding it first: one not required, no form it
+                    // holds is.
+                    $form->setParent($this->notRequired ??= new Form((new FormConfigBuilder('holder', null, new EventDispatcher()))->setRequired(false)));
+                }
+                $value = $value($form, null);
             }
             // An embedded form with no data class is the array its fields are written into, each
             // blank; one with a data class is what its `empty_data` makes — a new object of the class
@@ -276,6 +307,16 @@ final class FormTypeInspector
             // An `empty_data` closure that reads what only a request has: what it makes is unknown.
             return null;
         }
+    }
+
+    /**
+     * Whether the constraints, as always held, cascade into what they validate: a Valid among them.
+     *
+     * @param list<Constraint> $constraints
+     */
+    private static function holdsValid(array $constraints): bool
+    {
+        return array_any(HeldConstraints::always($constraints), static fn (Constraint $constraint): bool => $constraint instanceof Valid);
     }
 
     /**
@@ -377,14 +418,14 @@ final class FormTypeInspector
      * and its `entry_options`', resolved as the collection builds each entry — and those an All the
      * collection is always held to applies to every entry, Default group alone in both.
      *
-     * @param FormBuilderInterface<mixed>|null $entry       the collection's entry, built as it builds one
-     * @param list<Constraint>                 $constraints the collection field's own
+     * @param list<Constraint> $entryOwn    the entry's own, as the collection builds each entry
+     * @param list<Constraint> $constraints the collection field's own
      *
      * @return list<Constraint>
      */
-    private function entryConstraints(?FormBuilderInterface $entry, array $constraints): array
+    private static function entryConstraints(array $entryOwn, array $constraints): array
     {
-        $held = null === $entry ? [] : $this->collectConstraints($this->ownConstraints($entry->getFormConfig()), null);
+        $held = $entryOwn;
         foreach (HeldConstraints::always($constraints) as $constraint) {
             if ($constraint instanceof All) {
                 $held = [...$held, ...HeldConstraints::eachOf($constraint)];

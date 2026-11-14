@@ -107,4 +107,16 @@ final class TypeScriptTypesTest extends TestCase
         self::assertFalse(TypeScriptTypes::admitsNull("Omit<NoteData, 'id'>"));
         self::assertFalse(TypeScriptTypes::admitsNull("Pick<NoteData, 'id' | 'title'>"));
     }
+
+    public function test_a_key_is_what_its_members_are_read_through_aliases_and_out_of_brackets(): void
+    {
+        $aliases = ['Num' => 'number', 'Key' => '(Num) | string', 'Loop' => 'Loop | number'];
+
+        self::assertSame('any', TypeScriptTypes::keyKind('Key', $aliases));
+        self::assertSame('number', TypeScriptTypes::keyKind('Num', $aliases));
+        self::assertSame('string', TypeScriptTypes::keyKind("\n  | string", $aliases), 'A union may lead with its bar');
+        self::assertNull(TypeScriptTypes::keyKind("'a' | 'b'"), 'A literal is a key, not every string');
+        self::assertNull(TypeScriptTypes::keyKind('(string | number) & (boolean | number)'), 'An intersection, not a union in brackets');
+        self::assertNull(TypeScriptTypes::keyKind('Loop', $aliases), 'An alias that names itself says nothing');
+    }
 }
