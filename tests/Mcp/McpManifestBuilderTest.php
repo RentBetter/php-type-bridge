@@ -1688,15 +1688,43 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['id'], $schema['required']);
     }
 
-    public function testAFieldsOwnNotBlankInASequenceRefusesItLeftOut(): void
+    public function testAFieldLeftOutIsRefusedWhereItsOwnConstraintsSayNotBlankAtTheirTop(): void
     {
-        // With `clearMissing` off a POST body's field left out isn't submitted, and only its own
-        // constraints refuse that — one a Sequentially holds as much as one on its own.
+        // With `clearMissing` off a POST body's field left out isn't submitted; the processor refuses
+        // one whose own `constraints` hold a NotBlank at their top, in any group, and no other.
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
-        $plain = new CollectedFormField(name: 'plain', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, formConstraints: [new NotBlank()]);
+        $plain = new CollectedFormField(name: 'plain', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, formConstraints: [new NotBlank()], refusedMissing: true);
         $nested = new CollectedFormField(name: 'nested', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, formConstraints: [new Sequentially([new NotBlank(), new Length(max: 5)])]);
+        $grouped = new CollectedFormField(name: 'grouped', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, refusedMissing: true);
 
-        self::assertSame(['plain', 'nested'], $this->toolWithBody('POST', [$plain, $nested], $this->shape('array{plain?: string, nested?: string}'))['inputSchema']['required'] ?? null);
+        self::assertSame(['plain', 'grouped'], $this->toolWithBody('POST', [$plain, $nested, $grouped], $this->shape('array{plain?: string, nested?: string, grouped?: string}'))['inputSchema']['required'] ?? null);
+    }
+
+    public function testAPathParamBesideAFieldOfEitherShapeTakesTheFieldHeldToTheRoute(): void
+    {
+        // `id` takes a record's id or the fields to make one: a string or an object, neither of them
+        // the whole number the segment is alone.
+        $name = new CollectedFormField(name: 'name', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null);
+        $id = new CollectedFormField(name: 'id', formTypeClass: 'App\\PersonType', required: false, mapped: true, compound: true, dataClass: 'App\\Person', children: [$name]);
+        $schema = $this->pathAndBodyTool([new CollectedPathParam('id', 'number', '[0-9]+', false)], [$id], $this->shape('array{id?: string|array{name?: string}}'));
+
+        self::assertSame(['pattern' => '^(?:[0-9]+)$'], $schema['properties']['id']['allOf'][0] ?? null);
+        self::assertArrayHasKey('anyOf', $schema['properties']['id']['allOf'][1] ?? []);
+    }
+
+    public function testAQueryFieldAndABodyFieldOfOneNameHoldToBoth(): void
+    {
+        // One argument of the name, held to each — as before a path param took part.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $queryMode = new CollectedFormField(name: 'mode', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null);
+        $bodyMode = new CollectedFormField(name: 'mode', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\IntegerType', required: false, mapped: true, compound: false, dataClass: null);
+
+        $schema = $this->pathAndBodyTool([], [$bodyMode], $this->shape('array{mode?: int}'), [$queryMode], $this->shape('array{mode?: string}'));
+        self::assertSame(['allOf' => [['type' => 'string'], ['type' => 'integer']]], $schema['properties']['mode']);
+
+        // With a path param of the name too, the path is judged beside both fields.
+        $schema = $this->pathAndBodyTool([new CollectedPathParam('mode', 'string', '[a-z]+', false)], [$bodyMode], $this->shape('array{mode?: int}'), [$queryMode], $this->shape('array{mode?: string}'));
+        self::assertSame(['allOf' => [['pattern' => '^(?:[a-z]+)$'], ['type' => 'string'], ['type' => 'integer']]], $schema['properties']['mode']);
     }
 
     public function testAFieldLeftOutOfAnyWriteIsSubmittedBlankWithClearMissing(): void
@@ -2221,6 +2249,35 @@ final class McpManifestBuilderTest extends TestCase
         );
 
         return (new McpManifestBuilder(clearMissing: $clearMissing, typeAliases: $typeAliases))->build(['projects' => [$endpoint]])['tools'][0];
+    }
+
+    /**
+     * The input schema of a POST tool whose path takes these params, whose body these fields, and
+     * whose query those.
+     *
+     * @param list<CollectedPathParam> $pathParams
+     * @param list<CollectedFormField> $bodyFields
+     * @param list<CollectedFormField> $queryFields
+     *
+     * @return array<string, mixed>
+     */
+    private function pathAndBodyTool(array $pathParams, array $bodyFields, ShapeType $bodyContract, array $queryFields = [], ?ShapeType $queryContract = null): array
+    {
+        $endpoint = new CollectedEndpointContract(
+            name: 'saveThing',
+            domain: 'things',
+            controllerClass: 'App\\ThingController',
+            methodName: '__invoke',
+            responses: [],
+            request: new CollectedEndpointRequest(
+                query: [] === $queryFields ? null : new CollectedInputReference(null, 'App\\ThingQuery', 'ThingQuery', 'things', $queryFields, $queryContract),
+                body: new CollectedInputReference(null, 'App\\ThingData', 'ThingData', 'things', $bodyFields, $bodyContract),
+                pathParams: [] === $pathParams ? null : $pathParams,
+            ),
+            mcp: new CollectedMcpTool(name: 'saveThing', description: 'Save a thing.', httpMethod: 'POST', httpPath: '/things/{mode}', destructive: false),
+        );
+
+        return (new McpManifestBuilder())->build(['things' => [$endpoint]])['tools'][0]['inputSchema'];
     }
 
     private function response(int $status): CollectedApiResponseClass

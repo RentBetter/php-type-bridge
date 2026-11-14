@@ -17,6 +17,7 @@ use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\UppercasedCodeTy
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectNoteType;
+use PTGS\TypeBridge\Tests\Fixture\OwnConstraintFixtures\Notes\Form\OwnConstraintsType;
 use PTGS\TypeBridge\Tests\Fixture\RequiredQueryFixtures\Reports\Form\ReportStatusType;
 use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NestedBrokenRequestType;
 use PTGS\TypeBridge\Tests\InvalidFixture\Fixtures\Inspector\Form\NonContractRootType;
@@ -41,6 +42,17 @@ final class FormTypeInspectorTest extends TestCase
         $fields = $inspector->inspect(CountedBlankType::class, blanks: true)['fields'];
         self::assertSame('none', $fields[0]->blankValue);
         self::assertSame('none', $fields[1]->entryBlankValue);
+    }
+
+    public function test_a_field_is_refused_missing_where_its_own_constraints_hold_a_not_blank_at_their_top(): void
+    {
+        // As a processor submitting with `clearMissing` off asks of a field left out: the top of its
+        // own `constraints` option, whatever their groups — not inside a Sequentially.
+        $fields = array_column((new FormTypeInspector())->inspect(OwnConstraintsType::class)['fields'], null, 'name');
+
+        self::assertTrue($fields['plain']->refusedMissing);
+        self::assertFalse($fields['nested']->refusedMissing);
+        self::assertTrue($fields['grouped']->refusedMissing);
     }
 
     public function test_it_inspects_contract_form_types_and_nested_custom_forms(): void

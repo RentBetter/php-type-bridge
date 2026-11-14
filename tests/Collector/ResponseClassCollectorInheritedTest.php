@@ -529,6 +529,14 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::emit(self::fixtures('InheritedClassTypedFixtures'));
     }
 
+    public function test_self_in_a_binding_a_trait_writes_is_the_class_using_it(): void
+    {
+        // Outer binds Inner's param to `self::KIND_*`: the constants of the response using Outer.
+        $notes = self::emit(self::fixtures('TraitSelfBindingFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface ShowKindResponse {\n  kind: 'a' | 'b';\n}", $notes);
+    }
+
     public function test_self_in_a_traits_property_is_the_class_using_it(): void
     {
         // As PHP and PHPStan read it: a trait's `self::` is whichever class uses the trait, so its
