@@ -1071,7 +1071,7 @@ final class EndpointContractCollector
         }
         // Declared `?T`, it is emitted `T`, an alias's and a class's `_self` alike: a key typed with
         // it is no key left out when null.
-        $parsed = $parsed instanceof NullableType && $parsed->optional ? $parsed->inner : $parsed;
+        $parsed = ShapeField::declared($parsed);
 
         $cutAt = \count($this->cutAt);
         $outer = $this->through;
@@ -1100,7 +1100,10 @@ final class EndpointContractCollector
     private function configAliasAdmitsNull(string $name): bool
     {
         $type = $this->typeAliases[$name];
-        $admits = $this->configAliasesAdmittingNull[$name] ??= TypeScriptTypes::admitsNull($type, $this->typeAliases);
+        if (!\array_key_exists($name, $this->configAliasesAdmittingNull)) {
+            $this->configAliasesAdmittingNull[$name] = TypeScriptTypes::admitsNull($type, $this->typeAliases);
+        }
+        $admits = $this->configAliasesAdmittingNull[$name];
         if (null !== $admits || !$this->forTool) {
             return $admits ?? false;
         }

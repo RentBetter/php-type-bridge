@@ -17,6 +17,9 @@ use Symfony\Component\Routing\Attribute\Route as RouteAttribute;
 
 final class ApiMethodInspector
 {
+    /** @var array<string, bool> by attribute class, whether it is Symfony's #[Route] or one extending it */
+    private static array $symfonyRoutes = [];
+
     /** What each controller's attributes route it at, read once per class. */
     private readonly DeclaredRoutes $declaredRoutes;
 
@@ -124,7 +127,8 @@ final class ApiMethodInspector
      */
     private static function isSymfonyRoute(string $name): bool
     {
-        return RouteAttribute::class === $name || (PhpFileClassLocator::loads($name) && is_a($name, RouteAttribute::class, true));
+        // Asked of every attribute of every method each rule inspects: the autoloader once a name.
+        return self::$symfonyRoutes[$name] ??= RouteAttribute::class === $name || (PhpFileClassLocator::loads($name) && is_a($name, RouteAttribute::class, true));
     }
 
     /**

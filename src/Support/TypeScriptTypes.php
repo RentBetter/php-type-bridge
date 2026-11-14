@@ -16,6 +16,8 @@ final class TypeScriptTypes
         'Array', 'ReadonlyArray', 'Record', 'Promise', 'Map', 'Set', 'ReadonlyMap', 'ReadonlySet', 'WeakMap', 'WeakSet',
         'Date', 'RegExp', 'Error', 'Function', 'Object', 'String', 'Number', 'Boolean', 'BigInt', 'Symbol',
         'PropertyKey', 'NonNullable', 'Uppercase', 'Lowercase', 'Capitalize', 'Uncapitalize',
+        // Each maps the keys it is given to an object, whatever it is given.
+        'Pick', 'Omit',
     ];
 
     /**

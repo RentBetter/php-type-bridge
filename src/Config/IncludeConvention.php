@@ -99,6 +99,9 @@ final readonly class IncludeConvention
      */
     public function isIncluded(ParsedType $type): bool
     {
+        // Read in another file's scope — a template param bound there — it is still what it wraps.
+        $type = ParsedTypes::unscoped($type);
+
         return $type instanceof GenericType && $this->isIncludeType($type->name);
     }
 

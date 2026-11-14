@@ -60,6 +60,9 @@ final readonly class CollectedFormField
      * @param mixed                    $initialValue   what a new object of the data class holds at that property:
      *                                                 its default, or a promoted one's from the constructor; null
      *                                                 where it declares none, as the validator reads one never set
+     * @param bool                     $entryCompound  whether a collection's entry type is a form of fields, so
+     *                                                 one with a data class and none of its own reads an object
+     *                                                 whole; not a file input or a scalar type with a data class
      * @param bool                     $refusedMissing whether its own `constraints` option holds a NotBlank or a
      *                                                 NotNull at its top, in any group: all a processor submitting
      *                                                 with `clearMissing` off asks of a field left out, which
@@ -95,6 +98,7 @@ final readonly class CollectedFormField
         public array $heldConstraints = [],
         public mixed $initialValue = null,
         public bool $refusedMissing = false,
+        public bool $entryCompound = false,
     ) {}
 
     /**
@@ -136,6 +140,7 @@ final readonly class CollectedFormField
             heldConstraints: $this->heldConstraints,
             initialValue: $this->initialValue,
             refusedMissing: $this->refusedMissing,
+            entryCompound: $this->entryCompound,
         );
     }
 }

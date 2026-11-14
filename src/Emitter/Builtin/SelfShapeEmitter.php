@@ -124,7 +124,7 @@ final class SelfShapeEmitter implements TypeEmitter
         // An included key is absent unless the request asks for it, whatever its PHP spelling.
         $optional = $field->mayBeLeftOut() || $context->converter->isIncluded($field->type);
         // `key: ?T` is emitted `key?: T`: left out, not sent as null.
-        $type = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
+        $type = ShapeField::declared($field->type);
 
         return \sprintf('  %s%s: %s;', TypeToTsConverter::propertyName($field->name), $optional ? '?' : '', $context->convert($type, $scope));
     }

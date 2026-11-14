@@ -248,7 +248,7 @@ final readonly class TypeToTsConverter
             $fields = array_map(function (ShapeField $field) use ($scope): string {
                 $optional = $field->mayBeLeftOut() || $this->isIncluded($field->type);
                 // `key: ?T` is emitted `key?: T`: left out, not sent as null.
-                $fieldType = $field->type instanceof NullableType && $field->type->optional ? $field->type->inner : $field->type;
+                $fieldType = ShapeField::declared($field->type);
 
                 return \sprintf('%s%s: %s', self::propertyName($field->name), $optional ? '?' : '', $this->convert($fieldType, $scope));
             }, $type->fields);

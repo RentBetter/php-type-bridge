@@ -192,6 +192,7 @@ final class FormTypeInspector
                 heldConstraints: $heldConstraints,
                 initialValue: self::initialValue($property),
                 refusedMissing: self::refusedMissing($own),
+                entryCompound: null !== $entry && $entry->getCompound(),
             );
         }
 

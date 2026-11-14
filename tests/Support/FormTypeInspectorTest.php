@@ -89,6 +89,7 @@ final class FormTypeInspectorTest extends TestCase
         self::assertSame(ProjectNoteType::class, $notes->entryTypeClass);
         self::assertSame([], $notes->children);
         self::assertSame(['text', 'author'], array_map(static fn ($field) => $field->name, $notes->entryChildren));
+        self::assertTrue($notes->entryCompound, 'Its entry is a form of fields');
         self::assertTrue($notes->entryChildren[0]->required);
         self::assertFalse($notes->entryChildren[1]->required);
         // What a field's constraints refuse is read as well as what its form says.
@@ -98,6 +99,7 @@ final class FormTypeInspectorTest extends TestCase
         // A scalar entry has no fields to collect.
         self::assertSame('labels', $labels->name);
         self::assertSame(TextType::class, $labels->entryTypeClass);
+        self::assertFalse($labels->entryCompound);
         self::assertSame([], $labels->entryChildren);
         self::assertFalse($labels->required);
     }

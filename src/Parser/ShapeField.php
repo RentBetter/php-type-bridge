@@ -73,13 +73,14 @@ final readonly class ShapeField
         }
 
         // Required: a `?T` either side wrote is a key left out when null, which it no longer may be.
-        return new self($own->name, $type instanceof NullableType && $type->optional ? $type->inner : $type, false);
+        return new self($own->name, self::declared($type), false);
     }
 
     /**
-     * The type a key's value is, its `?` aside: `?T`'s `T`.
+     * The type a key's value is, its `?` aside: `?T`'s `T` — what `key: ?T` is emitted as (`key?: T`),
+     * and what an alias or a `_self` declared `?T` is.
      */
-    private static function declared(ParsedType $type): ParsedType
+    public static function declared(ParsedType $type): ParsedType
     {
         return $type instanceof NullableType && $type->optional ? $type->inner : $type;
     }

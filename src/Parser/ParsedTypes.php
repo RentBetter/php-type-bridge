@@ -35,6 +35,19 @@ final class ParsedTypes
     }
 
     /**
+     * The type a scope holds, however many wrap it ({@see ScopedType}): what a reader of its shape —
+     * is it an include generic, a `?T` — looks at, wherever it was written.
+     */
+    public static function unscoped(ParsedType $type): ParsedType
+    {
+        while ($type instanceof ScopedType) {
+            $type = $type->inner;
+        }
+
+        return $type;
+    }
+
+    /**
      * The type made of these parts in place of its own ({@see self::children()}), in the same order:
      * the type itself where it has none.
      *

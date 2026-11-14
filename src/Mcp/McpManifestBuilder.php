@@ -258,9 +258,8 @@ final class McpManifestBuilder
             $schema['properties'] = self::properties($properties);
         }
         if ([] !== $required) {
-            // Each name once: a path param and a body field may share one, and the meta-schema
-            // holds `required` to unique items.
-            $schema['required'] = array_values(array_unique($required));
+            // Each name once, as the meta-schema holds `required` to: each argument goes to one place.
+            $schema['required'] = $required;
         }
 
         // A name a path param takes is the path's.
@@ -487,6 +486,11 @@ final class McpManifestBuilder
         // one of its choices.
         if ('string' === $schema['type'] && null === $field->choiceValues && !isset($pattern['pattern']) && $this->refusesBlank($field)) {
             $bounds['minLength'] = max($bounds['minLength'] ?? 0, 1);
+        }
+        // `[]` is submitted as the list's blank: where that is refused — a NotBlank on a collection
+        // or a multiple choice — at least one item.
+        if ('array' === $schema['type'] && $this->refusesBlank($field)) {
+            $bounds['minItems'] = max($bounds['minItems'] ?? 0, 1);
         }
         // A blank the server takes is submitted null, which a Length skips: its minimum holds the
         // values that aren't blank.
@@ -779,9 +783,10 @@ final class McpManifestBuilder
     private function entrySchema(CollectedFormField $field, ?ParsedType $item = null, bool $json = false, bool $makes = false): array
     {
         // An entry its type reads whole is the shape the list declares of it — an object, where its
-        // class's shape can't be said here.
+        // class's shape can't be said here, and its type is a form of fields. One that isn't — a file
+        // input, a scalar type with a data class — is the value it reads.
         $shape = self::declaredShape($item);
-        if ([] === $field->entryChildren && (null !== $shape || null !== $field->entryDataClass)) {
+        if ([] === $field->entryChildren && (null !== $shape || ($field->entryCompound && null !== $field->entryDataClass))) {
             return (null === $shape ? null : $this->shapeSchema($shape, $json)) ?? ['type' => 'object'];
         }
 
