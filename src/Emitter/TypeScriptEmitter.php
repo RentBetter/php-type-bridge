@@ -255,7 +255,7 @@ final class TypeScriptEmitter
     public function emit(array $domains, array $responses = [], array $contracts = []): array
     {
         // A map keyed by an alias keyed as the alias is: known here, where every module's aliases are.
-        $keys = new AliasedMapKeys($domains);
+        $keys = new AliasedMapKeys($domains, $this->typeAliases);
         $domains = $keys->inDomains($domains);
         $responses = $keys->inResponses($responses);
 
@@ -786,7 +786,10 @@ final class TypeScriptEmitter
     }
 
     /**
-     * Every enum the types and responses name, each under the module it is declared in.
+     * Every enum the types and responses name, each under the module it is declared in: by
+     * `value-of<…>`, or by its class where it is written as its value ({@see ClassTypeResolver::writtenAsItsValue()})
+     * — a native `Status $status`, a key `status: Status` — and no alias of the module the name is
+     * written in has the name, which would win.
      *
      * @param array<string, CollectedDomain>                 $domains
      * @param array<string, list<CollectedApiResponseClass>> $responses
@@ -795,30 +798,42 @@ final class TypeScriptEmitter
      */
     private function referencedEnums(array $domains, array $responses): array
     {
+        /** @var list<array{ParsedType, string|null}> $types each with the module whose aliases its names are */
         $types = [];
+        $aliases = [];
         foreach ($domains as $collected) {
             foreach ($collected->types as $type) {
-                $types[] = $type->parsed;
+                $types[] = [$type->parsed, $type->domain];
+                $aliases[$type->domain][$type->name] = true;
             }
         }
-        foreach ($responses as $domainResponses) {
+        foreach ($responses as $domain => $domainResponses) {
             foreach ($domainResponses as $response) {
                 foreach ($response->properties as $property) {
-                    $types[] = $property->parsed;
+                    $types[] = [$property->parsed, $property->writtenInDomain ?? $domain];
                 }
             }
         }
 
         $enums = [];
         while ([] !== $types) {
-            $type = array_pop($types);
-            if ($type instanceof ValueOfType) {
-                $enum = $this->enumResolver->resolveFqcn($type->enumClass);
+            [$type, $domain] = array_pop($types);
+            $named = match (true) {
+                $type instanceof ValueOfType => $type->enumClass,
+                $type instanceof NameRefType && null !== $type->class && !isset($this->typeAliases[$type->name])
+                    && (null === $domain || !isset($aliases[$domain][$type->name])) && ClassTypeResolver::writtenAsItsValue($type->class) => $type->class,
+                default => null,
+            };
+            if (null !== $named) {
+                $enum = $this->enumResolver->resolveFqcn($named);
                 $enums[$this->enumResolver->getDomain($enum)][$enum] = $enum;
 
                 continue;
             }
-            array_push($types, ...ParsedTypes::children($type));
+            // Written in another file: its names are that file's module's — none, outside the tree.
+            foreach (ParsedTypes::children($type) as $child) {
+                $types[] = [$child, $type instanceof ScopedType ? $type->domain : $domain];
+            }
         }
 
         $byDomain = [];

@@ -211,7 +211,9 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         $output = self::emit(self::fixtures('LibraryEnumFixtures'));
 
         self::assertStringContainsString("export type Status = 'live' | 'gone';", $output['Common'] ?? '');
-        self::assertStringContainsString("export interface ShowNoteResponse {\n  status: CommonStatus;\n}", $output['Notes']);
+        self::assertStringContainsString("import type { Status } from '../Common/genTypes';", $output['Notes']);
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  status: Status;\n}", $output['Notes']);
+        self::assertStringNotContainsString("'draft'", $output['Notes'], "Not the application's Status");
     }
 
     public function test_a_property_typed_with_a_backed_enum_is_its_values(): void
@@ -546,6 +548,35 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         $notes = self::emit(self::fixtures('TraitSelfBindingFixtures'))['Notes'];
 
         self::assertStringContainsString("export interface ShowKindResponse {\n  kind: 'a' | 'b';\n}", $notes);
+    }
+
+    public function test_an_enum_that_serialises_itself_is_no_values_of_its_own(): void
+    {
+        // Badge's jsonSerialize() writes an object, which only a `_self` could say: it fails, saying so.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Badge.*`_self`/s');
+
+        self::emit(self::fixtures('SelfSerialisingEnumFixtures'));
+    }
+
+    public function test_a_modules_alias_of_an_enums_name_wins_and_the_enum_is_not_declared(): void
+    {
+        // TaskView's bare `Status` is Notes' alias, not the Common enum its `use` names: Common is
+        // written for nothing.
+        $output = self::emit(self::fixtures('AliasOverEnumFixtures'));
+
+        self::assertStringContainsString("export interface Task {\n  status: Status;\n}", $output['Notes']);
+        self::assertArrayNotHasKey('Common', $output);
+    }
+
+    public function test_an_enum_a_binding_names_is_read_in_the_module_of_the_file_that_writes_it(): void
+    {
+        // The base is Common's, which has an alias `Status`; the binding is Notes', whose `Status` is
+        // its enum: declared in Notes.
+        $notes = self::emit(self::fixtures('ScopedEnumFixtures'))['Notes'];
+
+        self::assertStringContainsString("export type Status = 'open' | 'shut';", $notes);
+        self::assertStringContainsString("export interface ShowValueResponse {\n  value: Status;\n}", $notes);
     }
 
     public function test_self_in_a_traits_property_is_the_class_using_it(): void

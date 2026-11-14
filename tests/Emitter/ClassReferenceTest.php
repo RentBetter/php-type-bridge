@@ -89,15 +89,15 @@ final class ClassReferenceTest extends TestCase
 
     /**
      * The built-in conventions both claim an enum that declares an alias, at equal priority. They
-     * publish no type, so they have no say in what it is called: the error is the missing shape,
-     * not the tie.
+     * publish no type, so they have no say in what it is called — nor need to: a backed enum that
+     * doesn't serialise itself is written as its value, so a key typed with it is its values.
      */
-    public function test_an_enum_only_built_in_conventions_claim_is_the_missing_shape_error(): void
+    public function test_an_enum_only_built_in_conventions_claim_is_its_values(): void
     {
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/Priority.*`_self`/s');
+        $plain = self::emit(__DIR__ . '/../Fixture/ClassRefUnclaimedFixtures')['Plain'];
 
-        self::emit(__DIR__ . '/../Fixture/ClassRefUnclaimedFixtures');
+        self::assertStringContainsString("export type Priority = 'low' | 'high';", $plain);
+        self::assertStringContainsString("export interface Pick {\n  priority: Priority;\n}", $plain);
     }
 
     /**

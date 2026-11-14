@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Emitter;
 
+use BackedEnum;
+use JsonSerializable;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
@@ -104,6 +106,12 @@ final class ClassTypeResolver
             return $this->rootSources->place($emitter->typeSymbol($reflection), $reflection);
         }
 
+        // A backed enum that doesn't serialise itself is written as its backing value: its values, as
+        // `value-of<…>` names them, declared in its module ({@see TypeScriptEmitter::emit()}).
+        if (self::writtenAsItsValue($class)) {
+            return new EmitImport($this->names->enumDomain($class), $this->names->enumName($class));
+        }
+
         throw new RuntimeException(\sprintf(
             'A shape names %s as a type, meaning the JSON it serialises to, but neither it nor a parent or '
             . 'interface declares a `_self` shape in the source tree, and no emitter publishes a type for it. Give it a '
@@ -111,6 +119,15 @@ final class ClassTypeResolver
             . 'never serialised, mark that shape\'s class #[PhpStanOnly].',
             $class,
         ));
+    }
+
+    /**
+     * Whether the class is a backed enum json_encode writes as its backing value: one that doesn't
+     * serialise itself (JsonSerializable).
+     */
+    public static function writtenAsItsValue(string $class): bool
+    {
+        return PhpFileClassLocator::loadsEnum($class) && is_subclass_of($class, BackedEnum::class) && !is_subclass_of($class, JsonSerializable::class);
     }
 
     /**

@@ -124,8 +124,9 @@ final class ResponseClassCollector
 
             $this->statusCodeResolver->assertResponseClass($reflection);
             $context = $withProperties ? $this->typeContext($className, $file, $srcDir, $classFiles) : ['imports' => []];
-            // A status alone is read off the class: its file's types are none of it.
-            if (null === $context || ($withProperties && !$this->files->readable($file))) {
+            // A status alone is read off the class: its file's types are none of it. One whose file
+            // can't be read has no context.
+            if (null === $context) {
                 continue;
             }
 

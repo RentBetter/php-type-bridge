@@ -315,8 +315,8 @@ final class PhpDocTypeHelper
     /**
      * A type written outside the source tree, its enums as that file names them: `value-of<Status>`
      * is the Status its `use` statements and namespace resolve, spelt in full, not whichever enum of
-     * the source tree has that short name. One outside the source tree is never emitted, so a type
-     * naming it fails, with why.
+     * the source tree has that short name. One outside the source tree is emitted as one the source
+     * tree names is; a name that is no enum this install can load fails, with why.
      *
      * @param array<string, string> $classImports the file's `use` statements ({@see self::classImports()})
      * @param array<string, string> $classFiles   the source tree's classes
@@ -328,8 +328,8 @@ final class PhpDocTypeHelper
                 return $leaf;
             }
             $enum = $this->resolveClassName($leaf->enumClass, $ownerClass, $classImports) ?? ltrim($leaf->enumClass, '\\');
-            if (!isset($classFiles[$enum])) {
-                throw new RuntimeException(\sprintf('`%s` names %s, outside the source tree: an enum TypeBridge never emits. %s', $leaf->enumClass, $enum, $why));
+            if (!isset($classFiles[$enum]) && !PhpFileClassLocator::loadsEnum($enum)) {
+                throw new RuntimeException(\sprintf('`%s` names %s, which is no enum this install can load. %s', $leaf->enumClass, $enum, $why));
             }
 
             return $leaf instanceof ValueOfType ? new ValueOfType($enum) : new IdOfType($enum);

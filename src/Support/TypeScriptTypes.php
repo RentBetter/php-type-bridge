@@ -65,6 +65,24 @@ final class TypeScriptTypes
     }
 
     /**
+     * Whether the type is every key an array has, as `Record<K, V>` reads its K: a union of a
+     * `string` and a `number`, read through the config's aliases — `string | number`, `PropertyKey` —
+     * or anything at all (`any`, `unknown`).
+     *
+     * @param array<string, string> $aliases the config's aliases, name => TypeScript
+     */
+    public static function isAnyKey(string $type, array $aliases = []): bool
+    {
+        $members = [];
+        foreach (self::split(self::standsFor($type, $aliases) ?? trim($type), '|') as $member) {
+            $member = trim($member);
+            $members[self::standsFor($member, $aliases) ?? $member] = true;
+        }
+
+        return isset($members['PropertyKey']) || isset($members['any']) || isset($members['unknown']) || (isset($members['string']) && isset($members['number']));
+    }
+
+    /**
      * The TypeScript a project-wide alias stands for, through any alias it names in turn; null where
      * the type is no such alias.
      *
