@@ -814,24 +814,18 @@ final class PhpDocTypeHelper
      */
     public function scoped(ParsedType $type, array $imports, ?string $domain): ParsedType
     {
-        if ($type instanceof NullableType) {
-            return new NullableType($this->scoped($type->inner, $imports, $domain), $type->optional);
-        }
-        if ($type instanceof UnionType) {
-            return new UnionType(array_map(fn (ParsedType $member): ParsedType => $this->scoped($member, $imports, $domain), $type->types));
-        }
-
-        $intersects = false;
-        for ($types = [$type]; [] !== $types && !$intersects;) {
-            $part = array_pop($types);
-            $intersects = $part instanceof IntersectionType;
-            array_push($types, ...ParsedTypes::children($part));
-        }
-        if ($intersects) {
+        // An intersection is a name and a shape by syntax: read whole where it is written.
+        if ($type instanceof NameRefType || $type instanceof IntersectionType) {
             return new ScopedType($type, $imports, $domain);
         }
+        if ($type instanceof ScopedType) {
+            return $type;
+        }
 
-        return $this->mapLeaves($type, static fn (ParsedType $leaf): ParsedType => $leaf instanceof NameRefType ? new ScopedType($leaf, $imports, $domain) : $leaf);
+        $parts = ParsedTypes::children($type);
+        $scoped = array_map(fn (ParsedType $part): ParsedType => $this->scoped($part, $imports, $domain), $parts);
+
+        return $scoped === $parts ? $type : ParsedTypes::withChildren($type, $scoped);
     }
 
     /**

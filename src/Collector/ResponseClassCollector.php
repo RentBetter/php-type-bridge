@@ -10,7 +10,6 @@ use PTGS\TypeBridge\Model\CollectedResponseProperty;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
-use PTGS\TypeBridge\Parser\ParsedTypes;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
@@ -180,7 +179,7 @@ final class ResponseClassCollector
                     // `?T` is the TS-optional form, as it is in a `_self` shape: the key is left off
                     // the wire when null (a side-load not asked for). `T|null` parses as a required
                     // nullable and stays a key that is always present.
-                    optional: ParsedTypes::unscoped($parsed) instanceof NullableType && ParsedTypes::unscoped($parsed)->optional,
+                    optional: $parsed instanceof NullableType && $parsed->optional,
                     imports: array_values($declared['imports']),
                     writtenIn: $declaringClass === $className ? null : $declaringClass,
                     writtenInDomain: $declaringClass === $className ? null : $declared['domain'],

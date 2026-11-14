@@ -39,11 +39,16 @@ final class TypeScriptTypes
     {
         $type = trim($type);
         $top = self::topLevel($type);
-        if (str_contains($top, '=>')) {
-            return false;
-        }
-        if (str_contains($top, '?')) {
+        // A conditional — its `?` ahead of any arrow, which may be one of its branches — is what tsc
+        // would have to evaluate; a function — its arrow ahead, a conditional maybe its return — is
+        // none of its return's nulls.
+        $conditional = strpos($top, '?');
+        $arrow = strpos($top, '=>');
+        if (false !== $conditional && (false === $arrow || $conditional < $arrow)) {
             return null;
+        }
+        if (false !== $arrow) {
+            return false;
         }
 
         $admits = false;

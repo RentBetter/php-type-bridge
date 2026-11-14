@@ -44,11 +44,12 @@ final readonly class MapType extends ParsedType
 
     private static function isKey(ParsedType $type): bool
     {
+        $type = ParsedTypes::unscoped($type);
+
         return match (true) {
             $type instanceof ScalarType => \in_array($type->base(), ['int', 'string', 'array-key', 'float', 'numeric'], true),
             $type instanceof LiteralType => \is_int($type->value) || \is_string($type->value),
             $type instanceof UnionType => array_all($type->types, self::isKey(...)),
-            $type instanceof ScopedType => self::isKey($type->inner),
             default => $type instanceof NameRefType || $type instanceof ValueOfType || $type instanceof IdOfType || $type instanceof ClassConstantType,
         };
     }
@@ -67,8 +68,6 @@ final readonly class MapType extends ParsedType
             $member = array_pop($types);
             if ($member instanceof UnionType) {
                 array_push($types, ...$member->types);
-            } elseif ($member instanceof ScopedType) {
-                $types[] = $member->inner;
             } elseif ($member instanceof ScalarType) {
                 $bases['numeric-string' === $member->type || 'numeric' === $member->base() ? 'array-key' : $member->base()] = true;
             }

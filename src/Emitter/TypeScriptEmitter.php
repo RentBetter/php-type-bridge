@@ -143,8 +143,16 @@ final class TypeScriptEmitter
         type ExpandBelow<P extends string, K extends string> = P extends `${K}.${infer Rest}` ? Rest : never;
         TS;
 
-    /** The global types of TypeScript's the generated code writes: a module type of one of these names would shadow it. */
-    private const array TYPESCRIPT_GLOBALS = ['Array', 'Exclude', 'NonNullable', 'Omit', 'Record'];
+    /**
+     * The global generics of TypeScript's the generated code may write — the helpers', and those a
+     * config alias's TypeScript may: a module type of one of these names would shadow it.
+     */
+    private const array TYPESCRIPT_GLOBALS = [
+        'Array', 'ReadonlyArray', 'Record', 'Partial', 'Required', 'Readonly', 'Pick', 'Omit', 'Exclude', 'Extract',
+        'NonNullable', 'Parameters', 'ConstructorParameters', 'ReturnType', 'InstanceType', 'Awaited', 'NoInfer',
+        'Promise', 'Map', 'Set', 'ReadonlyMap', 'ReadonlySet', 'WeakMap', 'WeakSet',
+        'Uppercase', 'Lowercase', 'Capitalize', 'Uncapitalize',
+    ];
 
     /** The include and expand helpers by what each is for, in the order they are declared. */
     private const array INCLUDE_HELPERS = ['including' => self::WITH_INCLUDES_HELPER, 'expanding' => self::WITH_EXPANDS_HELPER];

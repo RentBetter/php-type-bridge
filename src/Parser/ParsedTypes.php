@@ -35,8 +35,8 @@ final class ParsedTypes
     }
 
     /**
-     * The type a scope holds, however many wrap it ({@see ScopedType}): what a reader of its shape —
-     * is it an include generic, a `?T` — looks at, wherever it was written.
+     * The type a scope holds, however many wrap it ({@see ScopedType}): a name, or an intersection,
+     * read where it was written.
      */
     public static function unscoped(ParsedType $type): ParsedType
     {

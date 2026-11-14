@@ -55,6 +55,15 @@ final class PhpDocTypeHelperScopeTest extends TestCase
         self::assertInstanceOf(ScopedType::class, $list->inner);
     }
 
+    public function test_a_type_scoped_already_keeps_its_scope(): void
+    {
+        // A param a base passes on is bound in the file that binds it: read in the base's file as
+        // well, its names are still that file's.
+        $bound = new ScopedType(new NameRefType('Tag'), [], 'Common');
+
+        self::assertSame($bound, (new PhpDocTypeHelper())->scoped($bound, [], 'Notes'));
+    }
+
     public function test_a_name_is_the_class_php_resolves_it_to(): void
     {
         // A `use` names the class whether it exists or not: none of that name is no class, not the
