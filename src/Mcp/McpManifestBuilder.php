@@ -177,12 +177,7 @@ final class McpManifestBuilder
         if ([] !== $mcp->scopes) {
             $tool['scopes'] = $mcp->scopes;
         }
-        $tool['inputSchema'] = $this->inputSchema($contract, $mcp->httpMethod);
-
-        // A name a path param takes is the path's ({@see self::inputSchema()}).
-        $query = array_map(static fn (CollectedFormField $field): string => $field->name, $contract->request?->query->fields ?? []);
-        $path = array_map(static fn (CollectedPathParam $param): string => $param->name, $contract->request->pathParams ?? []);
-        $query = array_values(array_diff(array_unique([...$query, ...array_keys($this->includeQuery($contract))]), $path));
+        ['schema' => $tool['inputSchema'], 'query' => $query] = $this->arguments($contract, $mcp->httpMethod);
         if ([] !== $query) {
             $tool['query'] = $query;
         }
@@ -202,16 +197,20 @@ final class McpManifestBuilder
     }
 
     /**
-     * @return array<string, mixed>
+     * The tool's arguments: its input schema, and those of them it sends in the query string. Each
+     * argument goes to one place, as the manifest tells a client to send it: the path where it names
+     * a path param, the query string where `query` lists it, the body otherwise.
+     *
+     * @return array{schema: array<string, mixed>, query: list<string>}
      */
-    private function inputSchema(CollectedEndpointContract $contract, string $httpMethod): array
+    private function arguments(CollectedEndpointContract $contract, string $httpMethod): array
     {
         $properties = [];
         $required = [];
+        $includes = $this->includeQuery($contract);
+        $inQuery = [];
 
-        // Each argument goes to one place, as a client sends it: the path where it names a path param,
-        // the query string where the tool lists it a query parameter, the body otherwise. By name,
-        // the place an argument goes to, once one does.
+        // By name, the place its argument goes to, once one does.
         $taken = [];
         $request = $contract->request;
         if (null !== $request) {
@@ -231,22 +230,24 @@ final class McpManifestBuilder
 
             $query = [];
             $queryRequired = [];
+            $queryRefused = [];
             $body = [];
             $bodyRequired = [];
+            $bodyRefused = [];
             // With `clearMissing` on, a field left out is submitted blank — `$form->submit($data)`
             // submits a query and a body so, whatever the method — and so required where that is
             // refused. With it off it isn't submitted, and is held to what its new object holds:
             // a query's filter object is new on every request, a body's only on a POST.
-            $this->addFields($request->query, $query, $queryRequired, makes: true);
-            $this->addFields($request->body, $body, $bodyRequired, makes: $this->clearMissing || 'POST' === strtoupper($httpMethod), json: true);
-            self::place($contract, 'query', $query, $queryRequired, $properties, $required, $taken);
-            foreach ([...array_keys($query), ...array_keys($this->includeQuery($contract))] as $name) {
+            $this->addFields($request->query, $query, $queryRequired, $queryRefused, makes: true);
+            $this->addFields($request->body, $body, $bodyRequired, $bodyRefused, makes: $this->clearMissing || 'POST' === strtoupper($httpMethod), json: true);
+            $inQuery = self::place($contract, 'query', $query, $queryRequired, $queryRefused, $properties, $required, $taken);
+            foreach ([...$inQuery, ...array_keys($includes)] as $name) {
                 $taken[$name] ??= 'the query parameter ' . $name;
             }
-            self::place($contract, 'body', $body, $bodyRequired, $properties, $required, $taken);
+            self::place($contract, 'body', $body, $bodyRequired, $bodyRefused, $properties, $required, $taken);
         }
 
-        foreach ($this->includeQuery($contract) as $name => $description) {
+        foreach ($includes as $name => $description) {
             $properties[$name] ??= ['type' => 'string', 'description' => $description];
         }
 
@@ -262,7 +263,10 @@ final class McpManifestBuilder
             $schema['required'] = array_values(array_unique($required));
         }
 
-        return $schema;
+        // A name a path param takes is the path's.
+        $path = array_keys(array_filter($taken, static fn (string $place): bool => str_starts_with($place, '{')));
+
+        return ['schema' => $schema, 'query' => array_values(array_diff(array_unique([...$inQuery, ...array_keys($includes)]), $path))];
     }
 
     /**
@@ -272,6 +276,7 @@ final class McpManifestBuilder
      *
      * @param array<array-key, array<string, mixed>> $properties
      * @param list<string>         $required
+     * @param list<string>         $refused    those the server refuses left out: ones `$makes` holds to it
      * @param bool                 $makes      whether a field left out is held to what refuses it: one
      *                                         submitted blank with `clearMissing` on, or a POST body's,
      *                                         which makes something, so one its constraints refuse blank
@@ -279,7 +284,7 @@ final class McpManifestBuilder
      * @param bool                 $json       whether the fields are sent as JSON (a body), which can carry a
      *                                         null; a query string cannot
      */
-    private function addFields(?CollectedInputReference $reference, array &$properties, array &$required, bool $makes = false, bool $json = false): void
+    private function addFields(?CollectedInputReference $reference, array &$properties, array &$required, array &$refused, bool $makes = false, bool $json = false): void
     {
         if (null === $reference) {
             return;
@@ -292,7 +297,11 @@ final class McpManifestBuilder
             if ($json && $this->takesNull($key, $field)) {
                 $properties[$field->name] = self::withNull($properties[$field->name]);
             }
-            if ($this->isRequired($field, $key, inQuery: !$json) || ($makes && $this->refusesLeftOut($field, body: $json))) {
+            $refusedLeftOut = $makes && $this->refusesLeftOut($field, body: $json);
+            if ($refusedLeftOut) {
+                $refused[] = $field->name;
+            }
+            if ($refusedLeftOut || $this->isRequired($field, $key, inQuery: !$json)) {
                 $required[] = $field->name;
             }
         }
@@ -860,22 +869,33 @@ final class McpManifestBuilder
 
     /**
      * The fields of an input as the arguments a client sends to it: each but one whose name an
-     * argument another place takes has already ({@see self::inputSchema()}), which is never sent
-     * here — and fails, naming both, where the field can't go without it: no call could succeed.
+     * argument another place takes has already ({@see self::arguments()}), which is never sent
+     * here. Where the server refuses that one left out, no call could succeed: that fails, naming
+     * both. One only its contract requires — a PUT's `id: string`, with nothing refusing it missing —
+     * is left to the argument the other place takes.
      *
      * @param 'query'|'body'                         $input
      * @param array<array-key, array<string, mixed>> $fields
      * @param list<string>                           $fieldsRequired
+     * @param list<string>                           $fieldsRefused  those the server refuses left out
      * @param array<array-key, array<string, mixed>> $properties
      * @param list<string>                           $required
      * @param array<array-key, string>               $taken          by name, the place its argument goes to
+     *
+     * @return list<string> the names placed here
      */
-    private static function place(CollectedEndpointContract $contract, string $input, array $fields, array $fieldsRequired, array &$properties, array &$required, array $taken): void
+    private static function place(CollectedEndpointContract $contract, string $input, array $fields, array $fieldsRequired, array $fieldsRefused, array &$properties, array &$required, array $taken): array
     {
+        $placed = [];
         foreach ($fields as $name => $schema) {
+            $name = (string) $name;
             if (!isset($taken[$name])) {
                 $properties[$name] = $schema;
-            } elseif (\in_array((string) $name, $fieldsRequired, true)) {
+                $placed[] = $name;
+                if (\in_array($name, $fieldsRequired, true)) {
+                    $required[] = $name;
+                }
+            } elseif (\in_array($name, $fieldsRefused, true)) {
                 throw new RuntimeException(\sprintf(
                     'The MCP tool %s takes the %s field "%s", which it can never send: the argument of that name fills %s. Rename one of them, or take the field out of the %s.',
                     $contract->mcp->name ?? $contract->name,
@@ -886,8 +906,8 @@ final class McpManifestBuilder
                 ));
             }
         }
-        // Each one left is placed: a required one taken by another place failed above.
-        $required = [...$required, ...$fieldsRequired];
+
+        return $placed;
     }
 
     /**

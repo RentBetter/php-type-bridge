@@ -32,6 +32,7 @@ final class DeclaredProperties
 
         $declared = [];
         $depth = 0;
+        $parens = 0;
         $count = \count($tokens);
         for ($i = $body; $i < $count; ++$i) {
             $token = $tokens[$i];
@@ -41,7 +42,13 @@ final class DeclaredProperties
                 if (0 === --$depth) {
                     break;
                 }
-            } elseif (1 === $depth && $token->is(T_VARIABLE) && self::isDeclaration($tokens, $i)) {
+            } elseif (1 === $depth && '(' === $token->text) {
+                ++$parens;
+            } elseif (1 === $depth && ')' === $token->text) {
+                --$parens;
+            } elseif (1 === $depth && $token->is(T_VARIABLE) && (0 === $parens || self::isPromoted($tokens, $i))) {
+                // Outside a signature, a class body holds a variable in a property's declaration alone,
+                // each one it lists (`public $a, $b`); in one, a param its own modifier promotes.
                 $declared[substr($token->text, 1)] = true;
             }
         }
@@ -73,12 +80,13 @@ final class DeclaredProperties
     }
 
     /**
-     * Whether the variable at `$at` in a class body is a property it declares: a modifier before it,
-     * past its type — not a method's param, which `function` and the method's name come before.
+     * Whether the param at `$at` of a method's signature is a property it promotes: a modifier of its
+     * own before it, past its type — not one of the param before it, nor `function` and the method's
+     * name.
      *
      * @param list<PhpToken> $tokens
      */
-    private static function isDeclaration(array $tokens, int $at): bool
+    private static function isPromoted(array $tokens, int $at): bool
     {
         for ($i = $at - 1; $i >= 0; --$i) {
             $token = $tokens[$i];

@@ -189,6 +189,9 @@ final class TypeScriptEmitter
     /** @var array<string, array<string, string>> by module, the include and expand helpers its own types use: what each is for, and its code */
     private array $includeHelpers = [];
 
+    /** A pattern matching the name of any config type alias, made the first time one is asked for ({@see self::configAliasesNamedIn()}). */
+    private ?string $configAliasPattern = null;
+
     /** @var array<string, array<string, string>> by module, each name it declares or imports for its own, and what claims it ({@see self::buildSymbolMaps()}) */
     private array $claimedNames = [];
 
@@ -668,16 +671,15 @@ final class TypeScriptEmitter
      */
     private function configAliasesNamedIn(array $blocks): array
     {
-        $code = implode("\n", array_map(static fn (EmittedBlock $block): string => $block->code, $blocks));
-
-        $named = [];
-        foreach (array_keys($this->typeAliases) as $aliasName) {
-            if (1 === preg_match('/\\b' . preg_quote($aliasName, '/') . '\\b/', $code)) {
-                $named[$aliasName] = true;
-            }
+        if ([] === $this->typeAliases) {
+            return [];
         }
 
-        return $named;
+        // One pattern of every alias's name, read once over the code.
+        $this->configAliasPattern ??= '/\\b(?:' . implode('|', array_map(static fn (string $name): string => preg_quote($name, '/'), array_keys($this->typeAliases))) . ')\\b/';
+        preg_match_all($this->configAliasPattern, implode("\n", array_map(static fn (EmittedBlock $block): string => $block->code, $blocks)), $named);
+
+        return array_fill_keys($named[0], true);
     }
 
     /**

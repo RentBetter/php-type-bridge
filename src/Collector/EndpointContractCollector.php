@@ -70,8 +70,11 @@ final class EndpointContractCollector
     /** @var array<string, ShapeType|null> by source directory and class: a whole-value field's contract, read once however many forms embed it */
     private array $contracts = [];
 
-    /** @var array<string, bool> by name: whether a project-wide alias admits null, read once however many keys it types */
+    /** @var array<string, bool|null> by name: whether a project-wide alias admits null, read once however many keys it types; null where its TypeScript can't say */
     private array $configAliasesAdmittingNull = [];
+
+    /** Whether what is being read is read for a tool, which reads what the TypeScript doesn't ({@see self::configAliasAdmitsNull()}). */
+    private bool $forTool = true;
 
     /** How many aliases and classes one contract reads through, at most. */
     private const int READS = 1000;
@@ -556,16 +559,22 @@ final class EndpointContractCollector
      */
     private function readInput(string $formClass, string $srcDir, array $classFiles, bool $inQuery, bool $tool, ?string &$unreadable): CollectedInputReference
     {
+        $outer = $this->forTool;
         try {
+            $this->forTool = $tool;
+
             return $this->resolveFormClass($formClass, $srcDir, $classFiles, $inQuery, $tool);
         } catch (UnreadableContract $exception) {
             if (!$tool) {
                 throw $exception;
             }
+            $this->forTool = false;
             $input = $this->resolveFormClass($formClass, $srcDir, $classFiles, $inQuery, tool: false);
             $unreadable ??= $exception->getMessage();
 
             return $input;
+        } finally {
+            $this->forTool = $outer;
         }
     }
 
@@ -1084,13 +1093,19 @@ final class EndpointContractCollector
      * Whether a project-wide alias admits null, as its TypeScript says ({@see TypeScriptTypes::admitsNull()}).
      * A key typed with it is one a client may leave out of a query, or clear, where it does, and the
      * Endpoint's AsQuery<T> reads that off the TypeScript as tsc evaluates it: where its text can't
-     * say, guessing would have the Endpoint and the tool read the key two ways.
+     * say, guessing would have the Endpoint and the tool read the key two ways — for a tool. Where no
+     * tool reads it, all it decides is whether the Endpoint's query may be left out, and it is taken
+     * not to: a query required is one any call can send, and AsQuery<T> still says each key.
      */
     private function configAliasAdmitsNull(string $name): bool
     {
         $type = $this->typeAliases[$name];
+        $admits = $this->configAliasesAdmittingNull[$name] ??= TypeScriptTypes::admitsNull($type, $this->typeAliases);
+        if (null !== $admits || !$this->forTool) {
+            return $admits ?? false;
+        }
 
-        return $this->configAliasesAdmittingNull[$name] ??= TypeScriptTypes::admitsNull($type, $this->typeAliases) ?? throw new UnreadableContract(\sprintf(
+        throw new UnreadableContract(\sprintf(
             'Whether the project-wide alias "%s" (`%s`) admits null can\'t be read from its TypeScript, and a key of a request is typed with it: whether that key may be left out, or cleared, turns on it. Write the null out — `%2$s | null` where it admits one, `NonNullable<%2$s>` where it doesn\'t.',
             $name,
             $type,

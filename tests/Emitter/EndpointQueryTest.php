@@ -273,6 +273,18 @@ final class EndpointQueryTest extends TestCase
         (new McpManifestGenerator())->generate($src, TypeBridgeConfig::fromArray(['typeAliases' => ['Money' => 'Dinero']]));
     }
 
+    public function test_a_shape_read_for_an_endpoint_no_tool_reads_is_read_again_for_a_tool(): void
+    {
+        // Both queries are PriceInput, read for listPrices first: what it took of Money there is no
+        // answer for pickPrices' tool, which fails as it would alone. The TypeScript is generated.
+        $src = __DIR__ . '/../Fixture/SharedOpaqueAliasFixtures';
+        self::assertCount(2, (new EndpointContractCollector(typeAliases: ['Money' => 'Dinero']))->collect($src, (new ResponseClassCollector())->collectIndex($src))['Prices']);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Whether the project-wide alias "Money" (`Dinero`) admits null');
+
+        (new McpManifestGenerator())->generate($src, TypeBridgeConfig::fromArray(['typeAliases' => ['Money' => 'Dinero']]));
+    }
+
     public function test_a_bodys_null_is_asked_of_an_alias_only_for_an_mcp_tool(): void
     {
         // The same body, no tool: whether a key is cleared changes no TypeScript, so its alias's

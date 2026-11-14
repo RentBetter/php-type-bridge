@@ -1733,6 +1733,24 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['id'], $schema['required']);
     }
 
+    public function testAPathParamTakesTheArgumentOfAnIncludeParametersName(): void
+    {
+        // `{expand}` is the path's, so the tool lists no `expand` query parameter.
+        $contract = new CollectedEndpointContract(
+            name: 'showThing',
+            domain: 'things',
+            controllerClass: 'App\\ThingController',
+            methodName: '__invoke',
+            responses: [$this->response(200)],
+            request: new CollectedEndpointRequest(pathParams: [new CollectedPathParam('expand', 'string')]),
+            mcp: new CollectedMcpTool(name: 'showThing', description: 'Show a thing.', httpMethod: 'GET', httpPath: '/things/{expand}', destructive: false),
+        );
+
+        $tool = (new McpManifestBuilder(new IncludeConvention(query: ['include' => 'Opt-in parts.', 'expand' => 'Records in place.'])))->build(['things' => [$contract]])['tools'][0];
+        self::assertSame(['include'], $tool['query']);
+        self::assertSame(['type' => 'string'], $tool['inputSchema']['properties']['expand']);
+    }
+
     public function testAFieldThatCantGoWithoutAnArgumentAnotherPlaceTakesFailsNamingBoth(): void
     {
         // The POST's body refuses `id` left out — its own NotBlank — and the argument of its name

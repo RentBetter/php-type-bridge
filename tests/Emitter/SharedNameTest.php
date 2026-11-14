@@ -226,6 +226,15 @@ final class SharedNameTest extends TestCase
         self::assertStringContainsString('export type UuidStr = string;', $notes);
     }
 
+    public function test_a_config_alias_whose_name_ends_another_name_is_not_named_by_it(): void
+    {
+        // `NoteId` is named; `Data`, which only ends the interface `NoteData`, is not.
+        $notes = $this->emit('ChainedAliasFixtures', typeAliases: ['NoteId' => 'string', 'Data' => 'number'])['Notes'];
+
+        self::assertStringContainsString('export type NoteId = string;', $notes);
+        self::assertStringNotContainsString('export type Data ', $notes);
+    }
+
     public function test_with_a_root_module_a_config_alias_named_by_another_is_declared_there_and_not_imported(): void
     {
         $output = $this->emit('ChainedAliasFixtures', new OutputStructure(rootModule: 'genTypes.ts'), typeAliases: ['NoteId' => 'UuidStr', 'UuidStr' => 'string']);
