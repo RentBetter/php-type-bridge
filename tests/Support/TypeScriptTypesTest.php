@@ -98,4 +98,11 @@ final class TypeScriptTypesTest extends TestCase
         self::assertNull(TypeScriptTypes::admitsNull('Opaque', $aliases));
         self::assertNull(TypeScriptTypes::admitsNull('Unknown', $aliases), 'A name the config does not declare');
     }
+
+    public function test_pick_and_omit_never_admit_null(): void
+    {
+        // Each maps the keys it is given to an object: whatever it is given, never a null.
+        self::assertFalse(TypeScriptTypes::admitsNull("Omit<NoteData, 'id'>"));
+        self::assertFalse(TypeScriptTypes::admitsNull("Pick<NoteData, 'id' | 'title'>"));
+    }
 }

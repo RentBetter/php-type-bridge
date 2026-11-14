@@ -1621,7 +1621,7 @@ final class McpManifestBuilderTest extends TestCase
         // and of an entry class whose shape can't be said here, objects.
         $collection = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType';
         $items = new CollectedFormField(name: 'items', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: 'App\\ItemType');
-        $refs = new CollectedFormField(name: 'refs', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: 'App\\RefType', entryDataClass: 'App\\RefData');
+        $refs = new CollectedFormField(name: 'refs', formTypeClass: $collection, required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: 'App\\RefType', entryDataClass: 'App\\RefData', entryCompound: true);
 
         $properties = $this->toolWithBody('PUT', [$items, $refs], new ShapeType([
             new ShapeField('items', new ListType(new ShapeType([new ShapeField('a', new ScalarType('int'), optional: false)])), optional: true),
@@ -1629,6 +1629,23 @@ final class McpManifestBuilderTest extends TestCase
         ]))['inputSchema']['properties'];
         self::assertSame(['type' => 'array', 'items' => ['type' => 'object', 'properties' => ['a' => ['type' => 'integer']], 'required' => ['a']]], $properties['items']);
         self::assertSame(['type' => 'array', 'items' => ['type' => 'object']], $properties['refs']);
+    }
+
+    public function testACollectionOfScalarEntriesWithADataClassIsAListOfThem(): void
+    {
+        // A file input, or a custom scalar type with a data class, isn't compound: its entries are
+        // what it reads, a value each, not an object.
+        $files = new CollectedFormField(name: 'files', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType', required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', entryDataClass: 'App\\Upload');
+
+        self::assertSame(['type' => 'array', 'items' => ['type' => 'string']], $this->toolWithBody('PUT', [$files], $this->shape('array{files?: list<string>}'))['inputSchema']['properties']['files']);
+    }
+
+    public function testAListWhoseBlankIsRefusedTakesAtLeastOneItem(): void
+    {
+        // `names: []` is submitted as the empty list, which its NotBlank refuses, as `title: ""` is.
+        $names = new CollectedFormField(name: 'names', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType', required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', constraints: [new NotBlank()], blankValue: []);
+
+        self::assertSame(['type' => 'array', 'items' => ['type' => 'string'], 'minItems' => 1], $this->toolWithBody('PUT', [$names], $this->shape('array{names?: list<string>}'))['inputSchema']['properties']['names']);
     }
 
     public function testKeysNamedByNumbersAreAnObjectsProperties(): void

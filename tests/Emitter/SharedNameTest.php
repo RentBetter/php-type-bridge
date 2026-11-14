@@ -244,6 +244,16 @@ final class SharedNameTest extends TestCase
         self::assertMatchesRegularExpression("~^import type \\{ NoteId \\} from '\\.\\./genTypes';$~m", $output['Notes']);
     }
 
+    public function test_a_base_property_bound_to_an_included_key_extending_a_shape_is_included(): void
+    {
+        // `@extends AbstractEnvelope<included<NoteCore & array{extra: int}>>`: read whole where it is
+        // written, it is still a key sent only when asked for.
+        $notes = $this->emit('GenericIncludedFixtures', includes: new IncludeConvention(['included']))['Notes'];
+
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  data?: NoteCore & { extra: number };\n}", $notes);
+        self::assertStringContainsString("export type ShowNoteResponseIncluded = 'data';", $notes);
+    }
+
     /**
      * @param list<string> $rootSources
      * @param array<string, string> $typeAliases
