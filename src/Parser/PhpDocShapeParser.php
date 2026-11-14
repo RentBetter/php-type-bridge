@@ -420,16 +420,16 @@ final class PhpDocShapeParser
             }
         }
 
-        // PHPStan's keywords for what says nothing of its contents, as PHPStan reads them: `array`
-        // any array, as a property typed `array` is; `list` any list; `object` and `iterable`
-        // anything, which their JSON may be. Bare: `iterable<string>` is a generic, `object{…}` a
-        // shape, as before.
-        foreach (['non-empty-array' => 'array<array-key, mixed>', 'array' => 'array<array-key, mixed>', 'non-empty-list' => 'list<mixed>', 'list' => 'list<mixed>', 'object' => 'mixed', 'iterable' => 'mixed'] as $keyword => $means) {
+        // PHPStan's keywords for what says nothing of its contents, as PHPStan reads them, none of
+        // them null: `array` and `iterable` any array, as a property typed `array` is; `list` any
+        // list; `object` any value its JSON may be. Bare: `iterable<string>` is a generic,
+        // `object{…}` a shape, as before.
+        foreach (['non-empty-array' => 'array<array-key, mixed>', 'array' => 'array<array-key, mixed>', 'non-empty-list' => 'list<mixed>', 'list' => 'list<mixed>', 'iterable' => 'array<array-key, mixed>', 'object' => null] as $keyword => $means) {
             $after = $this->pos + \strlen($keyword);
             if ($this->lookAhead($keyword) && !$this->continuesName($after) && !\in_array(substr($this->input, $after, 1), ['<', '{'], true)) {
                 $this->pos += \strlen($keyword);
 
-                return (new self())->parse($means);
+                return null === $means ? new ScalarType('object') : (new self())->parse($means);
             }
         }
 

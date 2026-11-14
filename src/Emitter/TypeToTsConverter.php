@@ -154,6 +154,8 @@ final readonly class TypeToTsConverter
                 'int', 'float', 'numeric' => 'number',
                 'bool' => 'boolean',
                 'mixed' => 'unknown',
+                // PHPStan's `object`: any value its JSON may be, but never null.
+                'object' => 'NonNullable<unknown>',
                 'null' => 'null',
                 'scalar' => 'string | number | boolean',
                 'array-key' => 'string | number',
@@ -262,7 +264,11 @@ final readonly class TypeToTsConverter
         }
 
         if ($type instanceof IntersectionType) {
-            return $this->convert($type->base, $scope) . ' & ' . $this->convert($type->extra, $scope);
+            // Bracketed where it needs to be: a base a generic's param is bound to may be a union,
+            // each member of which the extension holds to.
+            $base = $this->convert($type->base, $scope);
+
+            return (TypeScriptTypes::needsBrackets($base) ? '(' . $base . ')' : $base) . ' & ' . $this->convert($type->extra, $scope);
         }
 
         // An include generic (`included<T>`) is its type; the key it sits on is what is optional.

@@ -33,7 +33,7 @@ final readonly class ScalarType extends ParsedType
     ];
 
     public function __construct(
-        public string $type, // 'string', 'int', 'float', 'bool', 'mixed', 'numeric', 'null', or a refinement
+        public string $type, // 'string', 'int', 'float', 'bool', 'mixed', 'numeric', 'null', 'object' (anything but null), or a refinement
     ) {}
 
     /**

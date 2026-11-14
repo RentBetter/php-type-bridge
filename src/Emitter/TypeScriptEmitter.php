@@ -181,6 +181,9 @@ final class TypeScriptEmitter
     /** @var array<string, array<string, string>> by module, each name it declares or imports for its own, and what claims it ({@see self::buildSymbolMaps()}) */
     private array $claimedNames = [];
 
+    /** @var array<string, list<string>> by module, the consts its endpoints declare: values, which a type of the module may share a name with, but an import may not */
+    private array $endpointConsts = [];
+
     /**
      * @param list<string> $preserveNull entries of the form "ShapeName.fieldName".
      *   Fields listed here must use `T|null` in their @phpstan-type annotation
@@ -927,6 +930,7 @@ final class TypeScriptEmitter
             }
         }
         $this->claimedNames = $registrations;
+        $this->endpointConsts = array_map(static fn (array $domainContracts): array => array_map(static fn (CollectedEndpointContract $contract): string => $contract->name, $domainContracts), $contracts);
 
         return $maps;
     }
@@ -985,14 +989,15 @@ final class TypeScriptEmitter
 
     /**
      * The names the module imports others' types under: their own, but where one is a name it takes
-     * itself — every one it claims ({@see self::buildSymbolMaps()}) — the module's prefixed.
+     * itself — every one it claims ({@see self::buildSymbolMaps()}), and its endpoints' consts — the
+     * module's prefixed.
      *
      * @param array<string, list<string>> $imports
      * @return array<string, array<string, string>>
      */
     private function computeForeignAliases(string $domain, array $imports): array
     {
-        $usedNames = array_map(static fn (): bool => true, $this->claimedNames[$domain] ?? []);
+        $usedNames = array_map(static fn (): bool => true, $this->claimedNames[$domain] ?? []) + array_fill_keys($this->endpointConsts[$domain] ?? [], true);
         $aliases = [];
 
         $importDomains = array_keys($imports);
