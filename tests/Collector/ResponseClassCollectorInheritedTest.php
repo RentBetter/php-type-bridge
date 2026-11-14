@@ -206,12 +206,23 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
     public function test_a_library_propertys_enum_is_the_one_its_file_names_not_one_of_the_same_short_name(): void
     {
-        // The library's `value-of<Status>` is its own Status, outside the source tree and never
-        // emitted — not the application's Status that shares its short name.
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/LibraryBaseLib\\\\Status.*outside the source tree/s');
+        // The library's `value-of<Status>` is its own Status — not the application's Status that
+        // shares its short name — emitted as one the source tree names from outside it is, in Common.
+        $output = self::emit(self::fixtures('LibraryEnumFixtures'));
 
-        self::emit(self::fixtures('LibraryEnumFixtures'));
+        self::assertStringContainsString("export type Status = 'live' | 'gone';", $output['Common'] ?? '');
+        self::assertStringContainsString("export interface ShowNoteResponse {\n  status: CommonStatus;\n}", $output['Notes']);
+    }
+
+    public function test_a_property_typed_with_a_backed_enum_is_its_values(): void
+    {
+        // A base's native `ErrorCode $code`, and a shape's `code: ErrorCode`: json_encode writes the
+        // enum's backing value, as `value-of<ErrorCode>` names it.
+        $notes = self::emit(self::fixtures('EnumTypedFixtures'))['Notes'];
+
+        self::assertStringContainsString("export type ErrorCode = 'conflict' | 'gone';", $notes);
+        self::assertStringContainsString("export interface ConflictResponse {\n  code: ErrorCode;\n}", $notes);
+        self::assertStringContainsString("export interface NoteError {\n  code: ErrorCode;\n}", $notes);
     }
 
     public function test_a_config_alias_on_a_library_property_is_the_emitting_modules_own(): void

@@ -63,19 +63,29 @@ final class MapKeyTest extends TestCase
         );
     }
 
+    public function test_a_key_a_project_wide_alias_of_any_key_names_is_any_key(): void
+    {
+        // `AnyKey: 'string | number'` is every key an array has; `Text: 'string'` a key it has.
+        $rows = self::emit(__DIR__ . '/../Fixture/ConfigAliasKeyFixtures', ['AnyKey' => 'string | number', 'Text' => 'string'])['Rows'];
+
+        self::assertStringContainsString("export interface Keyed {\n  byAny: Record<string, string> | string[];\n  byText: Record<Text, string>;\n}", $rows);
+    }
+
     /**
+     * @param array<string, string> $typeAliases
+     *
      * @return array<string, string>
      */
-    private static function emit(): array
+    private static function emit(string $src = self::SRC, array $typeAliases = []): array
     {
-        $responses = new ResponseClassCollector();
+        $responses = new ResponseClassCollector(typeAliases: $typeAliases);
         $enums = new EnumResolver();
-        $enums->scanDirectory(self::SRC);
+        $enums->scanDirectory($src);
 
-        return (new TypeScriptEmitter(enumResolver: $enums, domainMapper: new DomainMapper('/tmp/type-bridge-output')))->emit(
-            (new PhpDocTypeCollector())->collect(self::SRC),
-            $responses->collect(self::SRC),
-            (new EndpointContractCollector())->collect(self::SRC, $responses->collectIndex(self::SRC)),
+        return (new TypeScriptEmitter(enumResolver: $enums, domainMapper: new DomainMapper('/tmp/type-bridge-output'), typeAliases: $typeAliases))->emit(
+            (new PhpDocTypeCollector())->collect($src),
+            $responses->collect($src),
+            (new EndpointContractCollector(typeAliases: $typeAliases))->collect($src, $responses->collectIndex($src)),
         );
     }
 }
