@@ -354,7 +354,7 @@ final class PhpDocShapeParser
             $this->skipWhitespace();
             $this->expect('>');
 
-            return new MapType(self::arrayKey($key), $value);
+            return new MapType($key, $value);
         }
 
         // iterable<V>, or iterable<K, V> — what PHP iterates, sent as the array it makes: keyed by
@@ -366,7 +366,7 @@ final class PhpDocShapeParser
             $key = new ScalarType('array-key');
             if ($this->pos < $this->len && ',' === $this->input[$this->pos]) {
                 $this->pos++;
-                $key = self::arrayKey($value);
+                $key = $value;
                 $value = $this->parseType();
                 $this->skipWhitespace();
             }
@@ -678,25 +678,6 @@ final class PhpDocShapeParser
         }
 
         return \substr($this->input, $start, $this->pos - $start);
-    }
-
-    /**
-     * The key a map is sent with: PHP keys an array by ints and strings alone, so a key named as
-     * anything else — `mixed`, an object, a bool, a null — is whichever of them PHP makes of it: any
-     * key. A name, an enum's values or a constant's are kept, and read where they are resolved.
-     */
-    private static function arrayKey(ParsedType $key): ParsedType
-    {
-        $keys = static function (ParsedType $type) use (&$keys): bool {
-            return match (true) {
-                $type instanceof ScalarType => \in_array($type->base(), ['int', 'string', 'array-key', 'float', 'numeric'], true),
-                $type instanceof LiteralType => \is_int($type->value) || \is_string($type->value),
-                $type instanceof UnionType => array_all($type->types, $keys),
-                default => $type instanceof NameRefType || $type instanceof ValueOfType || $type instanceof IdOfType || $type instanceof ClassConstantType,
-            };
-        };
-
-        return $keys($key) ? $key : new ScalarType('array-key');
     }
 
     private function parseClassName(): string

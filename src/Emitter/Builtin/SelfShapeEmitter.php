@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Emitter\Builtin;
 
 use PTGS\TypeBridge\Attribute\AsTypeBridgeEmitter;
+use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Emitter\ConversionScope;
 use PTGS\TypeBridge\Emitter\EmitContext;
 use PTGS\TypeBridge\Emitter\EmittedBlock;
@@ -61,7 +62,7 @@ final class SelfShapeEmitter implements TypeEmitter
             }
             $lines[] = '}';
 
-            return implode("\n", [...$lines, ...self::includedUnion($name, $type->parsed->extra, $context)]);
+            return implode("\n", [...$lines, ...self::includedUnion($name, $type, $context)]);
         }
 
         if ($type->parsed instanceof ShapeType) {
@@ -74,29 +75,46 @@ final class SelfShapeEmitter implements TypeEmitter
             }
             $lines[] = '}';
 
-            return implode("\n", [...$lines, ...self::includedUnion($name, $type->parsed, $context)]);
+            return implode("\n", [...$lines, ...self::includedUnion($name, $type, $context)]);
         }
 
         return \sprintf('export type %s = %s;', $name, $context->convert($type->parsed, $scope));
     }
 
     /**
-     * `export type {Shape}Included = 'a' | 'b';` — the included keys that are present whenever the
-     * request asks for them: those whose PHP key is required. An included key that is optional in
-     * PHP may still be absent, so it is not listed.
+     * `export type {Shape}Included = 'a' | 'b';` — the type's {@see self::includedKeys()}.
      *
      * @return list<string>
      */
-    private static function includedUnion(string $name, ShapeType $shape, EmitContext $context): array
+    private static function includedUnion(string $name, CollectedType $type, EmitContext $context): array
     {
+        $keys = array_map(TypeToTsConverter::stringLiteral(...), self::includedKeys($type, $context->converter->includes));
+
+        return [] === $keys ? [] : ['', \sprintf('export type %s%s = %s;', $name, TypeScriptEmitter::INCLUDED_SUFFIX, implode(' | ', $keys))];
+    }
+
+    /**
+     * The included keys of a type's shape — its own, or an intersection's — that are present whenever
+     * the request asks for them: those whose PHP key is required. An included key that is optional
+     * in PHP may still be absent, so it is not one.
+     *
+     * @return list<string>
+     */
+    public static function includedKeys(CollectedType $type, IncludeConvention $includes): array
+    {
+        $shape = $type->parsed instanceof IntersectionType ? $type->parsed->extra : $type->parsed;
+        if (!$shape instanceof ShapeType) {
+            return [];
+        }
+
         $keys = [];
         foreach ($shape->fields as $field) {
-            if (!$field->optional && $context->converter->isIncluded($field->type)) {
-                $keys[] = TypeToTsConverter::stringLiteral($field->name);
+            if (!$field->optional && $includes->isIncluded($field->type)) {
+                $keys[] = $field->name;
             }
         }
 
-        return [] === $keys ? [] : ['', \sprintf('export type %s%s = %s;', $name, TypeScriptEmitter::INCLUDED_SUFFIX, implode(' | ', $keys))];
+        return $keys;
     }
 
     private function renderShapeField(ShapeField $field, string $shapeName, EmitContext $context, ConversionScope $scope): string

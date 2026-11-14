@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
 use PTGS\TypeBridge\Support\ClassFileTypes;
+use PTGS\TypeBridge\Support\DeclaredProperties;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
@@ -454,23 +455,41 @@ final class ResponseClassCollector
 
     /**
      * The traits on the way from the class a property is used in to the one that writes it, each
-     * used by the one before: none where the class writes it itself.
+     * used by the one before: none where the class writes it itself. One that declares it in its own
+     * body writes it, whatever a trait it uses writes alike — PHP takes a redeclaration that agrees,
+     * doc comment and all, and reflection tells the two apart only by that doc comment.
      *
      * @return list<ReflectionClass<object>>
      */
     private static function traitPath(ReflectionProperty $property): array
     {
+        $name = $property->getName();
         $path = [];
-        $traits = $property->getDeclaringClass()->getTraits();
+        $traits = self::traitsBelow($property->getDeclaringClass(), $name);
         while ([] !== $traits) {
             $trait = array_shift($traits);
-            if ($trait->hasProperty($property->getName()) && $trait->getProperty($property->getName())->getDocComment() === $property->getDocComment()) {
+            if ($trait->hasProperty($name) && $trait->getProperty($name)->getDocComment() === $property->getDocComment()) {
                 $path[] = $trait;
-                $traits = $trait->getTraits();
+                $traits = self::traitsBelow($trait, $name);
             }
         }
 
         return $path;
+    }
+
+    /**
+     * The traits a class or trait uses that may write a property it has: none where its own body
+     * declares the property.
+     *
+     * @param ReflectionClass<object> $holder
+     *
+     * @return list<ReflectionClass<object>>
+     */
+    private static function traitsBelow(ReflectionClass $holder, string $property): array
+    {
+        $traits = array_values($holder->getTraits());
+
+        return [] === $traits || DeclaredProperties::declares($holder, $property) ? [] : $traits;
     }
 
     /**

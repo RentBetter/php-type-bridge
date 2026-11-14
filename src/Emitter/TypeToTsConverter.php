@@ -116,7 +116,7 @@ final readonly class TypeToTsConverter
      * What a symbol of a module is called where the scope is emitted: its own name in the same
      * module, else the name it is imported under.
      */
-    private static function localName(string $domain, string $symbol, ConversionScope $scope): string
+    public static function localName(string $domain, string $symbol, ConversionScope $scope): string
     {
         return $domain === $scope->domain ? $symbol : $scope->foreignAliases[$domain][$symbol] ?? $symbol;
     }
@@ -143,7 +143,7 @@ final readonly class TypeToTsConverter
      */
     public function isIncluded(ParsedType $type): bool
     {
-        return $type instanceof GenericType && $this->includes->isIncludeType($type->name);
+        return $this->includes->isIncluded($type);
     }
 
     public function convert(ParsedType $type, ConversionScope $scope): string

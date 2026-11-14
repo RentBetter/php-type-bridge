@@ -7,6 +7,8 @@ namespace PTGS\TypeBridge\Emitter;
 use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Config\TypeScriptNaming;
 use PTGS\TypeBridge\Emitter\Builtin\EndpointContractEmitter;
+use PTGS\TypeBridge\Emitter\Builtin\ResponseClassEmitter;
+use PTGS\TypeBridge\Emitter\Builtin\SelfShapeEmitter;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
@@ -141,6 +143,9 @@ final class TypeScriptEmitter
         type ExpandBelow<P extends string, K extends string> = P extends `${K}.${infer Rest}` ? Rest : never;
         TS;
 
+    /** The include and expand helpers by what each is for, in the order they are declared. */
+    private const array INCLUDE_HELPERS = ['including' => self::WITH_INCLUDES_HELPER, 'expanding' => self::WITH_EXPANDS_HELPER];
+
     private EmittedNames $names;
 
     private SymbolRegistry $symbols;
@@ -177,6 +182,9 @@ final class TypeScriptEmitter
 
     /** @var array<string, list<string>> by module, the enums of its own anything emitted names */
     private array $enumsByDomain = [];
+
+    /** @var array<string, array<string, string>> by module, the include and expand helpers its own types use: what each is for, and its code */
+    private array $includeHelpers = [];
 
     /** @var array<string, array<string, string>> by module, each name it declares or imports for its own, and what claims it ({@see self::buildSymbolMaps()}) */
     private array $claimedNames = [];
@@ -232,8 +240,14 @@ final class TypeScriptEmitter
      */
     public function emit(array $domains, array $responses = [], array $contracts = []): array
     {
+        // A map keyed by an alias keyed as the alias is: known here, where every module's aliases are.
+        $keys = new AliasedMapKeys($domains);
+        $domains = $keys->inDomains($domains);
+        $responses = $keys->inResponses($responses);
+
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->enumsByDomain = $this->referencedEnums($domains, $responses);
+        $this->includeHelpers = $this->includeHelpersUsed($domains, $responses);
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses, $contracts), array_keys($this->typeAliases));
         $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
@@ -470,17 +484,8 @@ final class TypeScriptEmitter
         }
 
         // Helpers every module with endpoints shares, declared once like the aliases.
-        $helpers = [];
+        $helpers = EndpointContractEmitter::helpers($contracts, $this->includes);
         if ([] !== $contracts) {
-            if (EndpointContractEmitter::anyTakesQueryForm($contracts)) {
-                $helpers[] = new EmittedBlock(40, '// Endpoint inputs', EndpointContractEmitter::AS_QUERY_HELPER, 'AsQuery');
-            }
-            if (EndpointContractEmitter::anyTakesIncludeQuery($contracts, $this->includes)) {
-                $helpers[] = new EmittedBlock(40, '// Endpoint inputs', EndpointContractEmitter::includeQueryHelper($this->includes), 'IncludeQuery');
-            }
-            $helpers[] = new EmittedBlock(50, '// Endpoint results', EndpointContractEmitter::RESULT_HELPER, 'EndpointResult');
-            $helpers[] = new EmittedBlock(60, '// Endpoints', EndpointContractEmitter::ENDPOINT_HELPER, 'Endpoint');
-
             $seenControllers = [];
             foreach ($contracts as $contract) {
                 if (isset($seenControllers[$contract->controllerClass])) {
@@ -494,7 +499,7 @@ final class TypeScriptEmitter
             }
         }
 
-        $shared = [...$this->typeAliasBlocks($blocks), ...$this->withIncludesBlocks($blocks), ...$this->withExpandsBlocks($blocks), ...$helpers];
+        $shared = [...$this->typeAliasBlocks($blocks), ...$this->includeHelperBlocks($domain), ...$helpers];
         if ($this->domainMapper->hasRootModule()) {
             // Declared once, in the root module; what this module uses — the aliases, `EndpointResult`
             // — is imported from it. The `WithIncludes` helper is only declared: consumers import it.
@@ -525,41 +530,63 @@ final class TypeScriptEmitter
     }
 
     /**
-     * `WithIncludes<T, P>` for a module that declares an `…Included` union: the type with the keys
-     * a request's include paths name present, at any depth. Declared per module, like the type
-     * aliases, so each module stays self-contained; the copies are identical.
+     * The include and expand helpers a module's own types use ({@see self::includeHelpersUsed()}).
+     * `WithIncludes<T, P>` reads its `…Included` unions: the type with the keys a request's include
+     * paths name present, at any depth. `Ref<T>` and `WithExpands<T, P>` are keyed by `Ref`, the one
+     * name the module itself mentions, so with a root module that is what it imports; consumers
+     * import `WithIncludes` and `WithExpands` themselves. Declared per module, like the type aliases,
+     * so each module stays self-contained; the copies are identical.
      *
-     * @param list<EmittedBlock> $blocks
      * @return list<EmittedBlock>
      */
-    private function withIncludesBlocks(array $blocks): array
+    private function includeHelperBlocks(string $domain): array
     {
-        foreach ($blocks as $block) {
-            if (1 === preg_match('/^export type \w+' . self::INCLUDED_SUFFIX . ' = /m', $block->code)) {
-                return [new EmittedBlock(15, '// Includes', self::WITH_INCLUDES_HELPER, 'WithIncludes')];
-            }
-        }
+        $helpers = $this->includeHelpers[$domain] ?? [];
 
-        return [];
+        return [
+            ...(isset($helpers['including']) ? [new EmittedBlock(15, '// Includes', self::WITH_INCLUDES_HELPER, 'WithIncludes')] : []),
+            ...(isset($helpers['expanding']) ? [new EmittedBlock(16, '// Expands', self::WITH_EXPANDS_HELPER, self::REF_TYPE)] : []),
+        ];
     }
 
     /**
-     * `Ref<T>` and `WithExpands<T, P>` for a module with a `ref<T>` field. Keyed by `Ref`, the one
-     * name the module itself mentions, so with a root module that is what it imports; consumers
-     * import `WithExpands` themselves.
+     * By module, the include and expand helpers its own types use: `WithIncludes` where one declares
+     * an `…Included` union — a key present whenever it is asked for — and `Ref` and `WithExpands`
+     * where one holds a reference. Read off the types before any is emitted, so what a module
+     * declares is what it claims the names of ({@see self::includeHelperNames()}).
      *
-     * @param list<EmittedBlock> $blocks
-     * @return list<EmittedBlock>
+     * @param array<string, CollectedDomain>                 $domains
+     * @param array<string, list<CollectedApiResponseClass>> $responses
+     *
+     * @return array<string, array<string, string>>
      */
-    private function withExpandsBlocks(array $blocks): array
+    private function includeHelpersUsed(array $domains, array $responses): array
     {
-        foreach ($blocks as $block) {
-            if (1 === preg_match('/\b' . self::REF_TYPE . '</', $block->code)) {
-                return [new EmittedBlock(16, '// Expands', self::WITH_EXPANDS_HELPER, self::REF_TYPE)];
+        $used = [];
+        foreach ($domains as $domain => $collected) {
+            foreach ($collected->types as $type) {
+                if ([] !== SelfShapeEmitter::includedKeys($type, $this->includes)) {
+                    $used[$domain]['including'] = true;
+                }
+                if ($this->includes->hasRef($type->parsed)) {
+                    $used[$domain]['expanding'] = true;
+                }
+            }
+        }
+        foreach ($responses as $domain => $domainResponses) {
+            foreach ($domainResponses as $response) {
+                if ([] !== ResponseClassEmitter::includedProperties($response, $this->includes)) {
+                    $used[$domain]['including'] = true;
+                }
+                foreach ($response->properties as $property) {
+                    if ($this->includes->hasRef($property->parsed)) {
+                        $used[$domain]['expanding'] = true;
+                    }
+                }
             }
         }
 
-        return [];
+        return array_map(static fn (array $kinds): array => array_intersect_key(self::INCLUDE_HELPERS, $kinds), $used);
     }
 
     /**
@@ -951,21 +978,17 @@ final class TypeScriptEmitter
 
     /**
      * The names the include and expand helpers take in a module, each with what it is: every one
-     * they declare, where they are declared — in each module, or in the root module where one is
-     * set — and `Ref`, which a module imports from the root module. Taken wherever the config asks
-     * for the helpers, as a config alias is, whether the module uses them or not.
+     * they declare, where they are declared — in the module whose types use them, or in the root
+     * module, where one is set, for every module's — and `Ref`, which a module that uses it imports
+     * from the root module. A module whose types use neither may name its own types as it likes.
      *
      * @return array<string, string>
      */
     private function includeHelperNames(string $domain): array
     {
-        $helpers = [];
-        if ([] !== $this->includes->types || null !== $this->includes->sideLoadAttribute) {
-            $helpers['including'] = self::WITH_INCLUDES_HELPER;
-        }
-        if ([] !== $this->includes->refTypes) {
-            $helpers['expanding'] = self::WITH_EXPANDS_HELPER;
-        }
+        $helpers = $this->domainMapper->hasRootModule() && '' === $domain
+            ? array_intersect_key(self::INCLUDE_HELPERS, array_merge(...array_values($this->includeHelpers)))
+            : $this->includeHelpers[$domain] ?? [];
 
         $names = [];
         foreach ($helpers as $kind => $code) {

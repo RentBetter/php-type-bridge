@@ -83,9 +83,7 @@ final readonly class EmitContext
      */
     public function localReferenceFor(string $foreignDomain, string $name): string
     {
-        $symbol = $this->symbols->resolve($foreignDomain, $name);
-
-        return $foreignDomain === $this->domain ? $symbol : $this->foreignAliases[$foreignDomain][$symbol] ?? $symbol;
+        return TypeToTsConverter::localName($foreignDomain, $this->symbols->resolve($foreignDomain, $name), new ConversionScope($this->domain, foreignAliases: $this->foreignAliases));
     }
 
     public function symbolForInputReference(CollectedInputReference $input): string

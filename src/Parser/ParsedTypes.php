@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Parser;
 
+use LogicException;
+
 /**
  * Walks a parsed type's parts.
  */
@@ -30,6 +32,41 @@ final class ParsedTypes
             $type instanceof ScopedType => [$type->inner],
             default => [],
         };
+    }
+
+    /**
+     * The type made of these parts in place of its own ({@see self::children()}), in the same order:
+     * the type itself where it has none.
+     *
+     * @param list<ParsedType> $children
+     */
+    public static function withChildren(ParsedType $type, array $children): ParsedType
+    {
+        return match (true) {
+            $type instanceof NullableType => new NullableType(inner: $children[0], optional: $type->optional),
+            $type instanceof ListType => new ListType($children[0]),
+            $type instanceof MapType => new MapType($children[0], $children[1]),
+            $type instanceof TupleType => new TupleType($children, unsealed: $type->unsealed),
+            $type instanceof ShapeType => self::shapeWith($type, $children),
+            $type instanceof UnionType => new UnionType($children),
+            $type instanceof IntersectionType => new IntersectionType(base: $children[0], extra: $children[1] instanceof ShapeType ? $children[1] : throw new LogicException('An intersection\'s extra is a shape.')),
+            $type instanceof GenericType => new GenericType($type->name, $children),
+            $type instanceof ScopedType => new ScopedType($children[0], $type->imports, $type->domain),
+            default => $type,
+        };
+    }
+
+    /**
+     * @param list<ParsedType> $types
+     */
+    private static function shapeWith(ShapeType $shape, array $types): ShapeType
+    {
+        $fields = [];
+        foreach ($shape->fields as $i => $field) {
+            $fields[] = new ShapeField(name: $field->name, type: $types[$i], optional: $field->optional);
+        }
+
+        return new ShapeType($fields, unsealed: $shape->unsealed);
     }
 
     /**

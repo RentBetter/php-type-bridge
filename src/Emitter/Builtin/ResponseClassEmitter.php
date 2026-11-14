@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Emitter\Builtin;
 
 use PTGS\TypeBridge\Attribute\AsTypeBridgeEmitter;
+use PTGS\TypeBridge\Config\IncludeConvention;
 use PTGS\TypeBridge\Contract\ApiResponse;
 use PTGS\TypeBridge\Emitter\EmitContext;
 use PTGS\TypeBridge\Emitter\EmittedBlock;
@@ -57,36 +58,48 @@ final class ResponseClassEmitter implements TypeEmitter
 
         $name = $context->names->responseDeclarationName($response);
         $lines = [\sprintf('export interface %s {', $name)];
-        $included = [];
         foreach ($response->properties as $property) {
-            $isIncluded = $context->converter->isIncluded($property->parsed);
             $lines[] = \sprintf(
                 '  %s%s: %s;',
                 $property->name,
-                $property->optional || $isIncluded ? '?' : '',
+                $property->optional || $context->converter->isIncluded($property->parsed) ? '?' : '',
                 // Converted in the scope of the file it is written in: the imports of that file it uses.
                 $context->convert($property->parsed, $context->scopeFor($property->imports, $property->parsed, $property->writtenInDomain)),
             );
-
-            // Present whenever it is asked for: a side-load (an empty list when nothing is
-            // referenced), or an included value whose PHP property is not nullable.
-            if (self::isSideLoad($response->className, $property->name, $context) || ($isIncluded && !$property->optional)) {
-                $included[] = "'" . $property->name . "'";
-            }
         }
         $lines[] = '}';
 
+        $included = self::includedProperties($response, $context->converter->includes);
         if ([] !== $included) {
             $lines[] = '';
-            $lines[] = \sprintf('export type %s%s = %s;', $name, TypeScriptEmitter::INCLUDED_SUFFIX, implode(' | ', $included));
+            $lines[] = \sprintf('export type %s%s = %s;', $name, TypeScriptEmitter::INCLUDED_SUFFIX, implode(' | ', array_map(static fn (string $property): string => "'" . $property . "'", $included)));
         }
 
         return implode("\n", $lines);
     }
 
-    private static function isSideLoad(string $class, string $property, EmitContext $context): bool
+    /**
+     * The properties of a response that are present whenever the request asks for them: a side-load
+     * (an empty list when nothing is referenced), or an included value whose PHP property is not
+     * nullable.
+     *
+     * @return list<string>
+     */
+    public static function includedProperties(CollectedApiResponseClass $response, IncludeConvention $includes): array
     {
-        $attribute = $context->converter->includes->sideLoadAttribute;
+        $included = [];
+        foreach ($response->properties as $property) {
+            if (self::isSideLoad($response->className, $property->name, $includes) || ($includes->isIncluded($property->parsed) && !$property->optional)) {
+                $included[] = $property->name;
+            }
+        }
+
+        return $included;
+    }
+
+    private static function isSideLoad(string $class, string $property, IncludeConvention $includes): bool
+    {
+        $attribute = $includes->sideLoadAttribute;
         if (null === $attribute || !class_exists($class) || !property_exists($class, $property)) {
             return false;
         }

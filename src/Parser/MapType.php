@@ -18,8 +18,61 @@ namespace PTGS\TypeBridge\Parser;
  */
 final readonly class MapType extends ParsedType
 {
+    /** The key it is sent with ({@see self::keyOf()}), however the map is built: parsed, or a template param bound. */
+    public ParsedType $key;
+
     public function __construct(
-        public ParsedType $key,
+        ParsedType $key,
         public ParsedType $value,
-    ) {}
+    ) {
+        $this->key = self::keyOf($key);
+    }
+
+    /**
+     * The key a map is sent with. PHP keys an array by ints and strings alone, so a key named as
+     * anything else — `mixed`, an object, a bool, a null — is whichever of them PHP makes of it: any
+     * key; and so is one of an int and a string both, PHP's own `array-key`. A name, an enum's values
+     * or a constant's are kept, and read where they are resolved.
+     */
+    public static function keyOf(ParsedType $key): ParsedType
+    {
+        if ($key instanceof ScalarType && 'array-key' === $key->type) {
+            return $key;
+        }
+
+        return self::isKey($key) && !self::isAnyKey($key) ? $key : new ScalarType('array-key');
+    }
+
+    private static function isKey(ParsedType $type): bool
+    {
+        return match (true) {
+            $type instanceof ScalarType => \in_array($type->base(), ['int', 'string', 'array-key', 'float', 'numeric'], true),
+            $type instanceof LiteralType => \is_int($type->value) || \is_string($type->value),
+            $type instanceof UnionType => array_all($type->types, self::isKey(...)),
+            $type instanceof ScopedType => self::isKey($type->inner),
+            default => $type instanceof NameRefType || $type instanceof ValueOfType || $type instanceof IdOfType || $type instanceof ClassConstantType,
+        };
+    }
+
+    /**
+     * Whether the key is every one an array has: `array-key`, or a union of an int's — a float is
+     * keyed as the int it truncates to — and a string's.
+     */
+    private static function isAnyKey(ParsedType $type): bool
+    {
+        $bases = [];
+        $types = [$type];
+        while ([] !== $types) {
+            $member = array_pop($types);
+            if ($member instanceof UnionType) {
+                array_push($types, ...$member->types);
+            } elseif ($member instanceof ScopedType) {
+                $types[] = $member->inner;
+            } elseif ($member instanceof ScalarType) {
+                $bases[$member->base()] = true;
+            }
+        }
+
+        return isset($bases['array-key']) || ((isset($bases['int']) || isset($bases['float']) || isset($bases['numeric'])) && isset($bases['string']));
+    }
 }

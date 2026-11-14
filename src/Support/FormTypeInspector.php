@@ -170,8 +170,8 @@ final class FormTypeInspector
                 // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
                 // what is sent itself, and none of them is a field a request sends — as a field, or
                 // as each entry of a collection.
-                children: self::isChoice($config) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks),
-                entryChildren: null !== $entry && $entry->getCompound() && !self::isChoice($entry->getFormConfig()) ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()), $cascades, $blanks) : [],
+                children: self::isOfType($config, ChoiceType::class) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks),
+                entryChildren: null !== $entry && $entry->getCompound() && !self::isOfType($entry->getFormConfig(), ChoiceType::class) ? $this->collectFields($entry, $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()), $cascades, $blanks) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
@@ -233,12 +233,7 @@ final class FormTypeInspector
     private function blankValue(FormConfigInterface $config, array $fieldNames = []): mixed
     {
         if ($config->getCompound()) {
-            for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
-                if ($type->getInnerType() instanceof CollectionType) {
-                    return [];
-                }
-            }
-            if ($this->isMultipleChoice($config)) {
+            if (self::isOfType($config, CollectionType::class) || $this->isMultipleChoice($config)) {
                 return [];
             }
         } elseif (null !== $this->resolveOption($config, 'choice_loader')) {
@@ -643,18 +638,19 @@ final class FormTypeInspector
      */
     private function isMultipleChoice(FormConfigInterface $config): bool
     {
-        return $config->hasOption('multiple') && true === $config->getOption('multiple') && self::isChoice($config);
+        return $config->hasOption('multiple') && true === $config->getOption('multiple') && self::isOfType($config, ChoiceType::class);
     }
 
     /**
-     * Whether the field is of the choice family: ChoiceType, or a type built on it.
+     * Whether the field is of a type's family: the type, or one built on it.
      *
-     * @param FormConfigInterface<mixed> $config
+     * @param FormConfigInterface<mixed>              $config
+     * @param class-string<FormTypeInterface<mixed>> $family
      */
-    private static function isChoice(FormConfigInterface $config): bool
+    private static function isOfType(FormConfigInterface $config, string $family): bool
     {
         for ($type = $config->getType(); null !== $type; $type = $type->getParent()) {
-            if ($type->getInnerType() instanceof ChoiceType) {
+            if ($type->getInnerType() instanceof $family) {
                 return true;
             }
         }

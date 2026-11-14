@@ -76,8 +76,29 @@ final class EndpointContractEmitter implements TypeEmitter
     private const array METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
     /**
-     * The helpers a module's endpoints share, by name: declared in the module, or in the root module
-     * and imported.
+     * The helpers a module's endpoints share, each keyed by its name: declared in the module, or in
+     * the root module and imported.
+     *
+     * @param list<CollectedEndpointContract> $contracts the module's
+     *
+     * @return list<EmittedBlock>
+     */
+    public static function helpers(array $contracts, IncludeConvention $includes): array
+    {
+        if ([] === $contracts) {
+            return [];
+        }
+
+        return [
+            ...(self::anyTakesQueryForm($contracts) ? [new EmittedBlock(40, '// Endpoint inputs', self::AS_QUERY_HELPER, 'AsQuery')] : []),
+            ...(self::anyTakesIncludeQuery($contracts, $includes) ? [new EmittedBlock(40, '// Endpoint inputs', self::includeQueryHelper($includes), 'IncludeQuery')] : []),
+            new EmittedBlock(50, '// Endpoint results', self::RESULT_HELPER, 'EndpointResult'),
+            new EmittedBlock(60, '// Endpoints', self::ENDPOINT_HELPER, 'Endpoint'),
+        ];
+    }
+
+    /**
+     * The names of the helpers a module's endpoints share ({@see self::helpers()}).
      *
      * @param list<CollectedEndpointContract> $contracts the module's
      *
@@ -85,40 +106,49 @@ final class EndpointContractEmitter implements TypeEmitter
      */
     public static function helperNames(array $contracts, IncludeConvention $includes): array
     {
-        if ([] === $contracts) {
-            return [];
-        }
-
-        return [
-            ...(self::anyTakesQueryForm($contracts) ? ['AsQuery'] : []),
-            ...(self::anyTakesIncludeQuery($contracts, $includes) ? ['IncludeQuery'] : []),
-            'EndpointResult',
-            'Endpoint',
-        ];
+        return array_map(static fn (EmittedBlock $helper): string => (string) $helper->sortKey, self::helpers($contracts, $includes));
     }
 
     /**
-     * Every type name an endpoint declares of its own — its inputs, response map and result, as
-     * {@see self::emit()} declares them — each with what it names, to say which two clash. Beside
-     * the helpers its module takes ({@see self::helperNames()}), all a module names for its endpoints.
+     * Every type name an endpoint declares of its own — its inputs, response map and result
+     * ({@see self::declared()}) — each with what it names, to say which two clash. Beside the helpers
+     * its module takes ({@see self::helperNames()}), all a module names for its endpoints.
      *
      * @return list<array{string, string}> the name, and what it names
      */
     public static function endpointNames(CollectedEndpointContract $contract, TypeScriptNaming $naming, IncludeConvention $includes): array
     {
+        $what = ['query' => 'the query of', 'body' => 'the body of', 'path' => 'the path of', 'map' => 'the response map of', 'result' => 'the result of'];
+        $names = [];
+        foreach (self::declared($contract, $naming, $includes) as $part => $name) {
+            $names[] = [$name, $what[$part] . ' endpoint ' . $contract->name];
+        }
+
+        return $names;
+    }
+
+    /**
+     * The types an endpoint declares of its own, each under its name: its query — its query form's,
+     * the include query, or both — its body and its path where it takes them, its response map and
+     * its result. What {@see self::emit()} declares, and {@see self::endpointNames()} claims.
+     *
+     * @return array{query?: string, body?: string, path?: string, map: string, result: string}
+     */
+    private static function declared(CollectedEndpointContract $contract, TypeScriptNaming $naming, IncludeConvention $includes): array
+    {
         $request = $contract->request;
         $names = [];
         if (null !== $request?->query || self::takesIncludeQuery($contract, $includes)) {
-            $names[] = [$naming->queryAliasName($contract->name), 'the query of endpoint ' . $contract->name];
+            $names['query'] = $naming->queryAliasName($contract->name);
         }
         if (null !== $request?->body) {
-            $names[] = [$naming->bodyAliasName($contract->name), 'the body of endpoint ' . $contract->name];
+            $names['body'] = $naming->bodyAliasName($contract->name);
         }
         if (null !== $request?->path || null !== $request?->pathParams) {
-            $names[] = [$naming->pathAliasName($contract->name), 'the path of endpoint ' . $contract->name];
+            $names['path'] = $naming->pathAliasName($contract->name);
         }
-        $names[] = [$naming->endpointMapName($contract->name), 'the response map of endpoint ' . $contract->name];
-        $names[] = [$naming->endpointResultName($contract->name), 'the result of endpoint ' . $contract->name];
+        $names['map'] = $naming->endpointMapName($contract->name);
+        $names['result'] = $naming->endpointResultName($contract->name);
 
         return $names;
     }
@@ -188,41 +218,44 @@ final class EndpointContractEmitter implements TypeEmitter
     {
         $contracts = $context->contractsForController($class->getName());
 
+        $declared = [];
+        foreach ($contracts as $i => $contract) {
+            $declared[$i] = self::declared($contract, $context->naming, $context->includes);
+        }
+
         $blocks = [];
-        foreach ($contracts as $contract) {
-            if ((null !== $contract->request && $contract->request->hasAnyInput()) || self::takesIncludeQuery($contract, $context->includes)) {
-                $blocks[] = new EmittedBlock(40, '// Endpoint inputs', $this->renderInputs($contract, $context));
+        foreach ($contracts as $i => $contract) {
+            $inputs = $this->renderInputs($contract, $declared[$i], $context);
+            if ('' !== $inputs) {
+                $blocks[] = new EmittedBlock(40, '// Endpoint inputs', $inputs);
             }
         }
-        foreach ($contracts as $contract) {
-            $blocks[] = new EmittedBlock(50, '// Endpoint results', $this->renderResult($contract, $context));
+        foreach ($contracts as $i => $contract) {
+            $blocks[] = new EmittedBlock(50, '// Endpoint results', $this->renderResult($contract, $declared[$i], $context));
         }
-        foreach ($contracts as $contract) {
-            $blocks[] = new EmittedBlock(60, '// Endpoints', $this->renderEndpoint($contract, $context), $contract->name);
+        foreach ($contracts as $i => $contract) {
+            $blocks[] = new EmittedBlock(60, '// Endpoints', $this->renderEndpoint($contract, $declared[$i], $context), $contract->name);
         }
 
         return new EmittedType($context->domain, $blocks);
     }
 
-    private function renderInputs(CollectedEndpointContract $contract, EmitContext $context): string
+    /**
+     * @param array{query?: string, body?: string, path?: string, map: string, result: string} $declared
+     */
+    private function renderInputs(CollectedEndpointContract $contract, array $declared, EmitContext $context): string
     {
-        $lines = [];
-        if (null !== $query = $this->queryType($contract, $context)) {
-            $lines[] = \sprintf('export type %s = %s;', $context->naming->queryAliasName($contract->name), $query);
-        }
-
         $request = $contract->request;
-        if (null === $request) {
-            return implode("\n", $lines);
+        $lines = [];
+        if (isset($declared['query'])) {
+            $lines[] = \sprintf('export type %s = %s;', $declared['query'], $this->queryType($contract, $context));
         }
-
-        if (null !== $request->body) {
-            $lines[] = \sprintf('export type %s = %s;', $context->naming->bodyAliasName($contract->name), $context->symbolForInputReference($request->body));
+        if (isset($declared['body']) && null !== $request?->body) {
+            $lines[] = \sprintf('export type %s = %s;', $declared['body'], $context->symbolForInputReference($request->body));
         }
-        if (null !== $request->path) {
-            $lines[] = \sprintf('export type %s = %s;', $context->naming->pathAliasName($contract->name), $context->symbolForInputReference($request->path));
-        } elseif (null !== $request->pathParams) {
-            $lines[] = \sprintf('export type %s = %s;', $context->naming->pathAliasName($contract->name), $this->renderPathParams($request->pathParams));
+        if (isset($declared['path'])) {
+            $path = $request?->path;
+            $lines[] = \sprintf('export type %s = %s;', $declared['path'], null !== $path ? $context->symbolForInputReference($path) : $this->renderPathParams($request->pathParams ?? []));
         }
 
         return implode("\n", $lines);
@@ -230,9 +263,9 @@ final class EndpointContractEmitter implements TypeEmitter
 
     /**
      * The endpoint's query: its query form's type as a query string sends it, `IncludeQuery` when
-     * its response has a body to shape, both intersected, or none.
+     * its response has a body to shape, or both intersected.
      */
-    private function queryType(CollectedEndpointContract $contract, EmitContext $context): ?string
+    private function queryType(CollectedEndpointContract $contract, EmitContext $context): string
     {
         $types = [];
         if (null !== $query = $contract->request?->query) {
@@ -242,7 +275,7 @@ final class EndpointContractEmitter implements TypeEmitter
             $types[] = 'IncludeQuery';
         }
 
-        return [] === $types ? null : implode(' & ', $types);
+        return implode(' & ', $types);
     }
 
     /**
@@ -279,17 +312,20 @@ final class EndpointContractEmitter implements TypeEmitter
         return '{ ' . implode('; ', $fields) . ' }';
     }
 
-    private function renderResult(CollectedEndpointContract $contract, EmitContext $context): string
+    /**
+     * @param array{query?: string, body?: string, path?: string, map: string, result: string} $declared
+     */
+    private function renderResult(CollectedEndpointContract $contract, array $declared, EmitContext $context): string
     {
         $responses = $contract->responses;
         usort($responses, static fn(CollectedApiResponseClass $left, CollectedApiResponseClass $right): int => $left->status <=> $right->status);
 
-        $lines = [\sprintf('export type %s = {', $context->naming->endpointMapName($contract->name))];
+        $lines = [\sprintf('export type %s = {', $declared['map'])];
         foreach ($responses as $response) {
             $lines[] = \sprintf('  %d: %s;', $response->status, $context->responseSymbolName($response));
         }
         $lines[] = '};';
-        $lines[] = \sprintf('export type %s = EndpointResult<%s>;', $context->naming->endpointResultName($contract->name), $context->naming->endpointMapName($contract->name));
+        $lines[] = \sprintf('export type %s = EndpointResult<%s>;', $declared['result'], $declared['map']);
 
         return implode("\n", $lines);
     }
@@ -299,8 +335,10 @@ final class EndpointContractEmitter implements TypeEmitter
      * the method and path to call, typed with the endpoint's responses and the inputs it takes —
      * its path params and body when it has them, and its query: `query?` when a caller may leave it
      * out, `query` when its contract requires a key.
+     *
+     * @param array{query?: string, body?: string, path?: string, map: string, result: string} $declared
      */
-    private function renderEndpoint(CollectedEndpointContract $contract, EmitContext $context): string
+    private function renderEndpoint(CollectedEndpointContract $contract, array $declared, EmitContext $context): string
     {
         if (!\in_array($contract->httpMethod, self::METHODS, true)) {
             throw new \RuntimeException(\sprintf(
@@ -312,18 +350,17 @@ final class EndpointContractEmitter implements TypeEmitter
         }
 
         $inputs = [];
-        $request = $contract->request;
-        if (null !== $request && (null !== $request->path || null !== $request->pathParams)) {
-            $inputs[] = 'path: ' . $context->naming->pathAliasName($contract->name);
+        if (isset($declared['path'])) {
+            $inputs[] = 'path: ' . $declared['path'];
         }
-        if (null !== $this->queryType($contract, $context)) {
-            $inputs[] = (self::requiresQuery($contract) ? 'query: ' : 'query?: ') . $context->naming->queryAliasName($contract->name);
+        if (isset($declared['query'])) {
+            $inputs[] = (self::requiresQuery($contract) ? 'query: ' : 'query?: ') . $declared['query'];
         }
-        if (null !== $request?->body) {
-            $inputs[] = 'body: ' . $context->naming->bodyAliasName($contract->name);
+        if (isset($declared['body'])) {
+            $inputs[] = 'body: ' . $declared['body'];
         }
 
-        $type = $context->naming->endpointMapName($contract->name);
+        $type = $declared['map'];
         if ([] !== $inputs) {
             $type .= ', { ' . implode('; ', $inputs) . ' }';
         }

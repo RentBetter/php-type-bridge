@@ -31,6 +31,16 @@ final class MapKeyTest extends TestCase
         self::assertStringContainsString("export interface EitherRowsResponse {\n  rows: Record<string, string> | string[];\n}", $rows);
         self::assertStringContainsString("export interface IntRowsResponse {\n  rows: Record<number, string>;\n}", $rows);
         self::assertStringContainsString("export interface AliasRowsResponse {\n  rows: Record<string, string> | string[];\n}", $rows);
+        self::assertStringContainsString("export interface CodeRowsResponse {\n  rows: Record<Code, string>;\n}", $rows);
+        // Bound to an intersection, which is read whole in the file that writes it.
+        self::assertStringContainsString("export interface ExtendedRowsResponse {\n  rows: Record<number, RowKeys & { extra: Record<string, string> | string[] }>;\n}", $rows);
+    }
+
+    public function test_an_inherited_key_is_read_in_the_module_of_the_file_that_writes_it(): void
+    {
+        // The base's aliases, of anything, are its module's: its own, and one another class of the
+        // module declares, which this module has neither of.
+        self::assertStringContainsString("export interface KeyedRowsResponse {\n  byBase: Record<string, string> | string[];\n  byModule: Record<string, string> | string[];\n}", self::emit()['Rows']);
     }
 
     public function test_a_key_an_alias_names_is_keyed_as_the_alias_is(): void
@@ -45,6 +55,7 @@ final class MapKeyTest extends TestCase
             . "  byCode: Record<Code, number>;\n"
             . "  byLoose: Record<string, string> | string[];\n"
             . "  byAnything: Record<string, string> | string[];\n"
+            . "  byMaybeOrX: Record<string, string> | string[];\n"
             . '}',
             $rows,
         );

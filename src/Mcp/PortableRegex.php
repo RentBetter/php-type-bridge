@@ -12,6 +12,9 @@ namespace PTGS\TypeBridge\Mcp;
  */
 final class PortableRegex
 {
+    /** The class escapes both dialects take: `\D` and `\W` match a byte of a multibyte character by byte, and more than ECMA's by code point. */
+    private const string CLASS_ESCAPES = 'dw';
+
     /**
      * A Regex constraint's pattern as a whole-value rule both dialects read alike: anchored at both
      * ends (`/^…$/`) — unanchored, PCRE matches anywhere and across lines, which no padding with `.*`
@@ -118,11 +121,11 @@ final class PortableRegex
      * don't:
      *
      * - printable ASCII literals; outside a class, the syntax characters only escaped;
-     * - the escapes `\d \D \w \W \b \B \n \r \t \f` and escaped syntax characters (`\.`, `\/`, …) —
-     *   not `\s` or `\v`, whose sets differ, nor a backreference, an octal, `\x`, `\p` or an escaped
-     *   letter or `_`;
-     * - classes of literals, ranges between two literals in order, and `\d \D \w \W` — no nested
-     *   bracket, so no POSIX class, and no range from a class escape (`[\w-.]`);
+     * - the escapes `\d \w \b \B \n \r \t \f` and escaped syntax characters (`\.`, `\/`, …) —
+     *   not `\s` or `\v`, whose sets differ, nor `\D` or `\W` (below), a backreference, an octal,
+     *   `\x`, `\p` or an escaped letter or `_`;
+     * - classes of literals, ranges between two literals in order, and `\d \w` — no nested bracket,
+     *   so no POSIX class, and no range from a class escape (`[\w-.]`);
      * - plain and `(?:` groups, `*`, `+`, `?` and `{n}`, `{n,}`, `{n,m}` (n ≤ m) after something to
      *   repeat, each optionally lazy — not possessive;
      * - no `.` (PCRE's matches `\r`, and a route's a newline too; ECMA's neither), no `^` or `$`
@@ -141,15 +144,11 @@ final class PortableRegex
             return false;
         }
 
-        $byteSafe = true !== $unicode;
-        $classEscapes = $byteSafe ? 'dw' : 'dDwW';
-        $boundaries = 'bB';
-        // Read as Unicode, only `\d` and `\w`, published as their ASCII sets.
+        // A negated class only where PCRE matches code points; `\b` and `\B` only where it reads
+        // them as ECMA does, by byte. Read as Unicode, `\d` and `\w` are published as their ASCII sets.
+        $negatable = true === $unicode;
+        $boundaries = false === $unicode ? 'bB' : '';
         $widened = false !== $unicode;
-        if ($widened) {
-            $classEscapes = 'dw';
-            $boundaries = '';
-        }
 
         $length = \strlen($fragment);
         $depth = 0;
@@ -160,7 +159,7 @@ final class PortableRegex
 
             if ('\\' === $char) {
                 $escaped = $fragment[$i + 1] ?? '';
-                if ('' !== $escaped && str_contains($classEscapes . 'nrtf', $escaped)) {
+                if ('' !== $escaped && str_contains(self::CLASS_ESCAPES . 'nrtf', $escaped)) {
                     $repeatable = true;
                 } elseif ('' !== $escaped && str_contains($boundaries, $escaped)) {
                     $repeatable = false;
@@ -175,7 +174,7 @@ final class PortableRegex
             }
 
             if ('[' === $char) {
-                $close = self::classEnd($fragment, $i, $classEscapes, negatable: !$byteSafe, widened: $widened);
+                $close = self::classEnd($fragment, $i, negatable: $negatable, widened: $widened);
                 if (null === $close) {
                     return false;
                 }
@@ -269,7 +268,7 @@ final class PortableRegex
             $char = $fragment[$i];
             if ('\\' === $char) {
                 $escaped = $fragment[++$i] ?? '';
-                if ('' !== $escaped && (str_contains('nrtfvsDW', $escaped) || ($inClass && 'b' === $escaped))) {
+                if ('' !== $escaped && (str_contains('nrtf', $escaped) || ($inClass && 'b' === $escaped))) {
                     return true;
                 }
 
@@ -293,14 +292,15 @@ final class PortableRegex
 
     /**
      * Where the class opening at `$open` closes, when every part of it reads the same in both
-     * dialects: literals, escaped syntax characters and `\n \r \t \f \b \-`, the class escapes the
-     * mode allows (`$classEscapes`), and ranges between two literals in order — and negated only
-     * where the mode matches code points (`$negatable`), and then with no class escape published as
-     * a narrower set (`$widened`), which refusing fewer would take more. Null otherwise: a `[`
-     * inside (a POSIX class, or nesting), a range from or to a class escape, an empty class.
+     * dialects: literals, escaped syntax characters and `\n \r \t \f \b \-`, `\d` and `\w`, and
+     * ranges between two literals in order — and negated only where the mode matches code points
+     * (`$negatable`), and then with no class escape published as a narrower set (`$widened`), which
+     * refusing fewer would take more. Null otherwise: a `[` inside (a POSIX class, or nesting), a
+     * range from or to a class escape, an empty class.
      */
-    private static function classEnd(string $fragment, int $open, string $classEscapes, bool $negatable, bool $widened): ?int
+    private static function classEnd(string $fragment, int $open, bool $negatable, bool $widened): ?int
     {
+        $classEscapes = self::CLASS_ESCAPES;
         $length = \strlen($fragment);
         $i = $open + 1;
         if ('^' === ($fragment[$i] ?? '')) {

@@ -830,7 +830,7 @@ final class McpManifestBuilderTest extends TestCase
     {
         // A JSON list decodes to the array 0..n keys it, which an int or any key takes — the
         // TypeScript says so, and the server takes it. A map of string keys takes only an object.
-        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{tags: array<array-key, string>, ids: array<int, string>, any: iterable<string>, byName: array<string, int>, either: array<int|string, string>, byFloat: array<float, string>}'));
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{tags: array<array-key, string>, ids: array<int, string>, any: iterable<string>, byName: array<string, int>, either: array<int|string, string>, byFloat: array<float, string>, byNumber: array<int|float, string>}'));
 
         $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
         $strings = ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]];
@@ -841,6 +841,7 @@ final class McpManifestBuilderTest extends TestCase
         // Every key an array has is any key; PHP keys a float as the int it truncates to.
         self::assertSame($strings, $properties['either']);
         self::assertSame($strings, $properties['byFloat']);
+        self::assertSame($strings, $properties['byNumber']);
     }
 
     public function testAMapKeyedByANameIsKeyedAsTheNameReads(): void

@@ -141,6 +141,19 @@ final class SharedNameTest extends TestCase
         self::assertStringContainsString('export type WithIncludes<', $output['Checks']);
     }
 
+    public function test_a_module_declares_the_helpers_its_responses_and_intersections_use(): void
+    {
+        $output = $this->emit('UnusedHelperNamedFixtures', includes: new IncludeConvention(['included'], refTypes: ['ref']));
+
+        self::assertStringContainsString('author: Ref<AuthorData>;', $output['Orders']);
+        self::assertStringContainsString('export type WithExpands<', $output['Orders']);
+        self::assertStringContainsString("export type ShowOrderResponseIncluded = 'debug';", $output['Orders']);
+        self::assertStringContainsString('export type WithIncludes<', $output['Orders']);
+        self::assertStringContainsString("export type NoteDataIncluded = 'debug';", $output['Notes']);
+        self::assertStringContainsString('export type WithIncludes<', $output['Notes']);
+        self::assertStringNotContainsString('WithExpands', $output['Notes']);
+    }
+
     public function test_with_a_root_module_a_module_that_imports_no_helper_may_name_a_type_as_one(): void
     {
         $output = $this->emit('UnusedHelperNamedFixtures', new OutputStructure(rootModule: 'genTypes.ts'), includes: new IncludeConvention(['included'], refTypes: ['ref']));
@@ -149,6 +162,15 @@ final class SharedNameTest extends TestCase
         self::assertStringNotContainsString('import type', $output['Shop']);
         self::assertStringContainsString("import type { Ref } from '../genTypes';", $output['Checks']);
         self::assertStringContainsString('export type WithExpands<', $output['']);
+    }
+
+    public function test_the_root_module_claims_the_helpers_another_module_uses(): void
+    {
+        // Shop's types are the root module's own, and use no helper; Checks' are declared there.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "": "ListItem" is emitted by both the root module\'s expanding helper ListItem and type ');
+
+        $this->emit('UnusedHelperNamedFixtures', new OutputStructure(rootModule: 'genTypes.ts'), ['Shop'], new IncludeConvention(['included'], refTypes: ['ref']));
     }
 
     /**

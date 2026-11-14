@@ -622,10 +622,12 @@ final class McpManifestBuilder
             }
             $object = ['type' => 'object', 'additionalProperties' => $items];
 
-            // A JSON list decodes to the array its 0..n keys key: one an int may key takes it too.
-            return $type->key instanceof ScalarType && \in_array($type->key->base(), ['int', 'array-key'], true)
-                ? ['anyOf' => [$object, ['type' => 'array', 'items' => $items]]]
-                : $object;
+            // A JSON list decodes to the array its 0..n keys key: one keyed by any int takes it too.
+            return match ($this->keyTakesList($type->key)) {
+                true => ['anyOf' => [$object, ['type' => 'array', 'items' => $items]]],
+                false => $object,
+                null => null,
+            };
         }
 
         return match (true) {
@@ -639,6 +641,31 @@ final class McpManifestBuilder
                 ? ['enum' => array_map(static fn (BackedEnum $case): int|string => $case->value, $type->enumClass::cases())]
                 : null,
             $type instanceof NameRefType && null === $type->class => $this->configAliasSchema($type->name),
+            default => null,
+        };
+    }
+
+    /**
+     * Whether a map's key is any int, so a list is the map too: an int's, a float's — keyed as the
+     * int it truncates to — or any key; not a literal's, nor an enum's values, which name the keys
+     * there are. Null for a name the builder can't read here, which says neither.
+     */
+    private function keyTakesList(ParsedType $key): ?bool
+    {
+        if ($key instanceof UnionType) {
+            $takes = array_map($this->keyTakesList(...), $key->types);
+
+            return \in_array(null, $takes, true) ? null : !\in_array(false, $takes, true);
+        }
+
+        return match (true) {
+            $key instanceof ScalarType => \in_array($key->base(), ['int', 'float', 'numeric', 'array-key'], true),
+            $key instanceof LiteralType, $key instanceof ValueOfType, $key instanceof IdOfType => false,
+            $key instanceof NameRefType && null === $key->class => match ($this->configAliasSchema($key->name)['type'] ?? null) {
+                'number' => true,
+                'string' => false,
+                default => null,
+            },
             default => null,
         };
     }

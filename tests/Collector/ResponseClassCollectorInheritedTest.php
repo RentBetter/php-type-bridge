@@ -474,7 +474,8 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
         self::assertStringContainsString("export interface ListTagsResponse {\n  tags: Tag[];\n}", $notes);
         self::assertStringContainsString("export interface ListPromotedLabelsResponse {\n  labels: Tag[];\n}", $notes);
-        self::assertStringNotContainsString('CommonTag', $notes);
+        // One it only uses is the trait's, read in the trait's file.
+        self::assertStringContainsString("export interface ListTraitTagsResponse {\n  tags: CommonTag[];\n}", $notes);
     }
 
     public function test_self_in_a_traits_property_is_the_class_using_it(): void
