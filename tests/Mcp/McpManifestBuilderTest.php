@@ -826,6 +826,30 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['enum' => [1]], $properties['level']);
     }
 
+    public function testAMapAnIntMayKeyTakesAListToo(): void
+    {
+        // A JSON list decodes to the array 0..n keys it, which an int or any key takes — the
+        // TypeScript says so, and the server takes it. A map of string keys takes only an object.
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{tags: array<array-key, string>, ids: array<int, string>, any: iterable<string>, byName: array<string, int>}'));
+
+        $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
+        $strings = ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]];
+        self::assertSame($strings, $properties['tags']);
+        self::assertSame($strings, $properties['ids']);
+        self::assertSame($strings, $properties['any']);
+        self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'integer']], $properties['byName']);
+    }
+
+    public function testANullableMapTakesNullBesideEither(): void
+    {
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{tags: array<array-key, string>|null}'));
+
+        self::assertSame(
+            ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']], ['type' => 'null']]],
+            $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties']['tags'],
+        );
+    }
+
     public function testAFieldTheContractDoesNotDeclareIsLeftToItsForm(): void
     {
         $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';

@@ -65,6 +65,24 @@ final class PreserveNullConsistencyRuleTest extends RuleTestCase
         ]);
     }
 
+    public function testHoldsAnInterfacesAndATraitsShapesToItToo(): void
+    {
+        // Both are collected and emitted as a class's are, and the emitter holds them to it.
+        $this->analyse([
+            __DIR__ . '/../../Fixtures/Shape/Negative/MissingPreserveNullContract.php',
+            __DIR__ . '/../../Fixtures/Shape/Negative/MissingPreserveNullTrait.php',
+        ], [
+            [
+                'Field `nickname` in shape `MissingPreserveNullContract` (on PTGS\\TypeBridge\\Tests\\PHPStan\\Fixtures\\Shape\\Negative\\MissingPreserveNullContract) has `T|null` annotation but is not listed in `typeBridge.preserveNull`. Change the annotation to `?T` (emits as `nickname?: T`; field is omitted when null), or add `MissingPreserveNullContract.nickname` to preserveNull if null is semantically meaningful for this field.',
+                16,
+            ],
+            [
+                'Field `nickname` in shape `SharedNickname` (on PTGS\\TypeBridge\\Tests\\PHPStan\\Fixtures\\Shape\\Negative\\MissingPreserveNullTrait) has `T|null` annotation but is not listed in `typeBridge.preserveNull`. Change the annotation to `?T` (emits as `nickname?: T`; field is omitted when null), or add `SharedNickname.nickname` to preserveNull if null is semantically meaningful for this field.',
+                16,
+            ],
+        ]);
+    }
+
     public function testFlagsOptionalAnnotationOnPreserveNullField(): void
     {
         $this->preserveNull = ['UnnecessaryOptionalView.archivedAt'];

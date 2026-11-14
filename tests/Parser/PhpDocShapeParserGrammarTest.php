@@ -50,6 +50,49 @@ final class PhpDocShapeParserGrammarTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{string}>
+     */
+    public static function keysNoArrayHas(): iterable
+    {
+        yield 'an iterable of mixed keys' => ['iterable<mixed, string>'];
+        yield 'an iterable of object keys' => ['iterable<object, string>'];
+        yield 'an iterable of shape keys' => ['iterable<array{id: int}, string>'];
+        yield 'an array of mixed keys' => ['array<mixed, string>'];
+        yield 'an array of scalar keys' => ['array<scalar, string>'];
+        yield 'an array of bool keys' => ['array<bool, string>'];
+        yield 'an array of nullable keys' => ['array<int|null, string>'];
+    }
+
+    #[DataProvider('keysNoArrayHas')]
+    public function test_a_key_no_array_is_keyed_by_is_the_key_the_array_has(string $input): void
+    {
+        // PHP keys an array by ints and strings alone, and TypeScript a Record by what it can
+        // spell of them: what else a map names is any key, as `iterable<V>` is.
+        $map = (new PhpDocShapeParser())->parse($input);
+
+        self::assertInstanceOf(MapType::class, $map);
+        self::assertInstanceOf(ScalarType::class, $map->key);
+        self::assertSame('array-key', $map->key->type);
+    }
+
+    public function test_a_key_an_array_is_keyed_by_is_kept(): void
+    {
+        $parser = new PhpDocShapeParser();
+
+        foreach (['array<positive-int, string>' => 'positive-int', 'iterable<class-string, string>' => 'class-string', 'array<float, string>' => 'float'] as $input => $key) {
+            $map = $parser->parse($input);
+            self::assertInstanceOf(MapType::class, $map);
+            self::assertInstanceOf(ScalarType::class, $map->key);
+            self::assertSame($key, $map->key->type);
+        }
+        foreach (["array<'a' | 'b', int>", 'array<value-of<Status>, int>', 'array<Code, int>'] as $input) {
+            $map = $parser->parse($input);
+            self::assertInstanceOf(MapType::class, $map);
+            self::assertNotInstanceOf(ScalarType::class, $map->key, $input);
+        }
+    }
+
+    /**
      * @return iterable<string, array{string, string, string}>
      */
     public static function refinements(): iterable

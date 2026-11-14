@@ -28,4 +28,13 @@ final class ShowThingResponse implements HttpOk
 
     /** @var iterable<int, bool> */
     public iterable $flags = [];
+
+    /** @var iterable<mixed, string> */
+    public iterable $anyKeyed = [];
+
+    public ?iterable $maybeItems = null;
+
+    public iterable|null $alsoMaybeItems = null;
+
+    public iterable|string $itemsOrName = [];
 }

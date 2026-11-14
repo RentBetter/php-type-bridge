@@ -522,6 +522,17 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString("  native: NonNullable<unknown>;\n  documented: NonNullable<unknown>;\n  maybe: NonNullable<unknown> | null;\n", $things);
         self::assertStringContainsString("  items: Record<string, unknown> | unknown[];\n  documentedItems: Record<string, unknown> | unknown[];\n", $things);
         self::assertStringContainsString("  tags: Record<string, string> | string[];\n  flags: Record<number, boolean>;\n", $things);
+        // Keyed by anything, as PHPStan reads `iterable<V>`: any key an array has.
+        self::assertStringContainsString("  anyKeyed: Record<string, string> | string[];\n", $things);
+    }
+
+    public function test_native_iterable_in_a_union_is_what_it_is_alone(): void
+    {
+        // PHP reflects `iterable|null` as `Traversable|array|null`: no class sent, but the array
+        // `iterable` is, as `?iterable` is.
+        $things = self::emit(self::fixtures('NativeKeywordFixtures'))['Things'];
+
+        self::assertStringContainsString("  maybeItems: Record<string, unknown> | unknown[] | null;\n  alsoMaybeItems: Record<string, unknown> | unknown[] | null;\n  itemsOrName: Record<string, unknown> | unknown[] | string;\n", $things);
     }
 
     public function test_a_native_parent_type_is_the_parent_class(): void
