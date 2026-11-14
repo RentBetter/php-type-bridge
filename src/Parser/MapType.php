@@ -12,9 +12,8 @@ namespace PTGS\TypeBridge\Parser;
  * built from database rows, an FX table keyed by currency pair); a fixed set of
  * fields is better expressed as `array{...}` so consumers get real names.
  *
- * The single-argument `array<V>` form is deliberately NOT accepted. PHPStan
- * reads it as a list with integer keys, and silently treating it as a map keyed
- * by string would emit a type that lies about the data.
+ * The single-argument `array<V>` is keyed by anything, as PHPStan reads it:
+ * `array<array-key, V>`, a list or an object as json_encode writes it.
  */
 final readonly class MapType extends ParsedType
 {
@@ -55,8 +54,9 @@ final readonly class MapType extends ParsedType
     }
 
     /**
-     * Whether the key is every one an array has: `array-key`, or a union of an int's — a float is
-     * keyed as the int it truncates to — and a string's.
+     * Whether the key is every one an array has: `array-key`; a numeric string, which PHP keys as
+     * the int it spells and PHPStan reads as `int|numeric-string`; or a union of an int's — a float
+     * is keyed as the int it truncates to — and a string's.
      */
     private static function isAnyKey(ParsedType $type): bool
     {
@@ -69,7 +69,7 @@ final readonly class MapType extends ParsedType
             } elseif ($member instanceof ScopedType) {
                 $types[] = $member->inner;
             } elseif ($member instanceof ScalarType) {
-                $bases[$member->base()] = true;
+                $bases['numeric-string' === $member->type ? 'array-key' : $member->base()] = true;
             }
         }
 

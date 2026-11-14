@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Emitter;
 
+use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedDomain;
 use PTGS\TypeBridge\Model\CollectedType;
 use PTGS\TypeBridge\Model\ImportedType;
@@ -34,17 +35,22 @@ final class ClassTypeResolver
     /** @var array<string, CollectedDomain> */
     private array $domains;
 
+    /** @var array<string, CollectedApiResponseClass> keyed by class */
+    private array $responses = [];
+
     /** @var array<string, EmitImport> */
     private array $resolved = [];
 
     /**
-     * @param array<string, CollectedDomain> $domains
+     * @param array<string, CollectedDomain>                 $domains
+     * @param array<string, list<CollectedApiResponseClass>> $responses
      */
     public function __construct(
         array $domains,
         private readonly EmittedNames $names,
         private readonly EmitterRegistry $registry,
         private readonly RootSources $rootSources = new RootSources(),
+        array $responses = [],
     ) {
         $this->domains = $domains;
         foreach ($domains as $domain) {
@@ -54,6 +60,11 @@ final class ClassTypeResolver
                 }
             }
             $this->selfImports += $domain->selfImports;
+        }
+        foreach ($responses as $domainResponses) {
+            foreach ($domainResponses as $response) {
+                $this->responses[$response->className] = $response;
+            }
         }
     }
 
@@ -66,6 +77,13 @@ final class ClassTypeResolver
     {
         if (!PhpFileClassLocator::loads($class)) {
             throw new RuntimeException(\sprintf('A shape names "%s" as a type, and there is no such class.', $class));
+        }
+
+        // A response is sent as the interface of its public properties the module declares for it.
+        if (isset($this->responses[$class])) {
+            $response = $this->responses[$class];
+
+            return new EmitImport($response->domain, $this->names->responseDeclarationName($response));
         }
 
         $reflection = new ReflectionClass($class);

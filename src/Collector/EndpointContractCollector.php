@@ -908,8 +908,9 @@ final class EndpointContractCollector
             $type instanceof NullableType => new NullableType($read($type->inner, $type->optional && $nullAsked), $type->optional),
             $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member, $nullAsked && !$type->hasNull()), $type->types)),
             $type instanceof ListType => new ListType($read($type->inner, $nullAsked && !$inQuery)),
-            // A map's values are never sent null on their own: nothing reads a value's null.
-            $type instanceof MapType => new MapType($type->key, $read($type->value, false)),
+            // A map's values are never sent null on their own: nothing reads a value's null. Its
+            // key is read too, so the tool knows whether an int may key it.
+            $type instanceof MapType => new MapType($read($type->key, false), $read($type->value, false)),
             $type instanceof ShapeType => new ShapeType(array_map(
                 fn (ShapeField $key): ShapeField => new ShapeField($key->name, $read($key->type, $inQuery ? $nullAsked && !$key->mayBeLeftOut(inQuery: true) : $nullAsked), $key->optional),
                 $type->fields,

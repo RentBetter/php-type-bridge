@@ -22,7 +22,7 @@ use InvalidArgumentException;
  */
 final class ClassFileTypes
 {
-    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}|false> by file; false where it can't be read */
+    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>, properties: array<string, array<string, true>>}|false> by file; false where it can't be read */
     private array $files = [];
 
     /** @var array<string, bool> by class */
@@ -160,9 +160,20 @@ final class ClassFileTypes
     }
 
     /**
+     * Whether the class or trait declares the property in its own body, in the file it is written
+     * in ({@see DeclaredProperties}), rather than takes it from a trait it uses.
+     */
+    public function declaresProperty(string $file, string $class, string $property): bool
+    {
+        $read = '' === $file ? false : $this->read($file);
+
+        return false !== $read && isset($read['properties'][$class][$property]);
+    }
+
+    /**
      * What the file declares, imports and `use`s, read out of it once.
      *
-     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}|false
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>, properties: array<string, array<string, true>>}|false
      */
     private function read(string $file): array|false
     {

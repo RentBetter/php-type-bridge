@@ -249,7 +249,7 @@ final class TypeScriptEmitter
         $this->enumsByDomain = $this->referencedEnums($domains, $responses);
         $this->includeHelpers = $this->includeHelpersUsed($domains, $responses);
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses, $contracts), array_keys($this->typeAliases));
-        $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources);
+        $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources, $responses);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
 
         // A module whose enum something emitted elsewhere names is written, if only for the enum.
@@ -876,8 +876,9 @@ final class TypeScriptEmitter
         $maps = [];
         $registrations = [];
         // Every module written, one written only for an enum named from elsewhere included: its
-        // names collide as any other's.
-        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts), array_keys($this->enumsByDomain)));
+        // names collide as any other's. The root module, where one is set, declares what every
+        // module shares, whether it has types of its own or not.
+        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts), array_keys($this->enumsByDomain), $this->domainMapper->hasRootModule() ? [''] : []));
 
         foreach ($allDomains as $domain) {
             $maps[$domain] = [];
@@ -894,7 +895,8 @@ final class TypeScriptEmitter
                 );
             }
 
-            foreach ($this->includeHelperNames($domain) as $name => $what) {
+            $endpoints = array_map(static fn (CollectedEndpointContract $contract): string => $contract->name, $contracts[$domain] ?? []);
+            foreach ($this->includeHelperNames($domain, $endpoints) as $name => $what) {
                 $this->registerSymbol(domain: $domain, logicalName: null, emittedName: $name, descriptor: $what, maps: $maps, registrations: $registrations);
             }
 
@@ -980,11 +982,15 @@ final class TypeScriptEmitter
      * The names the include and expand helpers take in a module, each with what it is: every one
      * they declare, where they are declared — in the module whose types use them, or in the root
      * module, where one is set, for every module's — and `Ref`, which a module that uses it imports
-     * from the root module. A module whose types use neither may name its own types as it likes.
+     * from the root module, unless it declares the expanding helpers itself beside an endpoint of
+     * that name ({@see self::emitDomain()}). A module whose types use neither may name its own types
+     * as it likes.
+     *
+     * @param list<string> $endpoints the names of the module's endpoints, each a `const` of it
      *
      * @return array<string, string>
      */
-    private function includeHelperNames(string $domain): array
+    private function includeHelperNames(string $domain, array $endpoints = []): array
     {
         $helpers = $this->domainMapper->hasRootModule() && '' === $domain
             ? array_intersect_key(self::INCLUDE_HELPERS, array_merge(...array_values($this->includeHelpers)))
@@ -997,6 +1003,7 @@ final class TypeScriptEmitter
                 $names[$name] = match (true) {
                     !$this->domainMapper->hasRootModule() => "the {$kind} helper {$name}",
                     '' === $domain => "the root module's {$kind} helper {$name}",
+                    'expanding' === $kind && \in_array(self::REF_TYPE, $endpoints, true) => "the {$kind} helper {$name} the module declares beside its endpoint " . self::REF_TYPE,
                     self::REF_TYPE === $name => "the {$kind} helper {$name} the module imports from the root module",
                     default => null,
                 };

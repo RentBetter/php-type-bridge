@@ -14,7 +14,6 @@ use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
 use PTGS\TypeBridge\Support\ClassFileTypes;
-use PTGS\TypeBridge\Support\DeclaredProperties;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
@@ -38,6 +37,9 @@ final class ResponseClassCollector
 
     /** @var array<string, array<string, ParsedType>> by source directory, response and base: what the base's template params are bound to */
     private array $templateBindings = [];
+
+    /** @var array<string, list<ReflectionClass<object>>> by class and property: the traits on the way to the one that writes it ({@see self::traitPath()}) */
+    private array $traitPaths = [];
 
     private readonly ClassFileTypes $files;
 
@@ -140,7 +142,7 @@ final class ResponseClassCollector
                 // is read in the file it is written in — the class's, a base class's, a trait's, a
                 // library's — and converted in that file's scope, whatever another file imports
                 // under the same names, and whichever module the response is in.
-                $declaringClass = self::writtenIn($property);
+                $declaringClass = $this->writtenIn($property);
                 $declared = $this->typeContext($declaringClass, $classFiles[$declaringClass] ?? $this->fileOf($declaringClass), $srcDir, $classFiles);
                 if (null === $declared) {
                     throw new RuntimeException(\sprintf('The %s property %s::$%s is sent, but the file %s declares it in could not be read.', $className, $declaringClass, $property->getName(), $classFiles[$declaringClass] ?? $declaringClass));
@@ -148,7 +150,11 @@ final class ResponseClassCollector
 
                 $rawType = $this->resolvePropertyType($property);
                 $where = \sprintf('The %s property %s::$%s', $className, $declaringClass, $property->getName());
-                $type = $this->parser->parse($rawType);
+                try {
+                    $type = $this->parser->parse($rawType);
+                } catch (RuntimeException $e) {
+                    throw new RuntimeException(\sprintf('%s is typed `%s`, which can\'t be read: %s', $where, $rawType, $e->getMessage()), previous: $e);
+                }
                 $unresolved = $this->docHelper->unresolvedImportUsedIn($type, $declared['unresolved'], $where);
                 if (null !== $unresolved) {
                     throw $unresolved;
@@ -367,13 +373,13 @@ final class ResponseClassCollector
     private function traitBindings(ReflectionClass $response, ReflectionProperty $property, string $srcDir, array $classFiles): array
     {
         $user = $property->getDeclaringClass();
-        $key = $srcDir . "\0" . $response->getName() . "\0" . $user->getName() . "\0" . self::writtenIn($property);
+        $key = $srcDir . "\0" . $response->getName() . "\0" . $user->getName() . "\0" . $this->writtenIn($property);
         if (isset($this->templateBindings[$key])) {
             return $this->templateBindings[$key];
         }
 
         $bindings = $user->getName() === $response->getName() ? [] : $this->templateBindings($response, $user->getName(), $srcDir, $classFiles);
-        foreach (self::traitPath($property) as $trait) {
+        foreach ($this->traitPath($property) as $trait) {
             $bindings = $this->paramsBound($trait, $this->files->usesArgs($classFiles[$user->getName()] ?? $this->fileOf($user->getName()), $trait->getName()), $user->getName(), $bindings, $srcDir, $classFiles);
             $user = $trait;
         }
@@ -446,9 +452,9 @@ final class ResponseClassCollector
      * property's — is where its annotation was written and its names are imported. In the source
      * tree or not: a library's base class or trait is read in its own file, as PHPStan reads it.
      */
-    private static function writtenIn(ReflectionProperty $property): string
+    private function writtenIn(ReflectionProperty $property): string
     {
-        $path = self::traitPath($property);
+        $path = $this->traitPath($property);
 
         return ([] === $path ? $property->getDeclaringClass() : $path[array_key_last($path)])->getName();
     }
@@ -461,20 +467,25 @@ final class ResponseClassCollector
      *
      * @return list<ReflectionClass<object>>
      */
-    private static function traitPath(ReflectionProperty $property): array
+    private function traitPath(ReflectionProperty $property): array
     {
         $name = $property->getName();
+        $key = $property->getDeclaringClass()->getName() . '::' . $name;
+        if (isset($this->traitPaths[$key])) {
+            return $this->traitPaths[$key];
+        }
+
         $path = [];
-        $traits = self::traitsBelow($property->getDeclaringClass(), $name);
+        $traits = $this->traitsBelow($property->getDeclaringClass(), $name);
         while ([] !== $traits) {
             $trait = array_shift($traits);
             if ($trait->hasProperty($name) && $trait->getProperty($name)->getDocComment() === $property->getDocComment()) {
                 $path[] = $trait;
-                $traits = self::traitsBelow($trait, $name);
+                $traits = $this->traitsBelow($trait, $name);
             }
         }
 
-        return $path;
+        return $this->traitPaths[$key] = $path;
     }
 
     /**
@@ -485,11 +496,11 @@ final class ResponseClassCollector
      *
      * @return list<ReflectionClass<object>>
      */
-    private static function traitsBelow(ReflectionClass $holder, string $property): array
+    private function traitsBelow(ReflectionClass $holder, string $property): array
     {
         $traits = array_values($holder->getTraits());
 
-        return [] === $traits || DeclaredProperties::declares($holder, $property) ? [] : $traits;
+        return [] === $traits || $this->files->declaresProperty((string) $holder->getFileName(), $holder->getName(), $property) ? [] : $traits;
     }
 
     /**

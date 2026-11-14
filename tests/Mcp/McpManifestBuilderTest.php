@@ -21,6 +21,7 @@ use PTGS\TypeBridge\Model\FailedBlank;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
+use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
@@ -28,8 +29,10 @@ use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Support\AttributeText;
 use PTGS\TypeBridge\Support\FormTypeInspector;
+use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Enum\Severity;
 use PTGS\TypeBridge\Tests\Fixture\ArgumentMcpFixtures\Common\Spec\Param;
 use PTGS\TypeBridge\Tests\Fixture\DescribedMcpFixtures\Common\Spec\Api;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Common\Security\RequiresScope;
@@ -855,6 +858,15 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame($strings, $properties['withTotal']);
         self::assertSame($strings, $properties['firstTwo']);
         self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'string']], $properties['named']);
+
+        // An int-backed enum's values are ints; a string-backed one's strings.
+        $enums = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: new ShapeType([
+            new ShapeField('bySeverity', new MapType(new ValueOfType(Severity::class), new ScalarType('string')), optional: false),
+            new ShapeField('byStatus', new MapType(new ValueOfType(ProjectStatus::class), new ScalarType('string')), optional: false),
+        ]));
+        $properties = $this->toolWithBody('PUT', [$enums], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
+        self::assertSame($strings, $properties['bySeverity']);
+        self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'string']], $properties['byStatus']);
     }
 
     public function testAMapKeyedByAnAliasOfTheDataClassIsReadAsItIsDeclared(): void
@@ -877,11 +889,11 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]], $properties['byNum']);
         self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'string']], $properties['byStr']);
 
-        $unread = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{byCode: array<Code, string>}'));
-        self::assertSame(
-            ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]],
-            $this->toolWithBody('PUT', [$unread], new ShapeType([]))['inputSchema']['properties']['spec']['properties']['byCode'] ?? null,
-        );
+        $unread = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{byCode: array<Code, string>, byKind: array<self::KIND_*, string>}'));
+        $unreadProperties = $this->toolWithBody('PUT', [$unread], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
+        $either = ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]];
+        self::assertSame($either, $unreadProperties['byCode'] ?? null);
+        self::assertSame($either, $unreadProperties['byKind'] ?? null);
     }
 
     public function testANullableMapTakesNullBesideEither(): void

@@ -622,12 +622,8 @@ final class McpManifestBuilder
             }
             $object = ['type' => 'object', 'additionalProperties' => $items];
 
-            // A JSON list decodes to the array its 0..n keys key: one keyed by any int takes it too.
-            return match ($this->keyTakesList($type->key)) {
-                true => ['anyOf' => [$object, ['type' => 'array', 'items' => $items]]],
-                false => $object,
-                null => null,
-            };
+            // A JSON list decodes to the array its 0..n keys key: one an int may key takes it too.
+            return $this->keyTakesList($type->key) ? ['anyOf' => [$object, ['type' => 'array', 'items' => $items]]] : $object;
         }
 
         return match (true) {
@@ -646,27 +642,23 @@ final class McpManifestBuilder
     }
 
     /**
-     * Whether a map's key is any int, so a list is the map too: an int's, a float's — keyed as the
-     * int it truncates to — or any key; not a literal's, nor an enum's values, which name the keys
-     * there are. Null for a name the builder can't read here, which says neither.
+     * Whether an int may key a map, so a list is the map too, as the server decodes one: an int's
+     * key, a float's — keyed as the int it truncates to — an int literal's, an int-backed enum's
+     * values, any key's, a union with one of them in it. Not a string's, a string literal's, a
+     * string-backed enum's values or an enum's ids. A name the builder can't read here may be
+     * either, so it may be an int.
      */
-    private function keyTakesList(ParsedType $key): ?bool
+    private function keyTakesList(ParsedType $key): bool
     {
-        if ($key instanceof UnionType) {
-            $takes = array_map($this->keyTakesList(...), $key->types);
-
-            return \in_array(null, $takes, true) ? null : !\in_array(false, $takes, true);
-        }
-
         return match (true) {
+            $key instanceof UnionType => array_any($key->types, $this->keyTakesList(...)),
             $key instanceof ScalarType => \in_array($key->base(), ['int', 'float', 'numeric', 'array-key'], true),
-            $key instanceof LiteralType, $key instanceof ValueOfType, $key instanceof IdOfType => false,
-            $key instanceof NameRefType && null === $key->class => match ($this->configAliasSchema($key->name)['type'] ?? null) {
-                'number' => true,
-                'string' => false,
-                default => null,
-            },
-            default => null,
+            $key instanceof LiteralType => \is_int($key->value),
+            $key instanceof ValueOfType => !PhpFileClassLocator::loadsEnum($key->enumClass) || !is_subclass_of($key->enumClass, BackedEnum::class)
+                || array_any($key->enumClass::cases(), static fn (BackedEnum $case): bool => \is_int($case->value)),
+            $key instanceof IdOfType => false,
+            $key instanceof NameRefType && null === $key->class => 'string' !== ($this->configAliasSchema($key->name)['type'] ?? null),
+            default => true,
         };
     }
 

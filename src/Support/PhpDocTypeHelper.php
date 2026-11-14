@@ -272,9 +272,12 @@ final class PhpDocTypeHelper
                 return $leaf;
             }
 
-            // Written as a qualified name: a class by syntax, resolved as PHP would.
+            // Written as a qualified name — in a docblock, or as a native type — a class by syntax,
+            // resolved as PHP would, and spelt in full, so no alias of its short name answers to it.
             if (null !== $leaf->class) {
-                return new NameRefType($leaf->name, $this->resolveClassName($leaf->class, $ownerClass, $classImports) ?? ltrim($leaf->class, '\\'));
+                $class = $this->resolveClassName($leaf->class, $ownerClass, $classImports) ?? ltrim($leaf->class, '\\');
+
+                return new NameRefType($class, $class);
             }
 
             if (\in_array($leaf->name, $localAliases, true)) {
@@ -355,11 +358,14 @@ final class PhpDocTypeHelper
      * `@phpstan-use`, `@template-use`, `@use` — by the trait the name means, as PHP resolves it
      * there: through the file's `use` statements, else in its namespace.
      *
-     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}
+     * And the properties each class or trait in it declares in its own body
+     * ({@see DeclaredProperties}).
+     *
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>, properties: array<string, array<string, true>>}
      */
     public function readFile(string $content): array
     {
-        $tokens = \PhpToken::tokenize($content);
+        $tokens = array_values(\PhpToken::tokenize($content));
         $classImports = $this->classImportsIn($tokens);
         $namespace = self::namespaceIn($tokens);
         $definitions = [];
@@ -395,6 +401,7 @@ final class PhpDocTypeHelper
             'classImports' => $classImports,
             'importTags' => $importTags,
             'uses' => $bound,
+            'properties' => DeclaredProperties::inTokens($tokens, $namespace),
         ];
     }
 

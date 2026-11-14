@@ -330,37 +330,12 @@ final class PhpDocShapeParser
             return new ListType($inner);
         }
 
-        // array<K, V> → MapType. Sits after the `array{` branch above, so a
-        // shape is never mistaken for a map.
-        //
-        // Only the two-argument form is accepted. PHPStan reads one-argument
-        // `array<V>` as an INTEGER-keyed list, so quietly treating it as a
-        // string-keyed map would emit a type that lies about the data — better
-        // to reject it and make the author write `list<V>`.
-        if ($this->lookAhead('array<') || $this->lookAhead('non-empty-array<')) {
-            $this->expect($this->lookAhead('array<') ? 'array<' : 'non-empty-array<');
-            $key = $this->parseType();
-            $this->skipWhitespace();
-            if ($this->pos >= $this->len || ',' !== $this->input[$this->pos]) {
-                throw new RuntimeException(\sprintf(
-                    'array<> needs a key and a value type at position %d in "%s" — '
-                    . 'single-argument array<V> is an integer-keyed list; write list<V> instead.',
-                    $this->pos,
-                    $this->input,
-                ));
-            }
-            $this->pos++;
-            $value = $this->parseType();
-            $this->skipWhitespace();
-            $this->expect('>');
-
-            return new MapType($key, $value);
-        }
-
-        // iterable<V>, or iterable<K, V> — what PHP iterates, sent as the array it makes: keyed by
-        // anything where it names no key, as PHPStan reads `iterable<V>` as `iterable<mixed, V>`
-        if ($this->lookAhead('iterable<')) {
-            $this->expect('iterable<');
+        // array<K, V> and iterable<K, V> → MapType — what PHP iterates sent as the array it makes —
+        // and array<V> and iterable<V> keyed by anything, as PHPStan reads them: `array<array-key, V>`.
+        // Sits after the `array{` branch above, so a shape is never mistaken for a map.
+        $open = array_find(['array<', 'non-empty-array<', 'iterable<'], $this->lookAhead(...));
+        if (null !== $open) {
+            $this->expect($open);
             $value = $this->parseType();
             $this->skipWhitespace();
             $key = new ScalarType('array-key');
