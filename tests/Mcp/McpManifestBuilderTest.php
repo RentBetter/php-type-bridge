@@ -308,7 +308,7 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(true, $byName['DeleteProject']['destructive']);
         self::assertSame([
             'type' => 'object',
-            'properties' => ['id' => ['type' => 'integer', 'minimum' => 1]],
+            'properties' => ['id' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 9007199254740991]],
             'required' => ['id'],
         ], $byName['DeleteProject']['inputSchema']);
 
@@ -1198,14 +1198,16 @@ final class McpManifestBuilderTest extends TestCase
     public function testANumberOrUnrequiredSegmentHasNoPattern(): void
     {
         self::assertSame(
-            ['checkNumber' => ['type' => 'integer', 'minimum' => 0], 'anything' => ['type' => 'string']],
+            ['checkNumber' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 9007199254740991], 'anything' => ['type' => 'string']],
             $this->pathTool([new CollectedPathParam('checkNumber', 'number', '[0-9]+'), new CollectedPathParam('anything', 'string')]),
         );
     }
 
     public function testANumberSegmentHoldsToWhatItsRequirementMatches(): void
     {
-        // The router takes `1` but not `1.5` for `[0-9]+`: an integer, and not `-1`, at least 0.
+        // The router takes `1` but not `1.5` for `[0-9]+`: an integer, and not `-1`, at least 0 — and
+        // one a JSON client writes exactly, digit for digit: past 2^53 it writes one near it, from
+        // 1e21 in exponent form, which the router matches as neither.
         $properties = $this->pathTool([
             new CollectedPathParam('digits', 'number', '\\d+'),
             new CollectedPathParam('positive', 'number', '[1-9][0-9]*'),
@@ -1214,9 +1216,9 @@ final class McpManifestBuilderTest extends TestCase
             new CollectedPathParam('any', 'number'),
         ]);
 
-        self::assertSame(['type' => 'integer', 'minimum' => 0], $properties['digits']);
-        self::assertSame(['type' => 'integer', 'minimum' => 1], $properties['positive']);
-        self::assertSame(['type' => 'integer'], $properties['signed']);
+        self::assertSame(['type' => 'integer', 'minimum' => 0, 'maximum' => 9007199254740991], $properties['digits']);
+        self::assertSame(['type' => 'integer', 'minimum' => 1, 'maximum' => 9007199254740991], $properties['positive']);
+        self::assertSame(['type' => 'integer', 'minimum' => -9007199254740991, 'maximum' => 9007199254740991], $properties['signed']);
         // A decimal is the string it is: a number a client writes in exponent form (`1e-7`), the
         // router doesn't match.
         self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-9]+(?:\.[0-9]+)?)$'], $properties['decimal']);
@@ -1641,53 +1643,6 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame('{"type":"object","properties":{"0":{"type":"integer"},"1":{"type":"string"}},"required":["0","1"]}', $json);
     }
 
-    public function testAPathParamAndAFieldOfOneNameHoldToBoth(): void
-    {
-        // One argument fills both: it is held to the route's requirement and to the field's rules.
-        $code = new CollectedFormField(name: 'code', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new Length(max: 20)]);
-        $endpoint = new CollectedEndpointContract(
-            name: 'renameNote',
-            domain: 'notes',
-            controllerClass: 'App\\NoteController',
-            methodName: '__invoke',
-            responses: [],
-            request: new CollectedEndpointRequest(
-                body: new CollectedInputReference(null, 'App\\NoteData', 'NoteData', 'notes', [$code], $this->shape('array{code?: string}')),
-                pathParams: [new CollectedPathParam('code', 'string', '[A-Z]+-[0-9]+', false)],
-            ),
-            mcp: new CollectedMcpTool(name: 'renameNote', description: 'Rename a note.', httpMethod: 'PUT', httpPath: '/notes/{code}', destructive: false),
-        );
-
-        self::assertSame(
-            ['allOf' => [['type' => 'string', 'pattern' => '^(?:[A-Z]+-[0-9]+)$'], ['type' => 'string', 'maxLength' => 20]]],
-            (new McpManifestBuilder())->build(['notes' => [$endpoint]])['tools'][0]['inputSchema']['properties']['code'],
-        );
-    }
-
-    public function testAPathParamAndAFieldOfOneNameButNotOneTypeTakeTheFieldsTypeHeldToTheRoute(): void
-    {
-        // `/seq/{id}` requires `[0-9]+`, published alone as a whole number; the body's `id` is a
-        // string. No value is both: the argument is the field's type, its text — which is what the
-        // path takes — held to the route's requirement.
-        $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null);
-        $endpoint = new CollectedEndpointContract(
-            name: 'saveSeq',
-            domain: 'seqs',
-            controllerClass: 'App\\SeqController',
-            methodName: '__invoke',
-            responses: [],
-            request: new CollectedEndpointRequest(
-                body: new CollectedInputReference(null, 'App\\SeqData', 'SeqData', 'seqs', [$id], $this->shape('array{id?: string}')),
-                pathParams: [new CollectedPathParam('id', 'number', '[0-9]+', false)],
-            ),
-            mcp: new CollectedMcpTool(name: 'saveSeq', description: 'Save a sequence.', httpMethod: 'PUT', httpPath: '/seq/{id}', destructive: false),
-        );
-
-        $schema = (new McpManifestBuilder())->build(['seqs' => [$endpoint]])['tools'][0]['inputSchema'];
-        self::assertSame(['allOf' => [['pattern' => '^(?:[0-9]+)$'], ['type' => 'string']]], $schema['properties']['id']);
-        self::assertSame(['id'], $schema['required']);
-    }
-
     public function testAFieldLeftOutIsRefusedWhereItsOwnConstraintsSayNotBlankAtTheirTop(): void
     {
         // With `clearMissing` off a POST body's field left out isn't submitted; the processor refuses
@@ -1700,40 +1655,53 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['plain', 'grouped'], $this->toolWithBody('POST', [$plain, $nested, $grouped], $this->shape('array{plain?: string, nested?: string, grouped?: string}'))['inputSchema']['required'] ?? null);
     }
 
-    public function testAPathParamBesideAFieldOfEitherShapeTakesTheFieldHeldToTheRoute(): void
+    public function testAnArgumentNamedAsAPathParamIsThePathParam(): void
     {
-        // `id` takes a record's id or the fields to make one: a string or an object, neither of them
-        // the whole number the segment is alone.
-        $name = new CollectedFormField(name: 'name', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null);
-        $id = new CollectedFormField(name: 'id', formTypeClass: 'App\\PersonType', required: false, mapped: true, compound: true, dataClass: 'App\\Person', children: [$name]);
-        $schema = $this->pathAndBodyTool([new CollectedPathParam('id', 'number', '[0-9]+', false)], [$id], $this->shape('array{id?: string|array{name?: string}}'));
+        // A client puts an argument that names a path param in the path, and nowhere else: what the
+        // argument takes is what the segment does. The body's `code`, which may be left out, is never
+        // sent — whatever its type, an id or the fields to make one, or another number.
+        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
+        $code = new CollectedFormField(name: 'mode', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null, constraints: [new Length(max: 20)]);
+        $schema = $this->pathAndBodyTool([new CollectedPathParam('mode', 'string', '[A-Z]+-[0-9]+', false)], [$code], $this->shape('array{mode?: string}'));
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[A-Z]+-[0-9]+)$'], $schema['properties']['mode']);
+        self::assertSame(['mode'], $schema['required']);
 
-        self::assertSame(['pattern' => '^(?:[0-9]+)$'], $schema['properties']['id']['allOf'][0] ?? null);
-        self::assertArrayHasKey('anyOf', $schema['properties']['id']['allOf'][1] ?? []);
+        $name = new CollectedFormField(name: 'name', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null);
+        $either = new CollectedFormField(name: 'mode', formTypeClass: 'App\\PersonType', required: false, mapped: true, compound: true, dataClass: 'App\\Person', children: [$name]);
+        $schema = $this->pathAndBodyTool([new CollectedPathParam('mode', 'number', '[0-9]{1,4}', false)], [$either], $this->shape('array{mode?: string|array{name?: string}}'));
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[0-9]{1,4})$'], $schema['properties']['mode']);
 
-        // One whose id is a whole number takes the segment as it is: a branch of it is the path's type.
-        $schema = $this->pathAndBodyTool([new CollectedPathParam('id', 'number', '[0-9]+', false)], [$id], $this->shape('array{id?: int|array{name?: string}}'));
-        self::assertSame(['type' => 'integer', 'minimum' => 0], $schema['properties']['id']['allOf'][0] ?? null);
+        $amount = new CollectedFormField(name: 'mode', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\NumberType', required: false, mapped: true, compound: false, dataClass: null);
+        $schema = $this->pathAndBodyTool([new CollectedPathParam('mode', 'number', '[0-9]+', false)], [$amount], $this->shape('array{mode?: float}'));
+        self::assertSame(['type' => 'integer', 'minimum' => 0, 'maximum' => 9007199254740991], $schema['properties']['mode']);
     }
 
-    public function testAQueryFieldAndABodyFieldOfOneNameHoldToBoth(): void
+    public function testAQueryFieldTakesTheArgumentOfItsNameFromABodyField(): void
     {
-        // One argument of the name, held to each — as before a path param took part.
-        $text = 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType';
-        $queryMode = new CollectedFormField(name: 'mode', formTypeClass: $text, required: false, mapped: true, compound: false, dataClass: null);
+        // A client sends an argument the tool lists as a query parameter in the query string alone:
+        // the body's `mode`, which may be left out, is never sent.
+        $queryMode = new CollectedFormField(name: 'mode', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null);
         $bodyMode = new CollectedFormField(name: 'mode', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\IntegerType', required: false, mapped: true, compound: false, dataClass: null);
 
         $schema = $this->pathAndBodyTool([], [$bodyMode], $this->shape('array{mode?: int}'), [$queryMode], $this->shape('array{mode?: string}'));
-        self::assertSame(['allOf' => [['type' => 'string'], ['type' => 'integer']]], $schema['properties']['mode']);
+        self::assertSame(['type' => 'string'], $schema['properties']['mode']);
 
-        // A whole number is a number: a whole-number segment beside a field taking any number holds.
-        $amount = new CollectedFormField(name: 'mode', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\NumberType', required: false, mapped: true, compound: false, dataClass: null);
-        $schema = $this->pathAndBodyTool([new CollectedPathParam('mode', 'number', '[0-9]+', false)], [$amount], $this->shape('array{mode?: float}'));
-        self::assertSame(['allOf' => [['type' => 'integer', 'minimum' => 0], ['type' => 'number']]], $schema['properties']['mode']);
+        // A path param of the name takes it from both, and the query lists it no longer.
+        $tool = $this->pathAndBodyTool([new CollectedPathParam('mode', 'string', '[a-z]+', false)], [$bodyMode], $this->shape('array{mode?: int}'), [$queryMode], $this->shape('array{mode?: string}'), whole: true);
+        self::assertSame(['type' => 'string', 'pattern' => '^(?:[a-z]+)$'], $tool['inputSchema']['properties']['mode']);
+        self::assertArrayNotHasKey('query', $tool);
+    }
 
-        // With a path param of the name too, the path is judged beside both fields.
-        $schema = $this->pathAndBodyTool([new CollectedPathParam('mode', 'string', '[a-z]+', false)], [$bodyMode], $this->shape('array{mode?: int}'), [$queryMode], $this->shape('array{mode?: string}'));
-        self::assertSame(['allOf' => [['pattern' => '^(?:[a-z]+)$'], ['type' => 'string'], ['type' => 'integer']]], $schema['properties']['mode']);
+    public function testAFieldThatCantGoWithoutAnArgumentAnotherPlaceTakesFailsNamingBoth(): void
+    {
+        // The body's `id` is refused left out, and the argument of its name fills the path: no call
+        // the tool makes can succeed.
+        $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('The MCP tool saveThing takes the body field "id", which it can never send: the argument of that name fills the path param {id}. Rename one of them, or take the field out of the body.');
+
+        $this->pathAndBodyTool([new CollectedPathParam('id', 'string')], [$id], $this->shape('array{id?: string}'));
     }
 
     public function testAFieldLeftOutOfAnyWriteIsSubmittedBlankWithClearMissing(): void
@@ -1809,27 +1777,6 @@ final class McpManifestBuilderTest extends TestCase
         $properties = (new McpManifestBuilder(typeAliases: ['UuidStr' => 'string', 'Flag' => 'boolean']))->build(['things' => [$endpoint]])['tools'][0]['inputSchema']['properties'];
         self::assertSame(['type' => 'string'], $properties['owner']['anyOf'][0] ?? null);
         self::assertSame(['type' => 'boolean'], $properties['on']);
-    }
-
-    public function testAPathParamAndABodyFieldOfOneNameAreRequiredOnce(): void
-    {
-        // `required` lists each name once: the meta-schema holds it to unique items, and Ajv refuses
-        // a schema that repeats one.
-        $id = new CollectedFormField(name: 'id', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\TextType', required: false, mapped: true, compound: false, dataClass: null, constraints: [new NotBlank()]);
-        $endpoint = new CollectedEndpointContract(
-            name: 'renameThing',
-            domain: 'things',
-            controllerClass: 'App\\ThingController',
-            methodName: '__invoke',
-            responses: [],
-            request: new CollectedEndpointRequest(
-                body: new CollectedInputReference(null, 'App\\ThingData', 'ThingData', 'things', [$id], $this->shape('array{id?: string}')),
-                pathParams: [new CollectedPathParam('id', 'string')],
-            ),
-            mcp: new CollectedMcpTool(name: 'renameThing', description: 'Rename a thing.', httpMethod: 'POST', httpPath: '/things/{id}', destructive: false),
-        );
-
-        self::assertSame(['id'], (new McpManifestBuilder())->build(['things' => [$endpoint]])['tools'][0]['inputSchema']['required']);
     }
 
     public function testAnIntersectionWhoseBaseCantBeReadStillSaysItsOwnKeys(): void
@@ -2262,7 +2209,7 @@ final class McpManifestBuilderTest extends TestCase
 
     /**
      * The input schema of a POST tool whose path takes these params, whose body these fields, and
-     * whose query those.
+     * whose query those — or, `$whole`, the tool.
      *
      * @param list<CollectedPathParam> $pathParams
      * @param list<CollectedFormField> $bodyFields
@@ -2270,7 +2217,7 @@ final class McpManifestBuilderTest extends TestCase
      *
      * @return array<string, mixed>
      */
-    private function pathAndBodyTool(array $pathParams, array $bodyFields, ShapeType $bodyContract, array $queryFields = [], ?ShapeType $queryContract = null): array
+    private function pathAndBodyTool(array $pathParams, array $bodyFields, ShapeType $bodyContract, array $queryFields = [], ?ShapeType $queryContract = null, bool $whole = false): array
     {
         $endpoint = new CollectedEndpointContract(
             name: 'saveThing',
@@ -2283,10 +2230,12 @@ final class McpManifestBuilderTest extends TestCase
                 body: new CollectedInputReference(null, 'App\\ThingData', 'ThingData', 'things', $bodyFields, $bodyContract),
                 pathParams: [] === $pathParams ? null : $pathParams,
             ),
-            mcp: new CollectedMcpTool(name: 'saveThing', description: 'Save a thing.', httpMethod: 'POST', httpPath: '/things/{mode}', destructive: false),
+            mcp: new CollectedMcpTool(name: 'saveThing', description: 'Save a thing.', httpMethod: 'POST', httpPath: '/things/' . implode('/', array_map(static fn (CollectedPathParam $param): string => '{' . $param->name . '}', $pathParams)), destructive: false),
         );
 
-        return (new McpManifestBuilder())->build(['things' => [$endpoint]])['tools'][0]['inputSchema'];
+        $tool = (new McpManifestBuilder())->build(['things' => [$endpoint]])['tools'][0];
+
+        return $whole ? $tool : $tool['inputSchema'];
     }
 
     private function response(int $status): CollectedApiResponseClass
