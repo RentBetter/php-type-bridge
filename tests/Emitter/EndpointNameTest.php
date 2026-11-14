@@ -62,6 +62,17 @@ final class EndpointNameTest extends TestCase
         self::assertStringContainsString('q: SharedShowNoteQuery', $notes);
     }
 
+    public function test_an_import_named_as_an_endpoint_is_aliased(): void
+    {
+        // ShowNote is declared `export const ShowNote`; Shared's type of that name, imported into
+        // the same module, is given another name — though the module may declare a type of it.
+        $notes = $this->emit(__DIR__ . '/../Fixture/EndpointConstClashFixtures')['Notes'] ?? '';
+
+        self::assertStringContainsString('export const ShowNote:', $notes);
+        self::assertStringContainsString('ShowNote as SharedShowNote', $notes);
+        self::assertStringContainsString('at: SharedShowNote', $notes);
+    }
+
     public function test_an_import_named_as_an_endpoints_route_path_is_aliased(): void
     {
         // GetNote's path, read from its route, is declared `GetNotePathParams`; Shared's type of that name,

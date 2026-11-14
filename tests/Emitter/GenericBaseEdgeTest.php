@@ -9,6 +9,9 @@ use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
+use PTGS\TypeBridge\Parser\PhpDocShapeParser;
+use PTGS\TypeBridge\Parser\ShapeField;
+use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Support\DomainMapper;
 
@@ -24,6 +27,12 @@ final class GenericBaseEdgeTest extends TestCase
     {
         // `T & array{total: int}`, T bound to Meta: Meta, extended.
         self::assertStringContainsString('meta: Meta & { total: number };', $this->emit()['Metas'] ?? '');
+    }
+
+    public function test_a_param_bound_to_a_union_is_extended_whole(): void
+    {
+        // T bound to `Meta|Other`: each of them has the total, not just the last.
+        self::assertStringContainsString('meta: (Meta | Other) & { total: number };', $this->emit()['Unions'] ?? '');
     }
 
     public function test_a_params_default_naming_another_is_that_one_as_bound(): void
@@ -42,9 +51,15 @@ final class GenericBaseEdgeTest extends TestCase
     {
         $plain = $this->emit()['Plain'] ?? '';
 
+        // Neither `object` nor `iterable` is ever null, as PHPStan reads them: any value but null,
+        // and any array.
         self::assertStringContainsString('data: Record<string, unknown> | unknown[];', $plain);
-        self::assertStringContainsString('more: unknown;', $plain);
-        self::assertStringContainsString('each: unknown;', $plain);
+        self::assertStringContainsString('more: NonNullable<unknown>;', $plain);
+        self::assertStringContainsString('each: Record<string, unknown> | unknown[];', $plain);
+        $keys = (new PhpDocShapeParser())->parse('array{filter: object, tags: iterable}');
+        self::assertInstanceOf(ShapeType::class, $keys);
+        self::assertFalse(ShapeField::admitsNull($keys->fields[0]->type));
+        self::assertFalse(ShapeField::admitsNull($keys->fields[1]->type));
         self::assertStringContainsString('rows: unknown[];', $plain);
     }
 
