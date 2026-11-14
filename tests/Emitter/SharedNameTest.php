@@ -210,6 +210,15 @@ final class SharedNameTest extends TestCase
         $this->emit('UnusedHelperNamedFixtures', new OutputStructure(rootModule: 'genTypes.ts'), includes: new IncludeConvention(['included'], refTypes: ['ref']), typeAliases: ['Omit' => 'string']);
     }
 
+    public function test_a_type_named_as_a_global_a_config_alias_writes_is_a_collision(): void
+    {
+        // `Draft: 'Partial<…>'` is written into the module, beside its own `Partial`.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": "Partial" is both TypeScript\'s global Partial, which the module\'s code uses, and type PTGS\\TypeBridge\\Tests\\Fixture\\PartialNamedFixtures\\Notes\\Partial.');
+
+        $this->emit('PartialNamedFixtures', typeAliases: ['Draft' => 'Partial<{ id: string }>']);
+    }
+
     public function test_a_type_named_as_a_typescript_global_is_imported_under_another_name(): void
     {
         $notes = $this->emit('GlobalImportedFixtures')['Notes'];

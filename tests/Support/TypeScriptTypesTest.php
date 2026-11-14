@@ -50,6 +50,8 @@ final class TypeScriptTypesTest extends TestCase
         // What a generic, a conditional, an indexed access or a typeof makes is tsc's to work out.
         yield 'a generic it cannot see' => ['Nullable<string>', null];
         yield 'a conditional' => ['string extends number ? null : string', null];
+        yield 'a conditional with a function in a branch' => ['X extends string ? () => void : null', null];
+        yield 'a function returning a conditional' => ['() => X extends string ? null : string', false];
         yield 'an indexed access' => ["Window['name']", null];
         yield 'a typeof' => ['typeof window', null];
         yield 'one member it cannot read, beside one that does' => ['Nullable<string> | null', true];

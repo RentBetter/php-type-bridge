@@ -6,10 +6,13 @@ namespace PTGS\TypeBridge\Tests\Support;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Parser\ClassConstantType;
+use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IntersectionType;
+use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ScalarType;
+use PTGS\TypeBridge\Parser\ScopedType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\UnionType;
@@ -33,6 +36,23 @@ final class PhpDocTypeHelperScopeTest extends TestCase
 
         $union = $helper->scoped(new UnionType([$meta, new ScalarType('int'), new ScalarType('null')]), [], 'Notes');
         self::assertTrue(ShapeField::admitsNull($union));
+    }
+
+    public function test_only_the_intersection_in_a_bound_type_is_scoped_whole(): void
+    {
+        // `included<Meta & array{x: int}>` and `list<Meta & array{x: int}>`: the generic and the list
+        // stay what a reader sees, the intersection inside them read whole where it is written.
+        $meta = new IntersectionType(new NameRefType('Meta'), new ShapeType([new ShapeField('x', new ScalarType('int'), optional: false)]));
+        $helper = new PhpDocTypeHelper();
+
+        $included = $helper->scoped(new GenericType('included', [$meta]), [], 'Notes');
+        self::assertInstanceOf(GenericType::class, $included);
+        self::assertInstanceOf(ScopedType::class, $included->arguments[0]);
+        self::assertSame($meta, $included->arguments[0]->inner);
+
+        $list = $helper->scoped(new ListType($meta), [], 'Notes');
+        self::assertInstanceOf(ListType::class, $list);
+        self::assertInstanceOf(ScopedType::class, $list->inner);
     }
 
     public function test_a_name_is_the_class_php_resolves_it_to(): void
