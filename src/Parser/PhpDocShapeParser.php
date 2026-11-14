@@ -22,7 +22,7 @@ use RuntimeException;
  *   SingleType = '?' SingleType | 'value-of<' (ClassName | Const) '>' | 'id-of<' ClassName '>' | Refinement
  *              | ScalarType | Literal | Shape | ('list<' | 'non-empty-list<') Type '>' | Map | Const | Generic | NameRef
  *   Generic    = Ident '<' Type (',' Type)* '>'                               (included<T>: see `includes.types` config)
- *   Map        = ('array<' | 'non-empty-array<') Type ',' Type '>'
+ *   Map        = ('array<' | 'non-empty-array<') Type ',' Type '>' | 'iterable<' (Type ',')? Type '>'
  *   Const      = ClassName '::' ConstPattern                                    (self::STATUS_*, Foo::BAR)
  *   Refinement = ScalarType::REFINEMENTS key TypeArgs? | 'int<' … '>'         (positive-int, class-string<T>)
  *   ScalarType = 'string' | 'int' | 'float' | 'bool' | 'mixed' | 'numeric' | 'null'
@@ -357,6 +357,24 @@ final class PhpDocShapeParser
             return new MapType($key, $value);
         }
 
+        // iterable<V>, or iterable<K, V> — what PHP iterates, sent as the array it makes: keyed by
+        // anything where it names no key, as PHPStan reads `iterable<V>` as `iterable<mixed, V>`
+        if ($this->lookAhead('iterable<')) {
+            $this->expect('iterable<');
+            $value = $this->parseType();
+            $this->skipWhitespace();
+            $key = new ScalarType('array-key');
+            if ($this->pos < $this->len && ',' === $this->input[$this->pos]) {
+                $this->pos++;
+                $key = $value;
+                $value = $this->parseType();
+                $this->skipWhitespace();
+            }
+            $this->expect('>');
+
+            return new MapType($key, $value);
+        }
+
         // value-of<ClassName>, or value-of<self::OPTIONS> — an array constant's elements, or a case's backing value
         if ($this->lookAhead('value-of<')) {
             $this->expect('value-of<');
@@ -422,8 +440,8 @@ final class PhpDocShapeParser
 
         // PHPStan's keywords for what says nothing of its contents, as PHPStan reads them, none of
         // them null: `array` and `iterable` any array, as a property typed `array` is; `list` any
-        // list; `object` any value its JSON may be. Bare: `iterable<string>` is a generic,
-        // `object{…}` a shape, as before.
+        // list; `object` any value its JSON may be. Bare: `iterable<…>` and the others with their
+        // arguments are read above, and an object shape, `object{…}`, is not read at all.
         foreach (['non-empty-array' => 'array<array-key, mixed>', 'array' => 'array<array-key, mixed>', 'non-empty-list' => 'list<mixed>', 'list' => 'list<mixed>', 'iterable' => 'array<array-key, mixed>', 'object' => null] as $keyword => $means) {
             $after = $this->pos + \strlen($keyword);
             if ($this->lookAhead($keyword) && !$this->continuesName($after) && !\in_array(substr($this->input, $after, 1), ['<', '{'], true)) {

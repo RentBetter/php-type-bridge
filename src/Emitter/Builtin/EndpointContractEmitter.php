@@ -98,31 +98,27 @@ final class EndpointContractEmitter implements TypeEmitter
     }
 
     /**
-     * Every type name a module declares, or imports, for its endpoints: the helpers they share and
-     * each one's inputs, response map and result, as {@see self::emit()} declares them. One list,
-     * read wherever what a module names is asked, so no name it takes is missed.
+     * Every type name an endpoint declares of its own — its inputs, response map and result, as
+     * {@see self::emit()} declares them — each with what it names, to say which two clash. Beside
+     * the helpers its module takes ({@see self::helperNames()}), all a module names for its endpoints.
      *
-     * @param list<CollectedEndpointContract> $contracts the module's
-     *
-     * @return list<string>
+     * @return list<array{string, string}> the name, and what it names
      */
-    public static function declaredNames(array $contracts, TypeScriptNaming $naming, IncludeConvention $includes): array
+    public static function endpointNames(CollectedEndpointContract $contract, TypeScriptNaming $naming, IncludeConvention $includes): array
     {
-        $names = self::helperNames($contracts, $includes);
-        foreach ($contracts as $contract) {
-            $request = $contract->request;
-            if (null !== $request?->query || self::takesIncludeQuery($contract, $includes)) {
-                $names[] = $naming->queryAliasName($contract->name);
-            }
-            if (null !== $request?->body) {
-                $names[] = $naming->bodyAliasName($contract->name);
-            }
-            if (null !== $request?->path || null !== $request?->pathParams) {
-                $names[] = $naming->pathAliasName($contract->name);
-            }
-            $names[] = $naming->endpointMapName($contract->name);
-            $names[] = $naming->endpointResultName($contract->name);
+        $request = $contract->request;
+        $names = [];
+        if (null !== $request?->query || self::takesIncludeQuery($contract, $includes)) {
+            $names[] = [$naming->queryAliasName($contract->name), 'the query of endpoint ' . $contract->name];
         }
+        if (null !== $request?->body) {
+            $names[] = [$naming->bodyAliasName($contract->name), 'the body of endpoint ' . $contract->name];
+        }
+        if (null !== $request?->path || null !== $request?->pathParams) {
+            $names[] = [$naming->pathAliasName($contract->name), 'the path of endpoint ' . $contract->name];
+        }
+        $names[] = [$naming->endpointMapName($contract->name), 'the response map of endpoint ' . $contract->name];
+        $names[] = [$naming->endpointResultName($contract->name), 'the result of endpoint ' . $contract->name];
 
         return $names;
     }

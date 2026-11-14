@@ -512,8 +512,8 @@ final class ResponseClassCollector
      * may hold is all it says, so it is what is sent. A null it admits is kept — `?string` is
      * `string|null`, written whether null or not. A class is the one Reflection names, written whole,
      * so it is read as that class wherever the property is written. `array` is a list or an object of
-     * anything, as json_encode writes one; `object` and `iterable`, and an intersection, say nothing
-     * of the JSON they make.
+     * anything, as json_encode writes one, and so is `iterable`; `object` is anything but null, as
+     * the same keywords in a docblock are. An intersection says nothing of the JSON it makes.
      */
     private static function nativeType(?ReflectionType $type, ReflectionProperty $property): string
     {
@@ -546,10 +546,7 @@ final class ResponseClassCollector
             return '\\' . ($class instanceof ReflectionClass ? $class->getName() : $class ?? $name);
         }
 
-        return match ($name) {
-            'array' => 'array<array-key, mixed>',
-            'object', 'iterable' => 'mixed',
-            default => $name,
-        };
+        // `object` and `iterable` are the keywords a docblock writes, read as PHPStan reads them.
+        return 'array' === $name ? 'array<array-key, mixed>' : $name;
     }
 }

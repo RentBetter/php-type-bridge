@@ -41,7 +41,7 @@ final class SharedNameTest extends TestCase
         // The root module's `Include` takes a query form, declared `IncludeQuery`; Notes' endpoint
         // takes the include query, whose helper is declared in the root module too.
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('TypeScript naming collision in domain "": "IncludeQuery" is emitted by both the query of endpoint Include and the endpoint helper IncludeQuery, declared in the root module.');
+        $this->expectExceptionMessage('TypeScript naming collision in domain "": "IncludeQuery" is emitted by both the query of endpoint Include and the root module\'s endpoint helper IncludeQuery.');
 
         $this->emit('RootQueryNamedFixtures', new OutputStructure(rootModule: 'genTypes.ts'), ['Shared'], new IncludeConvention(query: ['include' => 'Opt-in parts.']));
     }
@@ -89,7 +89,7 @@ final class SharedNameTest extends TestCase
     {
         // The module imports `Ref` from the root module, where the helper is declared.
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('TypeScript naming collision in domain "Checks": "Ref" is emitted by both the expanding helper Ref, imported from the root module, and type ');
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Checks": "Ref" is emitted by both the expanding helper Ref the module imports from the root module and type ');
 
         $this->emit('RefNamedTypeFixtures', new OutputStructure(rootModule: 'genTypes.ts'), includes: new IncludeConvention(refTypes: ['ref']));
     }
@@ -114,7 +114,7 @@ final class SharedNameTest extends TestCase
     public function test_a_root_source_named_as_a_helper_the_expanding_helpers_declare_is_a_collision_in_the_root_module(): void
     {
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('TypeScript naming collision in domain "": "ListItem" is emitted by both the expanding helper ListItem, declared in the root module, and type ');
+        $this->expectExceptionMessage('TypeScript naming collision in domain "": "ListItem" is emitted by both the root module\'s expanding helper ListItem and type ');
 
         $this->emit('ListItemNamedTypeFixtures', new OutputStructure(rootModule: 'genTypes.ts'), ['Checks'], new IncludeConvention(refTypes: ['ref']));
     }

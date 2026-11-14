@@ -80,6 +80,9 @@ final class TypeScriptEmitter
     /** The generic a `ref<T>` field emits as. */
     public const string REF_TYPE = 'Ref';
 
+    /** What a name an endpoint helper takes is, said when another takes it too. */
+    private const string ENDPOINT_HELPER = 'the endpoint helper ';
+
     /**
      * `Ref<T>`, and `WithExpands<T, P>`: a type as sent when the request expanded paths P, with
      * each reference they name swapped for the record it points at. P is checked against
@@ -498,12 +501,23 @@ final class TypeScriptEmitter
         if ($this->domainMapper->hasRootModule()) {
             // Declared once, in the root module; what this module uses — the aliases, `EndpointResult`
             // — is imported from it. The `WithIncludes` helper is only declared: consumers import it.
+            // One named as an endpoint of the module is declared in it, as without a root module: an
+            // import may not share a name with the module's `const` (TS2395), where a type it declares
+            // may.
+            $consts = array_fill_keys(array_map(static fn (CollectedEndpointContract $contract): string => $contract->name, $contracts), true);
+            $own = [];
             foreach ($shared as $block) {
                 $rootBlocks[$block->sortKey ?? $block->code] = $block;
-                if ('' !== $domain && 'WithIncludes' !== $block->sortKey && null !== $block->sortKey) {
+                if ('' === $domain || 'WithIncludes' === $block->sortKey || null === $block->sortKey) {
+                    continue;
+                }
+                if (isset($consts[$block->sortKey])) {
+                    $own[] = $block;
+                } else {
                     $imports[''][] = $block->sortKey;
                 }
             }
+            $blocks = [...$own, ...$blocks];
         } else {
             $blocks = [...$shared, ...$blocks];
         }
@@ -856,6 +870,10 @@ final class TypeScriptEmitter
                 );
             }
 
+            foreach ($this->includeHelperNames($domain) as $name => $what) {
+                $this->registerSymbol(domain: $domain, logicalName: null, emittedName: $name, descriptor: $what, maps: $maps, registrations: $registrations);
+            }
+
             foreach (($domains[$domain] ?? new CollectedDomain($domain))->types as $type) {
                 $this->registerSymbol(
                     domain: $domain,
@@ -901,31 +919,31 @@ final class TypeScriptEmitter
                 );
             }
 
-            // What a module's endpoints declare — their inputs, maps and results, and the helpers they
-            // share, declared here or imported from the root module — no other type of it may be named.
-            foreach (array_unique(EndpointContractEmitter::declaredNames($contracts[$domain] ?? [], $this->naming, $this->includes)) as $name) {
-                $this->registerSymbol(
-                    domain: $domain,
-                    logicalName: null,
-                    emittedName: $name,
-                    descriptor: 'the endpoint type ' . $name,
-                    maps: $maps,
-                    registrations: $registrations,
-                );
+            // What a module's endpoints declare — the helpers they share, declared here or imported from
+            // the root module, and each one's inputs, map and result — no other type of it may be named,
+            // nor any of them as another.
+            $domainContracts = $contracts[$domain] ?? [];
+            foreach (EndpointContractEmitter::helperNames($domainContracts, $this->includes) as $name) {
+                $this->registerSymbol(domain: $domain, logicalName: null, emittedName: $name, descriptor: self::ENDPOINT_HELPER . $name, maps: $maps, registrations: $registrations);
+            }
+            foreach ($domainContracts as $contract) {
+                foreach (EndpointContractEmitter::endpointNames($contract, $this->naming, $this->includes) as [$name, $what]) {
+                    $this->registerSymbol(domain: $domain, logicalName: null, emittedName: $name, descriptor: $what, maps: $maps, registrations: $registrations);
+                }
             }
         }
 
         // The helpers are declared once, in the root module, where one is set: none of its own types
-        // may be named as one either.
+        // may be named as one either, nor its own endpoints' inputs and results.
         if ($this->domainMapper->hasRootModule()) {
             $helpers = [];
             foreach ($contracts as $domainContracts) {
                 $helpers = [...$helpers, ...EndpointContractEmitter::helperNames($domainContracts, $this->includes)];
             }
             foreach (array_unique($helpers) as $name) {
-                // Claimed already where the root module's own endpoints take it.
-                if (!str_starts_with($registrations[''][$name] ?? '', 'the endpoint type ')) {
-                    $this->registerSymbol(domain: '', logicalName: null, emittedName: $name, descriptor: 'the endpoint type ' . $name . ', declared in the root module', maps: $maps, registrations: $registrations);
+                // Claimed already, as the helper, where the root module's own endpoints take it.
+                if (self::ENDPOINT_HELPER . $name !== ($registrations[''][$name] ?? null)) {
+                    $this->registerSymbol(domain: '', logicalName: null, emittedName: $name, descriptor: "the root module's endpoint helper {$name}", maps: $maps, registrations: $registrations);
                 }
             }
         }
@@ -933,6 +951,40 @@ final class TypeScriptEmitter
         $this->endpointConsts = array_map(static fn (array $domainContracts): array => array_map(static fn (CollectedEndpointContract $contract): string => $contract->name, $domainContracts), $contracts);
 
         return $maps;
+    }
+
+    /**
+     * The names the include and expand helpers take in a module, each with what it is: every one
+     * they declare, where they are declared — in each module, or in the root module where one is
+     * set — and `Ref`, which a module imports from the root module. Taken wherever the config asks
+     * for the helpers, as a config alias is, whether the module uses them or not.
+     *
+     * @return array<string, string>
+     */
+    private function includeHelperNames(string $domain): array
+    {
+        $helpers = [];
+        if ([] !== $this->includes->types || null !== $this->includes->sideLoadAttribute) {
+            $helpers['including'] = self::WITH_INCLUDES_HELPER;
+        }
+        if ([] !== $this->includes->refTypes) {
+            $helpers['expanding'] = self::WITH_EXPANDS_HELPER;
+        }
+
+        $names = [];
+        foreach ($helpers as $kind => $code) {
+            preg_match_all('/^(?:export )?(?:type|interface) (\w+)/m', $code, $declared);
+            foreach ($declared[1] as $name) {
+                $names[$name] = match (true) {
+                    !$this->domainMapper->hasRootModule() => "the {$kind} helper {$name}",
+                    '' === $domain => "the root module's {$kind} helper {$name}",
+                    self::REF_TYPE === $name => "the {$kind} helper {$name} the module imports from the root module",
+                    default => null,
+                };
+            }
+        }
+
+        return array_filter($names, static fn (?string $what): bool => null !== $what);
     }
 
     /**
@@ -1006,13 +1058,15 @@ final class TypeScriptEmitter
         foreach ($importDomains as $importDomain) {
             $names = array_values(array_unique($imports[$importDomain]));
             sort($names);
+            // The module's name as TypeScript reads one: `Admin/Checks` is `AdminChecks`.
+            $prefix = preg_replace('/[^A-Za-z0-9_$]/', '', $importDomain) ?? $importDomain;
             foreach ($names as $name) {
                 $alias = $name;
                 if (isset($usedNames[$alias])) {
-                    $alias = $importDomain . $name;
+                    $alias = $prefix . $name;
                     $suffix = 0;
                     while (isset($usedNames[$alias])) {
-                        $alias = $importDomain . $name . (++$suffix);
+                        $alias = $prefix . $name . (++$suffix);
                     }
                 }
                 $aliases[$importDomain][$name] = $alias;
