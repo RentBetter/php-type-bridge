@@ -252,6 +252,36 @@ PHP);
         TypeBridgeConfig::fromArray(['routing' => ''], sys_get_temp_dir());
     }
 
+    public function test_the_routing_env_is_prod_unless_the_config_names_one(): void
+    {
+        self::assertSame('prod', TypeBridgeConfig::fromArray([])->routingEnv);
+        self::assertSame('prod', TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml'], sys_get_temp_dir())->routePathResolver()?->env);
+
+        $config = TypeBridgeConfig::fromArray(['routing' => 'config/routes.yaml', 'routingEnv' => 'staging'], sys_get_temp_dir());
+        self::assertSame('staging', $config->routingEnv);
+        self::assertSame('staging', $config->routePathResolver()?->env);
+    }
+
+    public function test_a_body_is_submitted_without_clear_missing_unless_the_config_says(): void
+    {
+        // Off, a field left out is held to what refuses its blank, as before the option was: an
+        // application that submits with Symfony's default turns it on.
+        self::assertFalse(TypeBridgeConfig::fromArray([])->clearMissing);
+        self::assertTrue(TypeBridgeConfig::fromArray(['clearMissing' => true])->clearMissing);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('clearMissing');
+        TypeBridgeConfig::fromArray(['clearMissing' => 'no']);
+    }
+
+    public function test_rejects_a_routing_env_that_names_none(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('routingEnv');
+
+        TypeBridgeConfig::fromArray(['routingEnv' => '']);
+    }
+
     public function test_parses_the_include_query_parameters(): void
     {
         $config = TypeBridgeConfig::fromArray([

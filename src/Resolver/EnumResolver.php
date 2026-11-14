@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Resolver;
 
+use PTGS\TypeBridge\Support\ClassNames;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use ReflectionEnum;
@@ -26,10 +27,14 @@ final class EnumResolver
         private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
     ) {}
 
-    public function scanDirectory(string $srcDir): void
+    /**
+     * @param array<string, string>|null $classFiles the tree's classes, class => file, where they are
+     *        already scanned
+     */
+    public function scanDirectory(string $srcDir, ?array $classFiles = null): void
     {
-        foreach ($this->classLocator->classesIn($srcDir) as $className => $file) {
-            if (!enum_exists($className)) {
+        foreach ($classFiles ?? $this->classLocator->classesIn($srcDir) as $className => $file) {
+            if (!PhpFileClassLocator::loadsEnum($className)) {
                 continue;
             }
 
@@ -66,7 +71,7 @@ final class EnumResolver
             return $this->cache[$fqcn];
         }
 
-        if (!enum_exists($fqcn)) {
+        if (!PhpFileClassLocator::loadsEnum($fqcn)) {
             throw new RuntimeException(\sprintf('Enum class "%s" was not found.', $className));
         }
 
@@ -96,8 +101,14 @@ final class EnumResolver
         return $values;
     }
 
+    /**
+     * The enum a name means: a short name the one the tree declares, a whole one itself — written
+     * with its leading `\` or without, it is one enum, in one module.
+     */
     public function resolveFqcn(string $className): string
     {
+        $className = ltrim($className, '\\');
+
         return $this->classMap[$className] ?? $className;
     }
 
@@ -110,12 +121,6 @@ final class EnumResolver
 
     public function getShortName(string $className): string
     {
-        $fqcn = $this->resolveFqcn($className);
-        $position = strrpos($fqcn, '\\');
-        if (false === $position) {
-            return $fqcn;
-        }
-
-        return substr($fqcn, $position + 1);
+        return ClassNames::short($this->resolveFqcn($className));
     }
 }

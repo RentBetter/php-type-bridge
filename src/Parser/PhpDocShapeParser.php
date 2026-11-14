@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Parser;
 
+use PTGS\TypeBridge\Support\ClassNames;
 use RuntimeException;
 
 /**
@@ -21,7 +22,7 @@ use RuntimeException;
  *   SingleType = '?' SingleType | 'value-of<' (ClassName | Const) '>' | 'id-of<' ClassName '>' | Refinement
  *              | ScalarType | Literal | Shape | ('list<' | 'non-empty-list<') Type '>' | Map | Const | Generic | NameRef
  *   Generic    = Ident '<' Type (',' Type)* '>'                               (included<T>: see `includes.types` config)
- *   Map        = ('array<' | 'non-empty-array<') Type ',' Type '>'
+ *   Map        = ('array<' | 'non-empty-array<') Type ',' Type '>' | 'iterable<' (Type ',')? Type '>'
  *   Const      = ClassName '::' ConstPattern                                    (self::STATUS_*, Foo::BAR)
  *   Refinement = ScalarType::REFINEMENTS key TypeArgs? | 'int<' … '>'         (positive-int, class-string<T>)
  *   ScalarType = 'string' | 'int' | 'float' | 'bool' | 'mixed' | 'numeric' | 'null'
@@ -244,7 +245,7 @@ final class PhpDocShapeParser
             $nonNullTypes = [];
             $hasNull = false;
             foreach ($types as $t) {
-                if ($t instanceof ScalarType && 'null' === $t->type) {
+                if (ScalarType::isNull($t)) {
                     $hasNull = true;
                 } else {
                     $nonNullTypes[] = $t;
@@ -329,28 +330,21 @@ final class PhpDocShapeParser
             return new ListType($inner);
         }
 
-        // array<K, V> → MapType. Sits after the `array{` branch above, so a
-        // shape is never mistaken for a map.
-        //
-        // Only the two-argument form is accepted. PHPStan reads one-argument
-        // `array<V>` as an INTEGER-keyed list, so quietly treating it as a
-        // string-keyed map would emit a type that lies about the data — better
-        // to reject it and make the author write `list<V>`.
-        if ($this->lookAhead('array<') || $this->lookAhead('non-empty-array<')) {
-            $this->expect($this->lookAhead('array<') ? 'array<' : 'non-empty-array<');
-            $key = $this->parseType();
-            $this->skipWhitespace();
-            if ($this->pos >= $this->len || ',' !== $this->input[$this->pos]) {
-                throw new RuntimeException(\sprintf(
-                    'array<> needs a key and a value type at position %d in "%s" — '
-                    . 'single-argument array<V> is an integer-keyed list; write list<V> instead.',
-                    $this->pos,
-                    $this->input,
-                ));
-            }
-            $this->pos++;
+        // array<K, V> and iterable<K, V> → MapType — what PHP iterates sent as the array it makes —
+        // and array<V> and iterable<V> keyed by anything, as PHPStan reads them: `array<array-key, V>`.
+        // Sits after the `array{` branch above, so a shape is never mistaken for a map.
+        $open = array_find(['array<', 'non-empty-array<', 'iterable<'], $this->lookAhead(...));
+        if (null !== $open) {
+            $this->expect($open);
             $value = $this->parseType();
             $this->skipWhitespace();
+            $key = new ScalarType('array-key');
+            if ($this->pos < $this->len && ',' === $this->input[$this->pos]) {
+                $this->pos++;
+                $key = $value;
+                $value = $this->parseType();
+                $this->skipWhitespace();
+            }
             $this->expect('>');
 
             return new MapType($key, $value);
@@ -419,6 +413,19 @@ final class PhpDocShapeParser
             }
         }
 
+        // PHPStan's keywords for what says nothing of its contents, as PHPStan reads them, none of
+        // them null: `array` and `iterable` any array, as a property typed `array` is; `list` any
+        // list; `object` any value its JSON may be. Bare: `iterable<…>` and the others with their
+        // arguments are read above, and an object shape, `object{…}`, is not read at all.
+        foreach (['non-empty-array' => 'array<array-key, mixed>', 'array' => 'array<array-key, mixed>', 'non-empty-list' => 'list<mixed>', 'list' => 'list<mixed>', 'iterable' => 'array<array-key, mixed>', 'object' => null] as $keyword => $means) {
+            $after = $this->pos + \strlen($keyword);
+            if ($this->lookAhead($keyword) && !$this->continuesName($after) && !\in_array(substr($this->input, $after, 1), ['<', '{'], true)) {
+                $this->pos += \strlen($keyword);
+
+                return null === $means ? new ScalarType('object') : (new self())->parse($means);
+            }
+        }
+
         // Boolean literals
         foreach (['true' => true, 'false' => false] as $keyword => $value) {
             if ($this->lookAhead($keyword) && !$this->isIdentChar($this->pos + \strlen($keyword))) {
@@ -445,7 +452,7 @@ final class PhpDocShapeParser
                 return $this->parseClassConstant($className, valueOf: false);
             }
 
-            return new NameRefType(substr((string) strrchr('\\' . $className, '\\'), 1), class: $className);
+            return new NameRefType(ClassNames::short($className), class: $className);
         }
 
         throw new RuntimeException(\sprintf(

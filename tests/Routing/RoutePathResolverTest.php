@@ -6,8 +6,10 @@ namespace PTGS\TypeBridge\Tests\Routing;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
+use PTGS\TypeBridge\Tests\Fixture\RequirementRoutedMcpFixtures\Codes\Controller\CodeController;
 use PTGS\TypeBridge\Tests\Fixture\RoutingApp\Health\HealthController;
 use PTGS\TypeBridge\Tests\Fixture\RoutingApp\Projects\Controller\ProjectController;
+use PTGS\TypeBridge\Tests\Fixture\TwiceRoutedApp\Notes\NoteController as TwiceRoutedNoteController;
 
 final class RoutePathResolverTest extends TestCase
 {
@@ -38,6 +40,28 @@ final class RoutePathResolverTest extends TestCase
     {
         // Invokable controllers are keyed by the bare FQCN, matching Symfony's own convention.
         self::assertSame('/health', $this->resolver()->pathFor(HealthController::class, '__invoke'));
+    }
+
+    public function testAMethodRoutedTwiceResolvesToTheRouteItsAttributeDeclares(): void
+    {
+        // The route its first #[Route] declares, not the last the collection lists.
+        $resolver = new RoutePathResolver(__DIR__ . '/../Fixture/RequirementRoutedMcpFixtures', 'config/routes.yaml');
+
+        self::assertSame('/notes/{id}', $resolver->pathFor(CodeController::class, 'showNoteAction'));
+        self::assertSame('[0-9]+', $resolver->routeFor(CodeController::class, 'showNoteAction')?->getRequirement('id'));
+    }
+
+    public function testItIsTheFirstRouteWhateverTheRouterSortsFirst(): void
+    {
+        // A priority puts the second route ahead in the router's order, and its path ends the way
+        // the first's does; a path written with its requirement or default inline is served without
+        // them. Neither is mistaken for, or loses, the route the first #[Route] declares.
+        $resolver = new RoutePathResolver(__DIR__ . '/../Fixture/TwiceRoutedApp', 'config/routes.yaml');
+
+        self::assertSame('/api/notes/{id}', $resolver->pathFor(TwiceRoutedNoteController::class, 'showNoteAction'));
+        self::assertSame('[0-9]+', $resolver->routeFor(TwiceRoutedNoteController::class, 'showNoteAction')?->getRequirement('id'));
+        self::assertSame('/api/pages/{page}/{slug}', $resolver->pathFor(TwiceRoutedNoteController::class, 'showPageAction'));
+        self::assertSame('[0-9]+', $resolver->routeFor(TwiceRoutedNoteController::class, 'showPageAction')?->getRequirement('page'));
     }
 
     public function testUnknownMethodsResolveToNull(): void

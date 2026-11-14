@@ -6,6 +6,8 @@ namespace PTGS\TypeBridge\Tests\Support;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
+use PTGS\TypeBridge\Tests\Fixture\LibraryTraitLib\HasItems;
+use PTGS\TypeBridge\Tests\Fixture\UnloadableFixtures\DevOnly\DevOnlyRule;
 
 final class PhpFileClassLocatorTest extends TestCase
 {
@@ -23,6 +25,19 @@ final class PhpFileClassLocatorTest extends TestCase
             unlink($file);
         }
         rmdir($this->dir);
+    }
+
+    public function test_a_class_interface_or_trait_is_loadable_and_one_missing_what_it_needs_is_not(): void
+    {
+        // One rule for every collector: whatever PHP can load, and nothing whose declaration throws
+        // for want of a require-dev package.
+        $locator = new PhpFileClassLocator();
+
+        self::assertTrue($locator->isLoadable(self::class));
+        self::assertTrue($locator->isLoadable(\Countable::class));
+        self::assertTrue($locator->isLoadable(HasItems::class));
+        self::assertFalse($locator->isLoadable(DevOnlyRule::class));
+        self::assertFalse($locator->isLoadable('PTGS\\TypeBridge\\Tests\\Nowhere'));
     }
 
     public function test_ignores_class_like_keywords_in_comments(): void

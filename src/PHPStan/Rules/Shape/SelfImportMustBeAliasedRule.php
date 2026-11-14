@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\PHPStan\Rules\Shape;
 
+use PTGS\TypeBridge\Support\ClassNames;
 use PhpParser\Node;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassNode;
@@ -51,7 +52,7 @@ final class SelfImportMustBeAliasedRule implements Rule
 
             // The short name is what the author wrote and what the suggested fix has to echo
             // back; the resolved name is correct but unreadable in a message.
-            $source = self::shortName($tag->getImportedFrom());
+            $source = ClassNames::short($tag->getImportedFrom());
 
             $errors[] = RuleErrorBuilder::message(\sprintf(
                 'Import of `_self` from %s must be aliased — `@phpstan-import-type _self from %s as <Something>Data`. '
@@ -66,12 +67,5 @@ final class SelfImportMustBeAliasedRule implements Rule
         }
 
         return $errors;
-    }
-
-    private static function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-
-        return false === $position ? $className : substr($className, $position + 1);
     }
 }

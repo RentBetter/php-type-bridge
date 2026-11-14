@@ -12,6 +12,7 @@ use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\ValueOfType;
+use PTGS\TypeBridge\Support\ClassNames;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
@@ -89,7 +90,7 @@ final class ShapeScaffolder
     private function fieldType(CollectedFormField $field, ?array $property): ?ParsedType
     {
         if (null !== $field->enumClass) {
-            $enum = new ValueOfType($this->shortName($field->enumClass));
+            $enum = new ValueOfType(ClassNames::short($field->enumClass));
 
             // A multi-select EnumType binds a list, and CollectedFormField carries no `multiple`
             // flag — the DTO holding an array is the signal. Without this a `status[]=todo&
@@ -140,7 +141,7 @@ final class ShapeScaffolder
 
     private function scalarFromFormType(string $formTypeClass): ?ScalarType
     {
-        $shortName = $this->shortName($formTypeClass);
+        $shortName = ClassNames::short($formTypeClass);
 
         return match (true) {
             str_contains($shortName, 'Checkbox'), str_contains($shortName, 'Boolean') => new ScalarType('bool'),
@@ -191,17 +192,10 @@ final class ShapeScaffolder
             'float' === $name => new ScalarType('float'),
             'bool' === $name => new ScalarType('bool'),
             is_a($name, DateTimeInterface::class, allow_string: true) => new ScalarType('string'),
-            enum_exists($name) => new ValueOfType($this->shortName($name)),
+            enum_exists($name) => new ValueOfType(ClassNames::short($name)),
             // Arrays need their @var docblock to be typed at all, and object properties need a
             // shape of their own — both are reported rather than guessed.
             default => null,
         };
-    }
-
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-
-        return false === $position ? $className : substr($className, $position + 1);
     }
 }

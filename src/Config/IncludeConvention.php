@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Config;
 
+use PTGS\TypeBridge\Parser\GenericType;
+use PTGS\TypeBridge\Parser\ParsedType;
+use PTGS\TypeBridge\Parser\ParsedTypes;
 use RuntimeException;
 
 /**
@@ -88,6 +91,33 @@ final readonly class IncludeConvention
     public function isEnumType(string $name): bool
     {
         return \in_array($name, $this->enumTypes, true);
+    }
+
+    /**
+     * Whether a key of this type is only sent when the request asks for it: it is wrapped in one of
+     * the include generics (`included<T>`).
+     */
+    public function isIncluded(ParsedType $type): bool
+    {
+        return $type instanceof GenericType && $this->isIncludeType($type->name);
+    }
+
+    /**
+     * Whether the type holds a reference a request can expand (`ref<T>`), at any depth: what the
+     * module it is emitted in declares `Ref<T>` and `WithExpands` for.
+     */
+    public function hasRef(ParsedType $type): bool
+    {
+        $types = [$type];
+        while ([] !== $types) {
+            $part = array_pop($types);
+            if ($part instanceof GenericType && $this->isRefType($part->name)) {
+                return true;
+            }
+            array_push($types, ...ParsedTypes::children($part));
+        }
+
+        return false;
     }
 
     /**

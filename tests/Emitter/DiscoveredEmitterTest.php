@@ -24,9 +24,18 @@ use PTGS\TypeBridge\Support\RootSources;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\AlphaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\BetaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
+use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitterContract;
 
 final class DiscoveredEmitterTest extends TestCase
 {
+    public function test_an_interface_or_a_trait_carrying_the_attribute_is_no_emitter(): void
+    {
+        // Only a class can be made one; scanned, the others are passed over as they always were.
+        $registry = EmitterRegistry::fromAttributeScan([MarkedEmitterContract::class, MarkedEmitter::class]);
+
+        self::assertNotEquals(EmitterRegistry::default(), $registry);
+    }
+
     public function test_discovered_emitter_produces_domain_and_root_modules(): void
     {
         $registry = EmitterRegistry::fromAttributeScan([MarkedEmitter::class]);

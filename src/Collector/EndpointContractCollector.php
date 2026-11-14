@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Collector;
 
+use LogicException;
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\McpTool;
+use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
@@ -14,27 +16,86 @@ use PTGS\TypeBridge\Model\CollectedFormField;
 use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
+use PTGS\TypeBridge\Parser\ListType;
+use PTGS\TypeBridge\Parser\MapType;
+use PTGS\TypeBridge\Parser\NameRefType;
+use PTGS\TypeBridge\Parser\NullableType;
+use PTGS\TypeBridge\Parser\ParsedType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
+use PTGS\TypeBridge\Parser\ScalarType;
+use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
+use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Parser\ValueOfType;
+use PTGS\TypeBridge\Routing\ControllerAttributeClassLoader;
+use PTGS\TypeBridge\Routing\DeclaredRoutes;
 use PTGS\TypeBridge\Routing\RequirementType;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Support\AttributeText;
+use PTGS\TypeBridge\Support\ClassFileTypes;
 use PTGS\TypeBridge\Support\DomainGuesser;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
+use PTGS\TypeBridge\Support\TypeScriptTypes;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
+use Symfony\Component\Routing\CompiledRoute;
+use Symfony\Component\Routing\Route;
 use Throwable;
 
 final class EndpointContractCollector
 {
-    /** @var array<string, string> requirement regex => TS type */
+    /** @var array<string, string> requirement regex, as the router holds it => TS type */
     private readonly array $requirementTypes;
 
+    /** A base's file, read once however many queries inherit from it. */
+    private readonly ClassFileTypes $files;
+
+    private readonly DomainGuesser $domainGuesser;
+
+    private readonly PhpDocTypeHelper $docHelper;
+
     private readonly ?AttributeText $toolDescriptions;
+
+    /** What each controller's attributes route it at, read once per class. */
+    private readonly DeclaredRoutes $declaredRoutes;
+
+    /** @var array<string, ParsedType|null> each type written, parsed once however many inputs name it */
+    private array $parsedTypes = [];
+
+    /** @var array<string, ShapeType|null> by source directory and class: a whole-value field's contract, read once however many forms embed it */
+    private array $contracts = [];
+
+    /** @var array<string, bool|null> by name: whether a project-wide alias admits null, read once however many keys it types; null where its TypeScript can't say */
+    private array $configAliasesAdmittingNull = [];
+
+    /** Whether what is being read is read for a tool, which reads what the TypeScript doesn't ({@see self::configAliasAdmitsNull()}). */
+    private bool $forTool = true;
+
+    /** How many aliases and classes one contract reads through, at most. */
+    private const int READS = 1000;
+
+    /** How many more the contract being read may read through ({@see self::readDeclared()}). */
+    private int $readsLeft = self::READS;
+
+    /** The class whose contract is being read, which a read past the bound fails naming. */
+    private string $readFor = '';
+
+    /** @var array<string, array{read: ParsedType, through: array<string, true>}> by source directory, where it is declared and how it is asked: an alias or a `_self` the contract being read has read, and the names it read through — kept for that contract alone, so whether one is read within the bound turns on it alone, not on what was read before it */
+    private array $readThrough = [];
+
+    /** @var list<string> where each read under way was cut short: the name it named that was being read */
+    private array $cutAt = [];
+
+    /** @var array<string, true> the names the read under way has read through */
+    private array $through = [];
+
+    /** @var array<string, array{definition: string, class: string, file: string, name: string}|null> by source directory and class: where its `_self` is declared */
+    private array $selves = [];
 
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
@@ -55,11 +116,15 @@ final class EndpointContractCollector
      *        part of that path, and the method attribute alone cannot see them. Without one a
      *        tool carries the attribute's own path; with one, a tool the router cannot place
      *        fails collection rather than shipping a path the application does not serve
+     * @param array<string, string> $typeAliases the project-wide aliases, name => TypeScript type: a key
+     *        typed with one that admits null takes null, as one its file declares does
+     * @param string $routingEnv the env the application is deployed in, where no route resolver says:
+     *        a tool whose #[Route]s are confined to another is served nowhere it is deployed
      */
     public function __construct(
-        private readonly PhpFileClassLocator $classLocator = new PhpFileClassLocator(),
-        private readonly DomainGuesser $domainGuesser = new DomainGuesser(),
-        private readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
+        ?PhpFileClassLocator $classLocator = null,
+        ?DomainGuesser $domainGuesser = null,
+        ?PhpDocTypeHelper $docHelper = null,
         private readonly FormTypeInspector $formTypeInspector = new FormTypeInspector(),
         array $requirementTypes = [],
         private readonly ?string $mcpScopeAttribute = null,
@@ -68,8 +133,21 @@ final class EndpointContractCollector
         ?string $mcpDescriptionProperty = null,
         private readonly ?RoutePathResolver $routePathResolver = null,
         private readonly PhpDocShapeParser $shapeParser = new PhpDocShapeParser(),
+        ?ClassFileTypes $files = null,
+        private readonly array $typeAliases = [],
+        string $routingEnv = 'prod',
     ) {
-        $this->requirementTypes = [...RequirementType::defaults(), ...$requirementTypes];
+        $this->files = ClassFileTypes::sharedBy($files, $docHelper, $domainGuesser, $classLocator);
+        $this->domainGuesser = $this->files->domainGuesser;
+        $this->docHelper = $this->files->docHelper;
+        $this->declaredRoutes = new DeclaredRoutes($routePathResolver->env ?? $routingEnv);
+        // Keyed as the router holds a requirement, anchors off, so a project keying one `^\\d+$` as
+        // its attribute writes it finds the `\\d+` the router serves.
+        $types = [];
+        foreach ([...RequirementType::defaults(), ...$requirementTypes] as $requirement => $type) {
+            $types[RoutePathResolver::servedRequirement($requirement) ?? $requirement] = $type;
+        }
+        $this->requirementTypes = $types;
         $this->toolDescriptions = null === $mcpDescriptionAttribute
             ? null
             : new AttributeText($mcpDescriptionAttribute, $mcpDescriptionProperty, 'mcpDescriptionProperty');
@@ -81,18 +159,18 @@ final class EndpointContractCollector
      */
     public function collect(string $srcDir, array $responseIndex): array
     {
-        $classFiles = $this->classLocator->classesIn($srcDir);
+        $classFiles = $this->files->classesIn($srcDir);
         $contracts = [];
         /** @var array<string, string> derived endpoint name => Class::method that claimed it */
         $seenNames = [];
 
         foreach ($classFiles as $className => $file) {
-            if (!$this->classLocator->isLoadable($className)) {
+            if (!$this->files->loadable($className)) {
                 continue;
             }
 
             $reflection = new ReflectionClass($className);
-            if ($reflection->isAbstract() || $reflection->isInterface()) {
+            if ($reflection->isAbstract() || $reflection->isInterface() || $reflection->isTrait()) {
                 continue;
             }
 
@@ -130,7 +208,10 @@ final class EndpointContractCollector
                         ));
                     }
                     $seenNames[$endpointName] = $claimant;
-                    [$httpMethod, $httpPath] = $this->routeMethodAndPath($method);
+                    $served = $this->routePathResolver?->routeFor($className, $method->getName());
+                    $route = $served ?? $this->declaredRoute($className, $method->getName());
+                    $httpMethod = self::httpMethodOf($route);
+                    [$request, $unreadable] = $this->resolveRequestContract($method, $route, $srcDir, $classFiles);
                     $contracts[$domain] ??= [];
                     $contracts[$domain][] = new CollectedEndpointContract(
                         name: $endpointName,
@@ -138,10 +219,10 @@ final class EndpointContractCollector
                         controllerClass: $className,
                         methodName: $method->getName(),
                         responses: $responses,
-                        request: $this->resolveRequestContract($method, $srcDir, $classFiles),
-                        mcp: $this->resolveMcpTool($method, $endpointName),
+                        request: $request,
+                        mcp: $this->resolveMcpTool($method, $className, $endpointName, $httpMethod, $route, $served, $unreadable),
                         httpMethod: $httpMethod,
-                        httpPath: $this->contractPath($method, $httpPath),
+                        httpPath: RoutePathResolver::clientPath($route?->getPath() ?? ''),
                     );
                 }
             }
@@ -170,7 +251,10 @@ final class EndpointContractCollector
         return ucfirst('' !== $base ? $base : $methodName);
     }
 
-    private function resolveMcpTool(ReflectionMethod $method, string $endpointName): ?CollectedMcpTool
+    /**
+     * @param string|null $unreadable why what the tool takes can't be read, if it can't
+     */
+    private function resolveMcpTool(ReflectionMethod $method, string $className, string $endpointName, string $httpMethod, ?Route $route, ?Route $served, ?string $unreadable): ?CollectedMcpTool
     {
         $attributes = $method->getAttributes(McpTool::class);
         if ([] === $attributes) {
@@ -179,16 +263,17 @@ final class EndpointContractCollector
 
         /** @var McpTool $tool */
         $tool = $attributes[0]->newInstance();
-        [$httpMethod, $httpPath] = $this->routeMethodAndPath($method);
-        $httpPath = $this->servedPath($method, $httpPath);
+        [$path, $unserved] = $this->servedPath($className, $method->getName(), $route, $served);
 
         return new CollectedMcpTool(
             name: $tool->name ?? $endpointName,
             description: $this->resolveMcpDescription($method, $tool),
             httpMethod: $httpMethod,
-            httpPath: $httpPath,
+            httpPath: $path,
             destructive: $tool->destructive ?? ('GET' !== $httpMethod),
             scopes: $this->resolveMcpScopes($method),
+            unserved: $unserved,
+            unreadable: $unreadable,
         );
     }
 
@@ -361,136 +446,203 @@ final class EndpointContractCollector
     }
 
     /**
-     * The path a client calls an endpoint at: the one Symfony serves when the routing config is
-     * given — its prefixes and any class-level #[Route] included — and the method attribute's own
-     * otherwise. Unlike an MCP tool's, an endpoint the router does not know keeps its attribute
-     * path rather than failing generation.
+     * The route a method's class's attributes declare, a class-level #[Route] merged in as the
+     * router merges it ({@see DeclaredRoutes}): what a method is described by — its HTTP method, its
+     * path and its params — where no routing config serves it. Unlike an MCP tool's, an endpoint the
+     * router does not know keeps its declared route rather than failing generation. Null when nothing
+     * routes it.
      */
-    private function contractPath(ReflectionMethod $method, string $attributePath): string
+    private function declaredRoute(string $className, string $methodName): ?Route
     {
-        return $this->routePathResolver?->pathFor($method->getDeclaringClass()->getName(), $method->getName()) ?? $attributePath;
+        $declared = $this->declaredRoutes->routeFor($className, $methodName);
+        if (null === $declared && null !== $error = $this->declaredRoutes->loadError($className)) {
+            throw new RuntimeException(\sprintf('The #[Route]s of %s cannot be read as Symfony reads them: %s', $className, $error));
+        }
+
+        return $declared;
     }
 
     /**
-     * The path an MCP tool is published with. With a route resolver configured it is the served
-     * path, and both ways the router can fail to supply one are errors rather than fallbacks: a
-     * routing file that will not load, or a method the loaded collection does not route. Either
-     * would otherwise publish the attribute path as if it were served, and a tool pointing at a
-     * path the application answers 404 to is worse than no tool.
+     * The HTTP method an endpoint is called with: the first its route is for
+     * ({@see ControllerAttributeClassLoader::methodsFor()}); GET where it names none.
      */
-    private function servedPath(ReflectionMethod $method, string $attributePath): string
+    private static function httpMethodOf(?Route $route): string
     {
+        return (null === $route ? [] : ControllerAttributeClassLoader::methodsFor($route))[0] ?? 'GET';
+    }
+
+    /**
+     * The path an MCP tool is published with — the one served in the env the application is deployed
+     * in — and why there is none. With a route resolver configured it is the router's, and both ways
+     * it can fail to supply one are errors rather than fallbacks: a routing file that will not load,
+     * or a method the loaded collection does not route — a route confined to another env, or
+     * imported in another's section alone, included. Without one it is the route the attributes
+     * declare, which must be declared — one written elsewhere, YAML say, has nowhere to be read —
+     * and served in the env too. Either would otherwise publish a path as if it
+     * were served, and a tool pointing at a path the application answers 404 to is worse than no
+     * tool. The manifest fails on it; the endpoint's TypeScript, described by its route, does not.
+     *
+     * @return array{0: string, 1: string|null} the path, and why it isn't served
+     */
+    private function servedPath(string $className, string $methodName, ?Route $route, ?Route $served): array
+    {
+        $declared = RoutePathResolver::clientPath($route?->getPath() ?? '');
         if (null === $this->routePathResolver) {
-            return $attributePath;
+            return [$declared, match (true) {
+                null === $route => \sprintf('Endpoint "%s::%s" is exposed as an MCP tool but no #[Route] declares it, and no `routing` is configured to find the route serving it in.', $className, $methodName),
+                !$this->declaredRoutes->serves($className, $methodName) => $this->notServed($className, $methodName, 'what its #[Route]s declare'),
+                default => null,
+            }];
         }
 
-        $served = $this->routePathResolver->pathFor($method->getDeclaringClass()->getName(), $method->getName());
         if (null !== $error = $this->routePathResolver->loadError()) {
-            throw new RuntimeException(\sprintf('Cannot resolve served route paths for MCP tools: %s', $error));
+            return [$declared, \sprintf('Cannot resolve served route paths for MCP tools: %s', $error)];
         }
 
-        if (null === $served) {
-            throw new RuntimeException(\sprintf(
-                'Endpoint "%s::%s" is exposed as an MCP tool but the routing configuration serves no route for it.',
-                $method->getDeclaringClass()->getName(),
-                $method->getName(),
-            ));
-        }
-
-        return $served;
+        return null === $served ? [$declared, $this->notServed($className, $methodName, 'the routing configuration')] : [RoutePathResolver::clientPath($served->getPath()), null];
     }
 
-    /**
-     * @return array{0: string, 1: string} [HTTP method (uppercased, first listed), path template]
-     */
-    private function routeMethodAndPath(ReflectionMethod $method): array
+    private function notServed(string $className, string $methodName, string $why): string
     {
-        $routeAttributes = $method->getAttributes('Symfony\\Component\\Routing\\Attribute\\Route');
-        if ([] === $routeAttributes) {
-            return ['GET', ''];
-        }
-
-        $arguments = $routeAttributes[0]->getArguments();
-        $path = $arguments['path'] ?? $arguments[0] ?? '';
-        $methods = $arguments['methods'] ?? [];
-
-        $httpMethod = 'GET';
-        if (\is_string($methods)) {
-            $httpMethod = strtoupper($methods);
-        } elseif (\is_array($methods) && \is_string($firstMethod = $methods[0] ?? null)) {
-            $httpMethod = strtoupper($firstMethod);
-        }
-
-        return [$httpMethod, \is_string($path) ? $path : ''];
+        return \sprintf(
+            'Endpoint "%s::%s" is exposed as an MCP tool but %s serves no route for it in %s.',
+            $className,
+            $methodName,
+            $why,
+            $this->declaredRoutes->env,
+        );
     }
 
     /**
+     * The request's inputs, and why what only its tool reads of them can't be read
+     * ({@see UnreadableContract}): that fails the tool, and the inputs are read as an endpoint no
+     * tool takes reads them.
+     *
      * @param array<string, string> $classFiles
+     *
+     * @return array{0: CollectedEndpointRequest|null, 1: string|null}
      */
-    private function resolveRequestContract(ReflectionMethod $method, string $srcDir, array $classFiles): ?CollectedEndpointRequest
+    private function resolveRequestContract(ReflectionMethod $method, ?Route $route, string $srcDir, array $classFiles): array
     {
         $attributes = $method->getAttributes(ApiRequest::class);
         /** @var ApiRequest|null $request */
         $request = [] !== $attributes ? $attributes[0]->newInstance() : null;
 
-        // An explicit class on #[ApiRequest(path:)] wins; otherwise the path params are
-        // derived from the #[Route] placeholders (each a string unless its requirement
-        // refines the type — see PathParam).
+        // An explicit class on #[ApiRequest(path:)] types the Endpoint's path; nothing reads its
+        // keys. The route's placeholders are the tool's path arguments, and the Endpoint's where no
+        // class is named (each a string unless its requirement refines the type — see PathParam).
         $path = null !== $request && null !== $request->path
-            ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles)
+            ? $this->resolveInputReference(null, $request->path, $srcDir, $classFiles, inQuery: false, nullAsked: false, readThrough: false)
             : null;
 
+        // What only a tool reads — a body's null, an embedded form's keys — is read only for one.
+        $tool = [] !== $method->getAttributes(McpTool::class);
+        $unreadable = null;
         $collected = new CollectedEndpointRequest(
-            query: null !== $request && null !== $request->query ? $this->resolveFormClass($request->query, $srcDir, $classFiles) : null,
-            body: null !== $request && null !== $request->body ? $this->resolveFormClass($request->body, $srcDir, $classFiles) : null,
+            query: null === $request?->query ? null : $this->readInput($request->query, $srcDir, $classFiles, inQuery: true, tool: $tool, unreadable: $unreadable),
+            body: null === $request?->body ? null : $this->readInput($request->body, $srcDir, $classFiles, inQuery: false, tool: $tool, unreadable: $unreadable),
             path: $path,
-            pathParams: null === $path ? $this->derivePathParamsFromRoute($method) : null,
+            pathParams: $this->derivePathParamsFromRoute($route),
         );
 
-        return $collected->hasAnyInput() ? $collected : null;
+        return [$collected->hasAnyInput() ? $collected : null, $unreadable];
     }
 
     /**
-     * Derives path parameters from the method's #[Route] placeholders. Each segment types as a
-     * plain string unless its route requirement matches a known {@see PathParam} pattern. Returns
-     * null when there is no #[Route] or it carries no placeholders.
+     * An input read as its endpoint needs it: for a tool, what the tool alone reads too. Where that
+     * can't be read, the tool can't be described, which fails it, not the run: the input is read as
+     * for no tool — which fails the run where what the TypeScript reads can't be read either.
+     *
+     * @param class-string          $formClass
+     * @param array<string, string> $classFiles
+     * @param string|null           $unreadable why the tool's can't be, the first time
+     */
+    private function readInput(string $formClass, string $srcDir, array $classFiles, bool $inQuery, bool $tool, ?string &$unreadable): CollectedInputReference
+    {
+        $outer = $this->forTool;
+        try {
+            $this->forTool = $tool;
+
+            return $this->resolveFormClass($formClass, $srcDir, $classFiles, $inQuery, $tool);
+        } catch (UnreadableContract $exception) {
+            if (!$tool) {
+                throw $exception;
+            }
+            $this->forTool = false;
+            $input = $this->resolveFormClass($formClass, $srcDir, $classFiles, $inQuery, tool: false);
+            $unreadable ??= $exception->getMessage();
+
+            return $input;
+        } finally {
+            $this->forTool = $outer;
+        }
+    }
+
+    /**
+     * Derives path parameters from the placeholders of the route a method is described by
+     * ({@see self::declaredRoute()}): a class-level #[Route]'s, and a routing prefix's, as much as its own.
+     * Each segment types as a plain string unless its requirement — the route's, an import's
+     * overriding the attribute's — matches a known {@see PathParam} pattern. Null when there is no
+     * route or it has no placeholders.
      *
      * @return list<CollectedPathParam>|null
      */
-    private function derivePathParamsFromRoute(ReflectionMethod $method): ?array
+    private function derivePathParamsFromRoute(?Route $route): ?array
     {
-        $routeAttributes = $method->getAttributes('Symfony\\Component\\Routing\\Attribute\\Route');
-        if ([] === $routeAttributes) {
+        if (null === $route) {
+            return null;
+        }
+        // Named as Symfony's compiler names them: `{!slug}` is `slug` too.
+        try {
+            $names = array_values(array_filter(self::compiled($route)->getPathVariables(), \is_string(...)));
+        } catch (Throwable $exception) {
+            throw new RuntimeException(\sprintf('The route %s cannot be compiled as Symfony compiles it: %s', $route->getPath(), $exception->getMessage()), previous: $exception);
+        }
+        if ([] === $names) {
             return null;
         }
 
-        $arguments = $routeAttributes[0]->getArguments();
-        $pathTemplate = $arguments['path'] ?? $arguments[0] ?? null;
-        if (!\is_string($pathTemplate) || 0 === preg_match_all('/\{(\w+)\}/', $pathTemplate, $matches)) {
-            return null;
-        }
-
-        $requirements = $arguments['requirements'] ?? [];
-        if (!\is_array($requirements)) {
-            $requirements = [];
-        }
+        // Whether the router matches the requirements by character (`u`) or by byte: the option as
+        // the route has it — an import's overrides the attribute's; with neither, the router's
+        // default, which is not known here.
+        $utf8 = $route->hasOption('utf8') ? $route->getOption('utf8') : null;
+        $utf8 = \is_bool($utf8) ? $utf8 : null;
 
         $params = [];
-        foreach ($matches[1] as $name) {
-            $requirement = $requirements[$name] ?? null;
-            $requirement = \is_string($requirement) ? $requirement : null;
+        foreach ($names as $name) {
+            $requirement = $route->getRequirement($name);
             $tsType = null !== $requirement ? ($this->requirementTypes[$requirement] ?? 'string') : 'string';
-            $params[] = new CollectedPathParam($name, $tsType, $requirement);
+            $params[] = new CollectedPathParam($name, $tsType, $requirement, $utf8, TypeScriptTypes::standsFor($tsType, $this->typeAliases));
         }
 
         return $params;
     }
 
     /**
+     * The route compiled as the router compiles it. A Unicode requirement needs `utf8`, which a route
+     * may leave to the router's default — FrameworkBundle's is on — not known here: one that needs it
+     * is compiled with it, which names the same path variables.
+     */
+    private static function compiled(Route $route): CompiledRoute
+    {
+        try {
+            return $route->compile();
+        } catch (LogicException $exception) {
+            if ($route->hasOption('utf8')) {
+                throw $exception;
+            }
+
+            return (clone $route)->setOption('utf8', true)->compile();
+        }
+    }
+
+    /**
      * @param array<string, string> $classFiles
      * @param class-string $formClass
+     * @param bool $tool whether the endpoint is an MCP tool: only its schema turns on whether a body's
+     *        key takes null, or on what an embedded form's data class declares
      */
-    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles): CollectedInputReference
+    private function resolveFormClass(string $formClass, string $srcDir, array $classFiles, bool $inQuery, bool $tool): CollectedInputReference
     {
         if (!isset($classFiles[$formClass])) {
             throw new RuntimeException(\sprintf(
@@ -500,7 +652,8 @@ final class EndpointContractCollector
             ));
         }
 
-        $resolvedForm = $this->formTypeInspector->inspect($formClass);
+        // A field's blank, which runs its `empty_data`, only a tool reads.
+        $resolvedForm = $this->formTypeInspector->inspect($formClass, blanks: $tool);
         if (null === $resolvedForm['dataClass']) {
             throw new RuntimeException(\sprintf(
                 'Form "%s" must configure a non-null data_class for TypeBridge request contracts.',
@@ -513,7 +666,12 @@ final class EndpointContractCollector
             ownerClass: $resolvedForm['dataClass'],
             srcDir: $srcDir,
             classFiles: $classFiles,
-            fields: $this->withDeclaredContracts($resolvedForm['fields'], $classFiles),
+            fields: $tool ? $this->withDeclaredContracts($resolvedForm['fields'], $srcDir, $classFiles, $inQuery) : $resolvedForm['fields'],
+            inQuery: $inQuery,
+            // A query's key that can't be left out turns its Endpoint's `query` required, tool or not.
+            nullAsked: $inQuery || $tool,
+            // A body's keys are read only for a tool, the one reader of them.
+            readThrough: $inQuery || $tool,
         );
     }
 
@@ -528,14 +686,14 @@ final class EndpointContractCollector
      *
      * @return list<CollectedFormField>
      */
-    private function withDeclaredContracts(array $fields, array $classFiles): array
+    private function withDeclaredContracts(array $fields, string $srcDir, array $classFiles, bool $inQuery): array
     {
         return array_map(
             fn (CollectedFormField $field): CollectedFormField => $field->withDeclared(
-                children: $this->withDeclaredContracts($field->children, $classFiles),
-                entryChildren: $this->withDeclaredContracts($field->entryChildren, $classFiles),
+                children: $this->withDeclaredContracts($field->children, $srcDir, $classFiles, $inQuery),
+                entryChildren: $this->withDeclaredContracts($field->entryChildren, $srcDir, $classFiles, $inQuery),
                 contract: $field->compound && [] === $field->children && null !== $field->dataClass
-                    ? $this->contractOf($field->dataClass, $classFiles)
+                    ? $this->contractOf($field->dataClass, $srcDir, $classFiles, $inQuery)
                     : null,
             ),
             $fields,
@@ -543,22 +701,70 @@ final class EndpointContractCollector
     }
 
     /**
-     * The `_self` shape a class in the source tree declares, or null when it is outside the tree,
-     * declares none, or declares one that is not a shape.
+     * The keys of the `_self` shape a class in the source tree declares — those it inherits included,
+     * and each alias it is written with read as it is declared, as an input's are — or null when it
+     * is outside the tree, declares none, or declares one that is not a shape.
      *
      * @param array<string, string> $classFiles
      */
-    private function contractOf(string $class, array $classFiles): ?ShapeType
+    private function contractOf(string $class, string $srcDir, array $classFiles, bool $inQuery): ?ShapeType
     {
-        $file = $classFiles[$class] ?? null;
-        $content = null === $file ? false : file_get_contents($file);
-        if (false === $content) {
+        $key = $srcDir . "\0" . $class . "\0" . ($inQuery ? 'query' : 'body');
+        if (\array_key_exists($key, $this->contracts)) {
+            return $this->contracts[$key];
+        }
+
+        return $this->contracts[$key] = $this->readContractOf($class, $srcDir, $classFiles, $inQuery);
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     */
+    private function readContractOf(string $class, string $srcDir, array $classFiles, bool $inQuery): ?ShapeType
+    {
+        // Its shape, read where it is declared ({@see self::selfOf()}).
+        $self = $this->selfOf($class, $srcDir, $classFiles);
+        if (null === $self) {
             return null;
         }
 
-        $self = $this->docHelper->extractPhpStanTypes($content)['_self'] ?? null;
+        [$own, $inherited] = $this->selfContract($self['definition'], $self['class'], $self['file'], $srcDir, $classFiles, $inQuery, nullAsked: true, name: $self['name']);
 
-        return null === $self ? null : $this->declaredShape($self);
+        return ShapeType::withInherited($own, $inherited);
+    }
+
+    /**
+     * What a class's `_self` declares: the keys of its own, and for an intersection those it inherits,
+     * read where its base is declared ({@see self::inheritedShape()}) — each alias read as it is
+     * declared. A `_self` written as another alias, the file's own or one it imports, is that alias's
+     * shape, read whole.
+     *
+     * @param string                $class      the class whose file declares it
+     * @param array<string, string> $classFiles
+     * @param bool                  $inQuery    whether it is a query's, sent as a query string
+     * @param bool                  $nullAsked  whether its keys' null decides anything: not for a path's
+     *
+     * @return array{0: ShapeType|null, 1: ShapeType|null} its own keys, and those it inherits
+     */
+    private function selfContract(string $definition, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked, string $name = '_self'): array
+    {
+        $this->readsLeft = self::READS;
+        // What one contract read, the next reads afresh: kept across them, a contract reading what
+        // another kept would be within the bound read after it and past it alone.
+        $this->readThrough = [];
+        $this->readFor = $class;
+        $this->cutAt = [];
+        $this->through = [];
+        $reading = [$file . "\0" . $name => true];
+        $self = $this->parseType($definition);
+        if ($self instanceof NameRefType && null === $self->class) {
+            return [ShapeType::declaredBy($this->readAliases($self, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked)), null];
+        }
+
+        return [
+            $this->withAliasesRead(ShapeType::declaredBy($self), $class, $file, $srcDir, $classFiles, $inQuery, $nullAsked, $reading),
+            $self instanceof IntersectionType ? $this->inheritedShape($self, $class, $file, $srcDir, $classFiles, $inQuery, $nullAsked, $reading) : null,
+        ];
     }
 
     /**
@@ -567,7 +773,7 @@ final class EndpointContractCollector
      * @param class-string $ownerClass
      * @param list<\PTGS\TypeBridge\Model\CollectedFormField> $fields
      */
-    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = []): CollectedInputReference
+    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = [], bool $inQuery = false, bool $nullAsked = true, bool $readThrough = true): CollectedInputReference
     {
         $file = $classFiles[$ownerClass] ?? null;
         if (null === $file) {
@@ -578,8 +784,7 @@ final class EndpointContractCollector
             ));
         }
 
-        $content = file_get_contents($file);
-        if (false === $content) {
+        if (!$this->files->readable($file)) {
             throw new RuntimeException(\sprintf(
                 'Input contract class "%s" could not be read from "%s".',
                 $ownerClass,
@@ -587,7 +792,7 @@ final class EndpointContractCollector
             ));
         }
 
-        $definitions = $this->docHelper->extractPhpStanTypes($content);
+        $definitions = $this->files->definitions($file);
         if (!isset($definitions['_self'])) {
             throw new RuntimeException(\sprintf(
                 'Input contract class "%s" must declare @phpstan-type _self.',
@@ -595,61 +800,366 @@ final class EndpointContractCollector
             ));
         }
 
+        // The keys it inherits are as much its contract as its own: whether a query may be left out,
+        // and whether a body key is required or may be cleared, is theirs to say too. Where nothing
+        // reads them, they are as written.
+        [$contract, $inherited] = $readThrough
+            ? $this->selfContract($definitions['_self'], $ownerClass, $file, $srcDir, $classFiles, $inQuery, $nullAsked)
+            : [ShapeType::declaredBy($this->parseType($definitions['_self'])), null];
+
         return new CollectedInputReference(
             formClass: $formClass,
             ownerClass: $ownerClass,
-            typeName: $this->emittedTypeName($ownerClass),
+            typeName: $this->docHelper->emittedTypeName('_self', $ownerClass),
             domain: $this->domainGuesser->guess($srcDir, $file),
             fields: $fields,
-            contract: $this->declaredShape($definitions['_self']),
+            contract: $contract,
+            inheritedContract: $inherited,
         );
     }
 
     /**
-     * The keys an input class declares, when its `_self` is a shape. An intersection gives the
-     * keys it adds: the ones it inherits are named elsewhere and are not read here, so a field
-     * among them is left to its form.
+     * The keys an intersection (`Base & array{…}`) takes from the shape it extends, read as any alias
+     * is ({@see self::readAliases()}): where it is declared, through an alias of it, and through that
+     * shape's own base in turn. Null when its base can't be read as a shape — one further down that
+     * can't be read leaves what is inherited unknown, not the part read.
+     *
+     * @param string                $class the class whose file the intersection is written in
+     * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading the aliases being read: the class's own `_self` itself
      */
-    private function declaredShape(string $self): ?ShapeType
+    private function inheritedShape(IntersectionType $self, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked, array $reading): ?ShapeType
     {
-        try {
-            $parsed = $this->shapeParser->parse($self);
-        } catch (Throwable) {
-            return null;
+        $base = $this->readAliases($self->base, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
+
+        return $base instanceof ShapeType ? $base : null;
+    }
+
+    /**
+     * Where an alias a file uses is declared: in the file, or in the class that declares the one it
+     * imports — its imports are followed there already ({@see ClassFileTypes::imports()}).
+     *
+     * @param array<string, string> $classFiles
+     *
+     * @return array{definition: string, class: string, file: string, name: string}|null
+     */
+    private function aliasDefinition(string $alias, string $class, string $file, string $srcDir, array $classFiles): ?array
+    {
+        $definition = $this->files->definitions($file)[$alias] ?? null;
+        if (null !== $definition) {
+            return ['definition' => $definition, 'class' => $class, 'file' => $file, 'name' => $alias];
         }
 
+        $import = $this->files->imports($class, $file, $srcDir, $classFiles)['imports'][$alias] ?? null;
+
+        return null === $import ? null : $this->importedDeclaration($import, $classFiles);
+    }
+
+    /**
+     * Where an imported alias is declared: in the class it is imported from, under the name it has
+     * there. Null where that class is outside the source tree, or declares no such alias.
+     *
+     * @param array<string, string> $classFiles
+     *
+     * @return array{definition: string, class: string, file: string, name: string}|null
+     */
+    private function importedDeclaration(ImportedType $import, array $classFiles): ?array
+    {
+        $target = $classFiles[$import->targetClass] ?? null;
+        $definition = null === $target ? null : $this->files->definitions($target)[$import->sourceName()] ?? null;
+
+        return null === $target || null === $definition ? null : ['definition' => $definition, 'class' => $import->targetClass, 'file' => $target, 'name' => $import->sourceName()];
+    }
+
+    /**
+     * The shape as a reader of it alone needs it: each alias it names read as what it is declared —
+     * in the file, or where it is imported from, another class's `_self` included — at any depth. So
+     * whether a key may be left out or takes null, holds a shape of what keys, a list of what, or which
+     * scalar, is said where the shape is read, as the TypeScript says it through the alias. An alias's
+     * `?T` is `T`, as its TypeScript is. A project-wide alias, which the config declares in TypeScript,
+     * stays named, read as `Alias|null` where that TypeScript admits null; a class's name stays too.
+     *
+     * @param string                $class the class whose file the shape is written in
+     * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading the aliases being read: the class's own `_self` itself
+     */
+    private function withAliasesRead(?ShapeType $shape, string $class, string $file, string $srcDir, array $classFiles, bool $inQuery, bool $nullAsked, array $reading): ?ShapeType
+    {
+        $read = null === $shape ? null : $this->readAliases($shape, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
+
+        return $read instanceof ShapeType ? $read : $shape;
+    }
+
+    /**
+     * Whether a null is asked of a project-wide alias read here ({@see self::configAliasAdmitsNull()})
+     * is whether anything turns on it: in a body every key's, which may be sent null to clear it; in a
+     * query only a key that can't be left out already — a query string sends a null by leaving the key
+     * out, and no item of a list sends one; in a path none, nor of a map's values; and never beside an
+     * explicit null (`Alias|null`), which settles it.
+     *
+     * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading the aliases being read, by file and name: one that names
+     *        itself, at any remove, stays named there
+     * @param bool                  $inQuery whether the type is sent as a query string
+     * @param bool                  $nullAsked whether its null decides anything
+     */
+    private function readAliases(ParsedType $type, string $class, string $file, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
+    {
+        $read = fn (ParsedType $part, ?bool $asked = null): ParsedType => $this->readAliases($part, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $asked ?? $nullAsked);
+
         return match (true) {
-            $parsed instanceof ShapeType => $parsed,
-            $parsed instanceof IntersectionType => $parsed->extra,
-            default => null,
+            // A class's name as PHP resolves it where it is written: `Input\AddressData` from the
+            // file's namespace, or through a `use` of one.
+            $type instanceof NameRefType => null === $type->class
+                ? $this->readAlias($type, $class, $file, $srcDir, $classFiles, $reading, $inQuery, $nullAsked)
+                : $this->readClass($type, $this->docHelper->resolveClassName($type->class, $class, $this->files->classImports($file)) ?? $type->class, $srcDir, $classFiles, $reading, $inQuery, $nullAsked),
+            // An explicit null settles the type's own: what else it admits is not asked of it.
+            $type instanceof NullableType => new NullableType($read($type->inner, $type->optional && $nullAsked), $type->optional),
+            $type instanceof UnionType => self::union(array_map(static fn (ParsedType $member): ParsedType => $read($member, $nullAsked && !$type->hasNull()), $type->types)),
+            $type instanceof ListType => new ListType($read($type->inner, $nullAsked && !$inQuery)),
+            // A map's values are never sent null on their own: nothing reads a value's null. Its
+            // key is read too, so the tool knows whether an int may key it.
+            $type instanceof MapType => new MapType($read($type->key, false), $read($type->value, false)),
+            $type instanceof ShapeType => new ShapeType(array_map(
+                fn (ShapeField $key): ShapeField => new ShapeField($key->name, $read($key->type, $inQuery ? $nullAsked && !$key->mayBeLeftOut(inQuery: true) : $nullAsked), $key->optional),
+                $type->fields,
+            ), $type->unsealed),
+            $type instanceof IntersectionType => self::intersection($type, $read($type->base), $read($type->extra)),
+            // The enum the file names, spelt in full, so a reader elsewhere can ask for its values.
+            $type instanceof ValueOfType => new ValueOfType($this->docHelper->resolveClassName($type->enumClass, $class, $this->files->classImports($file)) ?? $type->enumClass),
+            default => $type,
         };
     }
 
     /**
-     * Mirrors PhpDocTypeCollector::_self name emission for endpoint input references.
+     * An alias as it is declared, read in the file that declares it.
      *
-     * @param class-string $ownerClass
+     * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading
      */
-    private function emittedTypeName(string $ownerClass): string
+    private function readAlias(NameRefType $alias, string $class, string $file, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
-        $shortName = $this->shortName($ownerClass);
-        if (enum_exists($ownerClass)) {
-            return $shortName . 'Data';
+        $declared = $this->aliasDefinition($alias->name, $class, $file, $srcDir, $classFiles);
+        // No alias of the file's: a class it names, as PHP resolves the name there.
+        $named = null === $declared && !isset($this->typeAliases[$alias->name]) ? $this->docHelper->resolveClassName($alias->name, $class, $this->files->classImports($file)) : null;
+        if (null !== $named) {
+            return $this->readClass($alias, $named, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
+        }
+        if (null === $declared) {
+            // Asked only where it decides something; otherwise read as far as its text says.
+            $admitsNull = isset($this->typeAliases[$alias->name])
+                && ($nullAsked ? $this->configAliasAdmitsNull($alias->name) : true === TypeScriptTypes::admitsNull($this->typeAliases[$alias->name], $this->typeAliases));
+
+            return $admitsNull ? new NullableType($alias, optional: false) : $alias;
         }
 
-        return $shortName;
+        return $this->readDeclared($alias, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
     }
 
     /**
-     * @param class-string $className
+     * A key typed with a class, as the class is sent and its TypeScript names it: its `_self`, read
+     * where it is declared, as an alias is — an enum's too, which declaring one sends it as that
+     * shape; else an enum's values, but for one that names its value union otherwise
+     * (#[ValueOfName]). As written where the class declares none, or names itself at any remove.
+     *
+     * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading
      */
-    private function shortName(string $className): string
+    private function readClass(NameRefType $type, string $class, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
-        $position = strrpos($className, '\\');
-        if (false === $position) {
-            return $className;
+        $declared = $this->selfOf($class, $srcDir, $classFiles);
+        if (null === $declared && PhpFileClassLocator::loadsEnum($class) && null === ValueOfName::of($class)) {
+            return new ValueOfType($class);
         }
 
-        return substr($className, $position + 1);
+        return null === $declared ? $type : $this->readDeclared($type, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
+    }
+
+    /**
+     * Where the shape a class is sent as is declared, as its TypeScript finds it: its own `_self`, or
+     * one it imports — neither kept for PHPStan alone — else its nearest parent's or interface's.
+     * Null where none of the source tree declares one.
+     *
+     * @param array<string, string> $classFiles
+     *
+     * @return array{definition: string, class: string, file: string, name: string}|null
+     */
+    private function selfOf(string $class, string $srcDir, array $classFiles): ?array
+    {
+        $key = $srcDir . "\0" . $class;
+
+        return \array_key_exists($key, $this->selves) ? $this->selves[$key] : $this->selves[$key] = $this->findSelf($class, $srcDir, $classFiles);
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     *
+     * @return array{definition: string, class: string, file: string, name: string}|null
+     */
+    private function findSelf(string $class, string $srcDir, array $classFiles): ?array
+    {
+        if (!PhpFileClassLocator::loads($class)) {
+            return null;
+        }
+        $reflection = new ReflectionClass($class);
+        $lineage = [];
+        for ($current = $reflection; false !== $current; $current = $current->getParentClass()) {
+            $lineage[] = $current->getName();
+        }
+
+        foreach ([...$lineage, ...$reflection->getInterfaceNames()] as $candidate) {
+            $file = $classFiles[$candidate] ?? null;
+            if (null === $file) {
+                continue;
+            }
+            $scope = $this->files->scope($candidate, $file, $srcDir, $classFiles);
+            if (isset($scope['definitions']['_self'])) {
+                return ['definition' => $scope['definitions']['_self'], 'class' => $candidate, 'file' => $file, 'name' => '_self'];
+            }
+            $import = $scope['imports']['_self'] ?? null;
+            $declared = null === $import ? null : $this->importedDeclaration($import, $classFiles);
+            if (null !== $declared) {
+                return $declared;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * An alias or a class's `_self` read where it is declared, keyed by the name it is declared
+     * under — which an import may give another: as written where it names one being read already,
+     * itself at any remove included. What a read makes turns only on which of the names it reaches
+     * are being read, so it is kept, and read back wherever none it read through is: one that named
+     * only itself makes the same wherever it isn't being read, so a class naming itself is read once
+     * however many keys name it. One cut short where it named a read further out is not kept: read
+     * where that one isn't, it reads on.
+     *
+     * Classes naming one another still unroll into every order of them, each cut short at a
+     * different one. Past a bound no real contract nears they fail the read: a name left unread
+     * would publish a tool saying less than its Endpoint — a key its alias lets be cleared, refused.
+     *
+     * @param array{definition: string, class: string, file: string, name: string} $declared
+     * @param array<string, string> $classFiles
+     * @param array<string, true>   $reading
+     */
+    private function readDeclared(NameRefType $written, array $declared, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
+    {
+        $key = $declared['file'] . "\0" . $declared['name'];
+        if (isset($reading[$key])) {
+            $this->cutAt[] = $key;
+
+            return $written;
+        }
+        $kept = $srcDir . "\0" . $key . "\0" . ($inQuery ? 'query' : 'body') . "\0" . ($nullAsked ? 'asked' : 'not');
+        $read = $this->readThrough[$kept] ?? null;
+        if (null !== $read && [] === array_intersect_key($read['through'], $reading)) {
+            $this->through += $read['through'] + [$key => true];
+
+            return $read['read'];
+        }
+        if (--$this->readsLeft < 0) {
+            throw new UnreadableContract(\sprintf(
+                'The request contract of %s names aliases and classes that name one another in more ways than are read through (%d): what its keys are can\'t be said without reading every one. Have fewer of them name one another.',
+                $this->readFor,
+                self::READS,
+            ));
+        }
+        $parsed = $this->parseType($declared['definition']);
+        if (null === $parsed) {
+            return $written;
+        }
+        // Declared `?T`, it is emitted `T`, an alias's and a class's `_self` alike: a key typed with
+        // it is no key left out when null.
+        $parsed = ShapeField::declared($parsed);
+
+        $cutAt = \count($this->cutAt);
+        $outer = $this->through;
+        $this->through = [];
+        $read = $this->readAliases($parsed, $declared['class'], $declared['file'], $srcDir, $classFiles, [...$reading, $key => true], $inQuery, $nullAsked);
+        // Cut short where it named itself, it is all there is to read of it; where it named a read
+        // further out, that read is cut short too.
+        $further = array_values(array_filter(\array_slice($this->cutAt, $cutAt), static fn (string $at): bool => $at !== $key));
+        array_splice($this->cutAt, $cutAt, null, $further);
+        if ([] === $further) {
+            $this->readThrough[$kept] ??= ['read' => $read, 'through' => $this->through];
+        }
+        $this->through = $outer + $this->through + [$key => true];
+
+        return $read;
+    }
+
+    /**
+     * Whether a project-wide alias admits null, as its TypeScript says ({@see TypeScriptTypes::admitsNull()}).
+     * A key typed with it is one a client may leave out of a query, or clear, where it does, and the
+     * Endpoint's AsQuery<T> reads that off the TypeScript as tsc evaluates it: where its text can't
+     * say, guessing would have the Endpoint and the tool read the key two ways — for a tool. Where no
+     * tool reads it, all it decides is whether the Endpoint's query may be left out, and it is taken
+     * not to: a query required is one any call can send, and AsQuery<T> still says each key.
+     */
+    private function configAliasAdmitsNull(string $name): bool
+    {
+        $type = $this->typeAliases[$name];
+        if (!\array_key_exists($name, $this->configAliasesAdmittingNull)) {
+            $this->configAliasesAdmittingNull[$name] = TypeScriptTypes::admitsNull($type, $this->typeAliases);
+        }
+        $admits = $this->configAliasesAdmittingNull[$name];
+        if (null !== $admits || !$this->forTool) {
+            return $admits ?? false;
+        }
+
+        throw new UnreadableContract(\sprintf(
+            'Whether the project-wide alias "%s" (`%s`) admits null can\'t be read from its TypeScript, and a key of a request is typed with it: whether that key may be left out, or cleared, turns on it. Write the null out — `%2$s | null` where it admits one, `NonNullable<%2$s>` where it doesn\'t.',
+            $name,
+            $type,
+        ));
+    }
+
+    /**
+     * A union of the members read, a member that is itself a union or admits null spread into it —
+     * so a reader of the union sees its null.
+     *
+     * @param list<ParsedType> $members
+     */
+    private static function union(array $members): UnionType
+    {
+        $spread = [];
+        foreach ($members as $member) {
+            if ($member instanceof UnionType) {
+                $spread = [...$spread, ...$member->types];
+            } elseif ($member instanceof NullableType && !$member->optional) {
+                $spread = [...$spread, $member->inner, new ScalarType('null')];
+            } else {
+                $spread[] = $member;
+            }
+        }
+
+        return new UnionType($spread);
+    }
+
+    /**
+     * An intersection read: the shape its base and its own keys make, where its base reads as one
+     * ({@see ShapeType::intersected()}); its own keys read, on the base as written, otherwise.
+     */
+    private static function intersection(IntersectionType $written, ParsedType $base, ParsedType $extra): ParsedType
+    {
+        if (!$extra instanceof ShapeType) {
+            return $written;
+        }
+
+        return $base instanceof ShapeType ? ShapeType::intersected($base, $extra) : new IntersectionType($written->base, $extra);
+    }
+
+    private function parseType(string $type): ?ParsedType
+    {
+        if (\array_key_exists($type, $this->parsedTypes)) {
+            return $this->parsedTypes[$type];
+        }
+
+        try {
+            return $this->parsedTypes[$type] = $this->shapeParser->parse($type);
+        } catch (Throwable) {
+            return $this->parsedTypes[$type] = null;
+        }
     }
 }

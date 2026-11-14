@@ -7,16 +7,20 @@ namespace PTGS\TypeBridge\Support;
 use BackedEnum;
 use Closure;
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocNode;
+use PHPStan\PhpDocParser\Ast\PhpDoc\TemplateTagValueNode;
 use PHPStan\PhpDocParser\Ast\PhpDoc\TypeAliasImportTagValueNode;
+use PHPStan\PhpDocParser\Ast\Type\TypeNode;
 use PHPStan\PhpDocParser\Lexer\Lexer;
 use PHPStan\PhpDocParser\Parser\ConstExprParser;
 use PHPStan\PhpDocParser\Parser\PhpDocParser;
 use PHPStan\PhpDocParser\Parser\TokenIterator;
 use PHPStan\PhpDocParser\Parser\TypeParser;
 use PHPStan\PhpDocParser\ParserConfig;
+use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\GenericType;
+use PTGS\TypeBridge\Parser\IdOfType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\LiteralType;
@@ -24,10 +28,13 @@ use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\NullableType;
 use PTGS\TypeBridge\Parser\ParsedType;
+use PTGS\TypeBridge\Parser\ParsedTypes;
+use PTGS\TypeBridge\Parser\ScopedType;
 use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
+use PTGS\TypeBridge\Parser\ValueOfType;
 use ReflectionClass;
 use ReflectionProperty;
 use RuntimeException;
@@ -122,6 +129,9 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * A file's `@phpstan-import-type` tags, by the alias each is known by locally, every one of which
+     * must be found in the source tree: the first that isn't fails.
+     *
      * @param array<string, string> $classFiles
      * @param array<string, list<string>> $shortNameMap
      * @return array<string, ImportedType>
@@ -134,41 +144,112 @@ final class PhpDocTypeHelper
         array $shortNameMap,
         DomainGuesser $domainGuesser,
     ): array {
-        $imports = [];
-
-        foreach ($this->importTags($content) as $tag) {
-            $sourceAlias = $tag->importedAlias;
-            $classRef = $tag->importedFrom->name;
-            $localAlias = $tag->importedAs ?? $sourceAlias;
-            $targetClass = $this->resolveClassReference($classRef, $ownerClass, $classFiles, $shortNameMap);
-            $targetTypeName = $this->emittedTypeName($sourceAlias, $targetClass);
-            $targetFile = $classFiles[$targetClass] ?? null;
-            if (null === $targetFile) {
-                throw new RuntimeException(\sprintf('Imported type target "%s" for "%s" was not found.', $targetClass, $ownerClass));
-            }
-
-            $imports[$localAlias] = new ImportedType(
-                localAlias: $localAlias,
-                targetClass: $targetClass,
-                targetTypeName: $targetTypeName,
-                targetDomain: $domainGuesser->guess($srcDir, $targetFile),
-            );
+        $read = $this->importedTypes($this->importTags($content), $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser, $this->classImports($content));
+        foreach ($read['unresolved'] as $why) {
+            throw new RuntimeException($why);
         }
 
-        return $imports;
+        return $read['imports'];
     }
 
     /**
-     * Resolves the names in a parsed type that only make sense where it was written: imported
-     * aliases become the names they were imported as; a bare name that is not an alias of the
-     * file but names a class is annotated with that class, so the emitter can fall back to the
-     * class's own type; and class constants — `self::STATUS_*` — become the literal values of
-     * the constants they match.
+     * The types a file's `@phpstan-import-type` tags (read with {@see self::importTags()}) import, by
+     * the alias each is known by locally. An import whose target is not in the source tree is set
+     * aside, with why, rather than thrown: a file is read for some of its types only — a response's
+     * base class, whose protected properties may name anything — and such an import matters only if
+     * what is read uses it ({@see self::unresolvedImportUsedIn()}).
+     *
+     * @param list<TypeAliasImportTagValueNode> $tags
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
+     * @param array<string, string> $classImports the file's `use` statements ({@see self::classImports()}),
+     *        which name the class an import is from as they name any
+     * @return array{imports: array<string, ImportedType>, unresolved: array<string, string>} `unresolved` is local alias => why
+     */
+    public function importedTypes(
+        array $tags,
+        string $ownerClass,
+        string $srcDir,
+        array $classFiles,
+        array $shortNameMap,
+        DomainGuesser $domainGuesser,
+        array $classImports = [],
+    ): array {
+        $imports = [];
+        $unresolved = [];
+        foreach ($tags as $tag) {
+            try {
+                $import = $this->importedType($tag, $ownerClass, $srcDir, $classFiles, $shortNameMap, $domainGuesser, $classImports);
+                $imports[$import->localAlias] = $import;
+            } catch (RuntimeException $e) {
+                $unresolved[$tag->importedAs ?? $tag->importedAlias] = $e->getMessage();
+            }
+        }
+
+        return ['imports' => $imports, 'unresolved' => $unresolved];
+    }
+
+    /**
+     * An import whose target was set aside as unresolved by
+     * {@see self::importedTypes()}, if the type uses it — names it as a type, which
+     * a shape key or a string literal spelt the same does not: the error it would have thrown, with
+     * where it is used — so a file is failed only over an import something read from it needs.
+     *
+     * @param ParsedType $type as parsed, before its names are resolved
+     * @param array<string, string> $unresolved local alias => why
+     */
+    public function unresolvedImportUsedIn(ParsedType $type, array $unresolved, string $where): ?RuntimeException
+    {
+        $used = array_key_first(array_intersect_key($unresolved, ParsedTypes::names($type)));
+
+        return null === $used ? null : new RuntimeException(\sprintf('%s %s is typed with it.', $unresolved[$used], $where));
+    }
+
+    /**
+     * @param array<string, string> $classFiles
+     * @param array<string, list<string>> $shortNameMap
+     * @param array<string, string> $classImports
+     */
+    private function importedType(
+        TypeAliasImportTagValueNode $tag,
+        string $ownerClass,
+        string $srcDir,
+        array $classFiles,
+        array $shortNameMap,
+        DomainGuesser $domainGuesser,
+        array $classImports,
+    ): ImportedType {
+        $sourceAlias = $tag->importedAlias;
+        $targetClass = $this->resolveClassReference($tag->importedFrom->name, $ownerClass, $classFiles, $shortNameMap, $classImports);
+        $targetFile = $classFiles[$targetClass] ?? null;
+        if (null === $targetFile) {
+            throw new RuntimeException(\sprintf('Imported type target "%s" for "%s" was not found.', $targetClass, $ownerClass));
+        }
+
+        return new ImportedType(
+            localAlias: $tag->importedAs ?? $sourceAlias,
+            targetClass: $targetClass,
+            targetTypeName: $this->emittedTypeName($sourceAlias, $targetClass),
+            targetDomain: $domainGuesser->guess($srcDir, $targetFile),
+            sourceAlias: $sourceAlias,
+        );
+    }
+
+    /**
+     * Resolves the names in a parsed type that only make sense where it was written: an imported
+     * alias keeps the name the file imports it as — the scope the type is converted in
+     * ({@see \PTGS\TypeBridge\Emitter\EmitContext::scopeFor()}) says which type that is, so one
+     * imported under another name is never taken for an alias the file declares with its emitted
+     * name; a bare name that is not an alias of the file but names a class is annotated with that
+     * class, so the emitter can fall back to the class's own type; and class constants —
+     * `self::STATUS_*` — become the literal values of the constants they match.
      *
      * @param array<string, ImportedType> $imports
      * @param ?string $ownerClass the class whose docblock holds the type
      * @param array<string, string> $classImports the file's `use` statements, alias => class ({@see self::classImports()})
      * @param list<string> $localAliases the aliases the file declares itself
+     * @param ?string $selfClass the class `self::` means, where it isn't `$ownerClass`: in a
+     *        trait, the class using it — as PHP and PHPStan read it
      */
     public function resolveImportedNames(
         ParsedType $type,
@@ -176,10 +257,11 @@ final class PhpDocTypeHelper
         ?string $ownerClass = null,
         array $classImports = [],
         array $localAliases = [],
+        ?string $selfClass = null,
     ): ParsedType {
-        return $this->mapLeaves($type, function (ParsedType $leaf) use ($imports, $ownerClass, $classImports, $localAliases): ParsedType {
+        return $this->mapLeaves($type, function (ParsedType $leaf) use ($imports, $ownerClass, $classImports, $localAliases, $selfClass): ParsedType {
             if ($leaf instanceof ClassConstantType) {
-                return $this->resolveClassConstant($leaf, $ownerClass, $classImports);
+                return $this->resolveClassConstant($leaf, $ownerClass, $classImports, $selfClass ?? $ownerClass);
             }
 
             if (!$leaf instanceof NameRefType) {
@@ -187,12 +269,15 @@ final class PhpDocTypeHelper
             }
 
             if (null === $leaf->class && isset($imports[$leaf->name])) {
-                return new NameRefType($imports[$leaf->name]->targetTypeName);
+                return $leaf;
             }
 
-            // Written as a qualified name: a class by syntax, resolved as PHP would.
+            // Written as a qualified name — in a docblock, or as a native type — a class by syntax,
+            // resolved as PHP would, and spelt in full, so no alias of its short name answers to it.
             if (null !== $leaf->class) {
-                return new NameRefType($leaf->name, $this->resolveClassName($leaf->class, $ownerClass, $classImports) ?? ltrim($leaf->class, '\\'));
+                $class = $this->resolveClassName($leaf->class, $ownerClass, $classImports) ?? ltrim($leaf->class, '\\');
+
+                return new NameRefType($class, $class);
             }
 
             if (\in_array($leaf->name, $localAliases, true)) {
@@ -206,6 +291,52 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * A type written outside the source tree, its names as that file means them: each the class it
+     * resolved to ({@see self::resolveImportedNames()}), spelt in full, so no module's alias of the
+     * same short name answers to it. Such a file is in no module, so a name that resolved to no
+     * class fails, with why — but for a project-wide alias, which PHPStan reads in any file.
+     *
+     * @param list<string> $sharedNames the project-wide aliases (`typeAliases`)
+     */
+    public function namesAsClasses(ParsedType $type, string $why, array $sharedNames = []): ParsedType
+    {
+        return $this->mapLeaves($type, static function (ParsedType $leaf) use ($why, $sharedNames): ParsedType {
+            if (!$leaf instanceof NameRefType || (null === $leaf->class && \in_array($leaf->name, $sharedNames, true))) {
+                return $leaf;
+            }
+            if (null === $leaf->class) {
+                throw new RuntimeException(\sprintf('`%s` names no class where it is written. %s', $leaf->name, $why));
+            }
+
+            return new NameRefType($leaf->class, $leaf->class);
+        });
+    }
+
+    /**
+     * A type written outside the source tree, its enums as that file names them: `value-of<Status>`
+     * is the Status its `use` statements and namespace resolve, spelt in full, not whichever enum of
+     * the source tree has that short name. One outside the source tree is emitted as one the source
+     * tree names is; a name that is no enum this install can load fails, with why.
+     *
+     * @param array<string, string> $classImports the file's `use` statements ({@see self::classImports()})
+     * @param array<string, string> $classFiles   the source tree's classes
+     */
+    public function enumsAsWritten(ParsedType $type, string $ownerClass, array $classImports, array $classFiles, string $why): ParsedType
+    {
+        return $this->mapLeaves($type, function (ParsedType $leaf) use ($ownerClass, $classImports, $classFiles, $why): ParsedType {
+            if (!$leaf instanceof ValueOfType && !$leaf instanceof IdOfType) {
+                return $leaf;
+            }
+            $enum = $this->resolveClassName($leaf->enumClass, $ownerClass, $classImports) ?? ltrim($leaf->enumClass, '\\');
+            if (!isset($classFiles[$enum]) && !PhpFileClassLocator::loadsEnum($enum)) {
+                throw new RuntimeException(\sprintf('`%s` names %s, which is no enum this install can load. %s', $leaf->enumClass, $enum, $why));
+            }
+
+            return $leaf instanceof ValueOfType ? new ValueOfType($enum) : new IdOfType($enum);
+        });
+    }
+
+    /**
      * The file's `use` statements for classes, as alias => fully qualified name. Only those
      * before the first class-like declaration: a `use` inside one imports a trait.
      *
@@ -213,8 +344,93 @@ final class PhpDocTypeHelper
      */
     public function classImports(string $content): array
     {
-        $imports = [];
+        return $this->classImportsIn(\PhpToken::tokenize($content));
+    }
+
+    /**
+     * What a file says, read out of it in one pass: the aliases it declares
+     * ({@see self::extractPhpStanTypes()}), the classes its `use` statements name
+     * ({@see self::classImports()}) and its import tags ({@see self::importTags()}) — the file
+     * tokenised once, each docblock parsed once.
+     *
+     * And the types it binds a trait's template params to where a class or trait in it uses the
+     * trait — `@use Trait<…>` on the `use` statement (or the class), ranked as PHPStan ranks them:
+     * `@phpstan-use`, `@template-use`, `@use` — by the trait the name means, as PHP resolves it
+     * there: through the file's `use` statements, else in its namespace; each with where it is
+     * written, which says whose binding it is ({@see ClassFileTypes::usesArgs()}).
+     *
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<array{from: int, to: int, doc: string, rank: int, args: list<string>}>>}
+     */
+    public function readFile(string $content): array
+    {
         $tokens = \PhpToken::tokenize($content);
+        $classImports = $this->classImportsIn($tokens);
+        $namespace = self::namespaceIn($tokens);
+        $definitions = [];
+        $importTags = [];
+        $uses = [];
+        foreach ($tokens as $token) {
+            if (!$token->is(\T_DOC_COMMENT)) {
+                continue;
+            }
+            $node = $this->parse($token->text);
+            foreach ($node->getTypeAliasTagValues() as $tag) {
+                $definitions[$tag->alias] = (string) $tag->type;
+            }
+            foreach ($node->getTypeAliasImportTagValues() as $tag) {
+                $importTags[] = $tag;
+            }
+            foreach (['@phpstan-use', '@template-use', '@use'] as $rank => $tagName) {
+                foreach ($node->getUsesTagValues($tagName) as $use) {
+                    // Where it is written, so each class of the file reads its own.
+                    $uses[ClassNames::resolve($use->type->type->name, $classImports, $namespace)][] = [
+                        'from' => $token->line,
+                        'to' => $token->line + substr_count($token->text, "\n"),
+                        'doc' => $token->text,
+                        'rank' => $rank,
+                        'args' => array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $use->type->genericTypes)),
+                    ];
+                }
+            }
+        }
+
+        return [
+            'definitions' => $definitions,
+            'classImports' => $classImports,
+            'importTags' => $importTags,
+            'uses' => $uses,
+        ];
+    }
+
+    /**
+     * The namespace a file declares, '' for none.
+     *
+     * @param array<\PhpToken> $tokens
+     */
+    private static function namespaceIn(array $tokens): string
+    {
+        $count = \count($tokens);
+        for ($i = 0; $i < $count; ++$i) {
+            if (!$tokens[$i]->is(\T_NAMESPACE)) {
+                continue;
+            }
+            for (++$i; $i < $count && $tokens[$i]->is(\T_WHITESPACE); ++$i) {
+            }
+
+            return $i < $count && $tokens[$i]->is([\T_NAME_QUALIFIED, \T_STRING]) ? $tokens[$i]->text : '';
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<\PhpToken> $tokens
+     *
+     * @return array<string, string>
+     */
+    private function classImportsIn(array $tokens): array
+    {
+        $imports = [];
         $count = \count($tokens);
 
         for ($i = 0; $i < $count; $i++) {
@@ -237,8 +453,9 @@ final class PhpDocTypeHelper
                 continue;
             }
 
+            // Several in one statement, by commas: `use A\B, C\D as E;`.
             $prefix = '';
-            $names = [$statement];
+            $names = explode(',', $statement);
             if (1 === preg_match('/^(.*?)\\\\?\{(.*)\}$/s', $statement, $group)) {
                 $prefix = trim($group[1], '\\ ') . '\\';
                 $names = explode(',', $group[2]);
@@ -250,7 +467,7 @@ final class PhpDocTypeHelper
                     continue;
                 }
                 $class = ltrim($prefix . trim($parts[0]), '\\');
-                $alias = isset($parts[1]) ? trim($parts[1]) : substr((string) strrchr('\\' . $class, '\\'), 1);
+                $alias = isset($parts[1]) ? trim($parts[1]) : ClassNames::short($class);
                 $imports[$alias] = $class;
             }
         }
@@ -301,10 +518,11 @@ final class PhpDocTypeHelper
         if ($type instanceof IntersectionType) {
             $base = $this->mapLeaves($type->base, $leaf);
             $extra = $this->mapLeaves($type->extra, $leaf);
-            if (!$base instanceof NameRefType || !$extra instanceof ShapeType) {
+            if (!$extra instanceof ShapeType) {
                 throw new RuntimeException('Resolved intersection type became invalid after import resolution.');
             }
 
+            // A generic's param in the base's place is whatever it is bound to.
             return new IntersectionType(base: $base, extra: $extra);
         }
 
@@ -334,17 +552,19 @@ final class PhpDocTypeHelper
      *
      * @param array<string, string> $classImports
      */
-    private function resolveClassConstant(ClassConstantType $type, ?string $ownerClass, array $classImports): ParsedType
+    private function resolveClassConstant(ClassConstantType $type, ?string $ownerClass, array $classImports, ?string $selfClass): ParsedType
     {
         $keyword = strtolower($type->class);
+        // `self::` is the class the type is read for — for a trait, the one using it, as PHP and
+        // PHPStan read it — and `parent::` that class's parent.
         $class = match ($keyword) {
-            'self', 'static', 'parent' => $ownerClass ?? throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $type->class)),
+            'self', 'static', 'parent' => $selfClass ?? throw new RuntimeException(\sprintf('`%s::` needs the class that owns the type, and none was given.', $type->class)),
             default => $this->resolveClassName($type->class, $ownerClass, $classImports),
         };
         if ('parent' === $keyword && null !== $class) {
             $class = get_parent_class($class) ?: throw new RuntimeException(\sprintf('`%s::%s` is written on %s, which has no parent class.', $type->class, $type->pattern, $class));
         }
-        if (null === $class || (!class_exists($class) && !interface_exists($class) && !enum_exists($class))) {
+        if (null === $class || !PhpFileClassLocator::loads($class)) {
             throw new RuntimeException(\sprintf(
                 'Class "%s" in `%s::%s` could not be found. Write self::, import the class, or give its fully qualified name.',
                 $type->class,
@@ -460,24 +680,17 @@ final class PhpDocTypeHelper
      * @param array<string, string> $classImports
      * @return ?class-string
      */
-    private function resolveClassName(string $name, ?string $ownerClass, array $classImports): ?string
+    public function resolveClassName(string $name, ?string $ownerClass, array $classImports): ?string
     {
-        $candidates = [];
-        if (str_starts_with($name, '\\')) {
-            $candidates[] = ltrim($name, '\\');
-        } else {
-            $first = explode('\\', $name, 2);
-            if (isset($classImports[$first[0]])) {
-                $candidates[] = $classImports[$first[0]] . (isset($first[1]) ? '\\' . $first[1] : '');
-            }
-            if (null !== $ownerClass && null !== $namespace = $this->namespace($ownerClass)) {
-                $candidates[] = $namespace . '\\' . $name;
-            }
+        // As PHP resolves it — and, leniently, one it would not, unqualified, as the global class.
+        $candidates = [ClassNames::resolve($name, $classImports, null === $ownerClass ? null : ClassNames::namespaceOf($ownerClass))];
+        if (!str_starts_with($name, '\\') && !ClassNames::imported($name, $classImports)) {
             $candidates[] = $name;
         }
 
         foreach ($candidates as $candidate) {
-            if (class_exists($candidate) || interface_exists($candidate) || enum_exists($candidate)) {
+            // One whose declaration throws in this install — a require-dev parent — is no class here.
+            if (PhpFileClassLocator::loads($candidate)) {
                 return $candidate;
             }
         }
@@ -512,9 +725,12 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * A file's `@phpstan-import-type` tags, as written: TypeBridge reads the `@phpstan-` spellings of
+     * a type alias and its import alone, `@psalm-` ones neither.
+     *
      * @return list<TypeAliasImportTagValueNode>
      */
-    private function importTags(string $content): array
+    public function importTags(string $content): array
     {
         $tags = [];
 
@@ -527,6 +743,106 @@ final class PhpDocTypeHelper
         return $tags;
     }
 
+    /**
+     * The template params a class's docblock declares, in the order first written, as PHPStan reads
+     * them: each name by its highest-ranked spelling — `@phpstan-` over `@psalm-` over `@phan-` over
+     * plain, `-covariant` and `-contravariant` alike — with its bound (`of …`) and default (`= …`) as
+     * written.
+     *
+     * @return list<array{name: string, bound: string|null, default: string|null}>
+     */
+    public function templateParams(string $docComment): array
+    {
+        if ('' === $docComment) {
+            return [];
+        }
+
+        $ranks = ['' => 0, 'phan' => 1, 'psalm' => 2, 'phpstan' => 3];
+        $chosen = [];
+        foreach ($this->parse($docComment)->getTags() as $tag) {
+            if (!$tag->value instanceof TemplateTagValueNode || 1 !== preg_match('/^@(?:(phan|psalm|phpstan)-)?template(?:-covariant|-contravariant)?$/', $tag->name, $spelling)) {
+                continue;
+            }
+            $rank = $ranks[$spelling[1] ?? ''];
+            if (!isset($chosen[$tag->value->name]) || $rank > $chosen[$tag->value->name]['rank']) {
+                $chosen[$tag->value->name] = ['rank' => $rank, 'value' => $tag->value];
+            }
+        }
+
+        $params = [];
+        foreach ($chosen as $name => ['value' => $value]) {
+            $params[] = [
+                'name' => $name,
+                'bound' => null === $value->bound ? null : (string) $value->bound,
+                'default' => null === $value->default ? null : (string) $value->default,
+            ];
+        }
+
+        return $params;
+    }
+
+    /**
+     * The types a class's docblock binds its parent's template params to, as written, PHPStan's own
+     * spelling first — `@phpstan-extends`, then `@template-extends`, `@phan-inherits`,
+     * `@phan-extends`, `@extends` — or null where it binds none.
+     *
+     * @return list<string>|null
+     */
+    public function extendsArgs(string $docComment): ?array
+    {
+        if ('' === $docComment) {
+            return null;
+        }
+
+        $node = $this->parse($docComment);
+        foreach (['@phpstan-extends', '@template-extends', '@phan-inherits', '@phan-extends', '@extends'] as $tagName) {
+            foreach ($node->getExtendsTagValues($tagName) as $extends) {
+                return array_values(array_map(static fn (TypeNode $arg): string => (string) $arg, $extends->type->genericTypes));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The type with each name it uses read in the scope of the file that writes it ({@see ScopedType}),
+     * its shape — a `?T`, a list, a union, an `included<…>` — as it is. An intersection, whose base
+     * is a name by syntax, is scoped whole — inside the `?` and beside the null of a type that has
+     * them, which a reader asks of the type itself.
+     *
+     * @param list<ImportedType> $imports the writing file's
+     */
+    public function scoped(ParsedType $type, array $imports, ?string $domain): ParsedType
+    {
+        // An intersection is a name and a shape by syntax: read whole where it is written.
+        if ($type instanceof NameRefType || $type instanceof IntersectionType) {
+            return new ScopedType($type, $imports, $domain);
+        }
+        if ($type instanceof ScopedType) {
+            return $type;
+        }
+
+        $parts = ParsedTypes::children($type);
+        $scoped = array_map(fn (ParsedType $part): ParsedType => $this->scoped($part, $imports, $domain), $parts);
+
+        return $scoped === $parts ? $type : ParsedTypes::withChildren($type, $scoped);
+    }
+
+    /**
+     * The type with each name used bare that `$by` has replaced by what it maps it to: a template
+     * param by the type it is bound to, an alias by the name it is read under elsewhere.
+     *
+     * @param array<string, ParsedType> $by
+     */
+    public function substituted(ParsedType $type, array $by): ParsedType
+    {
+        if ([] === $by) {
+            return $type;
+        }
+
+        return $this->mapLeaves($type, static fn (ParsedType $leaf): ParsedType => $leaf instanceof NameRefType && null === $leaf->class && isset($by[$leaf->name]) ? $by[$leaf->name] : $leaf);
+    }
+
     private function parse(string $docComment): PhpDocNode
     {
         return $this->parser->parse(new TokenIterator($this->lexer->tokenize($docComment)));
@@ -535,24 +851,26 @@ final class PhpDocTypeHelper
     /**
      * @param array<string, string> $classFiles
      * @param array<string, list<string>> $shortNameMap
+     * @param array<string, string> $classImports
      */
     private function resolveClassReference(
         string $classRef,
         string $ownerClass,
         array $classFiles,
         array $shortNameMap,
+        array $classImports = [],
     ): string {
+        // As PHP and PHPStan resolve it: a name the file's `use` statements give is that class, ahead
+        // of one of the same short name in its namespace.
+        $resolved = ClassNames::resolve($classRef, $classImports, ClassNames::namespaceOf($ownerClass));
+        if (ClassNames::imported($classRef, $classImports) || isset($classFiles[$resolved])) {
+            return $resolved;
+        }
+        // Leniently, where that is no class of the source tree: the name in full, then the one class
+        // there of its short name.
         $trimmed = ltrim($classRef, '\\');
         if (isset($classFiles[$trimmed])) {
             return $trimmed;
-        }
-
-        $namespace = $this->namespace($ownerClass);
-        if (null !== $namespace) {
-            $candidate = $namespace . '\\' . $trimmed;
-            if (isset($classFiles[$candidate])) {
-                return $candidate;
-            }
         }
 
         $candidates = $shortNameMap[$trimmed] ?? [];
@@ -575,37 +893,30 @@ final class PhpDocTypeHelper
         ));
     }
 
-    private function namespace(string $className): ?string
-    {
-        $position = strrpos($className, '\\');
-        if (false === $position) {
-            return null;
-        }
-
-        return substr($className, 0, $position);
-    }
-
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-        if (false === $position) {
-            return $className;
-        }
-
-        return substr($className, $position + 1);
-    }
-
-    private function emittedTypeName(string $alias, string $ownerClass): string
+    /**
+     * The name a type alias is collected under — the one an import of it, an endpoint's input
+     * reference and its own declaration all key it by: a named alias is its own name; a class's `_self`
+     * is the class, and an enum's as {@see ValueOfName::shapeName()} says, `{Enum}Data` beside its value
+     * union. It is declared as {@see \PTGS\TypeBridge\Emitter\EmittedNames} names it, the project's
+     * suffix and prefix applied.
+     */
+    public function emittedTypeName(string $alias, string $ownerClass): string
     {
         if ('_self' !== $alias) {
             return $alias;
         }
 
-        $shortName = $this->shortName($ownerClass);
-        if (enum_exists($ownerClass)) {
-            return $shortName . 'Data';
-        }
+        // An import's target may be one this install can't load: no enum, and set aside where it is read.
+        return self::selfTypeName(ClassNames::short($ownerClass), PhpFileClassLocator::loadsEnum($ownerClass), null !== ValueOfName::of($ownerClass));
+    }
 
-        return $shortName;
+    /**
+     * The name a `_self` is collected under, by what declares it: a class's is the class; an enum's is
+     * `{Enum}Data`, beside the value union under the enum's own name, or the enum's own name where it
+     * names that union otherwise ({@see ValueOfName}). For a reader of the source that loads no class.
+     */
+    public static function selfTypeName(string $shortName, bool $enum, bool $valuesNamedOtherwise): string
+    {
+        return $enum && !$valuesNamedOtherwise ? $shortName . 'Data' : $shortName;
     }
 }

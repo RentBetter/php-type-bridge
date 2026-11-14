@@ -1,0 +1,48 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Form;
+
+use PTGS\TypeBridge\Form\AbstractFormType;
+use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Input\ContactData;
+use Symfony\Component\Form\Extension\Core\Type\CollectionType;
+use Symfony\Component\Form\Extension\Core\Type\FormType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\OptionsResolver\OptionsResolver;
+
+/**
+ * `address` is required, so left out Symfony makes it a new AddressData; `billing` is not, so
+ * left out it is null.
+ *
+ * @extends AbstractFormType<ContactData>
+ */
+final class ContactType extends AbstractFormType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder
+            ->add('address', AddressType::class)
+            ->add('billing', AddressType::class, ['required' => false])
+            ->add('ref', RefType::class, ['required' => false])
+            ->add('postal', PostalType::class)
+            ->add('phones', CollectionType::class, ['entry_type' => PhoneType::class, 'allow_add' => true])
+            ->add('refs', CollectionType::class, ['entry_type' => RefType::class, 'allow_add' => true])
+            ->add('tree', NodeType::class, ['required' => false])
+            ->add('shipping', PostalType::class)
+            ->add('memo', MemoType::class, ['required' => false])
+            // A plain FormType holding fields, no data class: left out it is `[]` with each field
+            // written in, `['a' => null]`.
+            ->add('meta', FormType::class);
+        $builder->get('meta')->add('a', TextType::class);
+        $builder->add('courier', PostalType::class, ['required' => false]);
+    }
+
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        parent::configureOptions($resolver);
+
+        $resolver->setDefaults(['data_class' => ContactData::class]);
+    }
+}

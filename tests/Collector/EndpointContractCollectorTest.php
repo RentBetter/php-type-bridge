@@ -125,4 +125,44 @@ final class EndpointContractCollectorTest extends TestCase
 
         (new EndpointContractCollector())->collect($srcDir, $responses);
     }
+
+    public function test_an_intersection_follows_a_reimported_alias_to_the_shape_it_names(): void
+    {
+        $src = __DIR__ . '/../Fixture/ReimportedScopeFixtures';
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
+        $byName = array_column($contracts['Reports'], null, 'name');
+
+        $inherited = $byName['ShowScopedReport']->request?->query?->inheritedContract;
+        self::assertNotNull($inherited);
+        self::assertSame(['product'], array_map(static fn(object $key): string => $key->name, $inherited->fields), "ProductScopeData's keys, not ReportScopes' own");
+    }
+
+    public function test_a_path_parameter_knows_whether_its_route_matches_utf8(): void
+    {
+        $src = __DIR__ . '/../Fixture/ReimportedScopeFixtures';
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
+        $byName = array_column($contracts['Reports'], null, 'name');
+        $utf8 = static function (string $name) use ($byName): ?bool {
+            $param = $byName[$name]->request?->pathParams[0] ?? null;
+            self::assertNotNull($param, $name . ' has its {code}');
+
+            return $param->utf8;
+        };
+
+        self::assertTrue($utf8('ShowReport'), 'utf8: true on the route');
+        self::assertFalse($utf8('ShowRawReport'), "options: ['utf8' => false]");
+        self::assertNull($utf8('ShowPlainReport'), 'Not stated: the router\'s default decides');
+    }
+
+    public function test_a_fields_trim_option_survives_collection(): void
+    {
+        // withDeclared() rebuilds every field the collector hands on; it must carry `trim` across.
+        $src = __DIR__ . '/../Fixture/ReimportedScopeFixtures';
+        $contracts = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
+        $byName = array_column($contracts['Reports'], null, 'name');
+        $fields = array_column($byName['ShowScopedReport']->request?->query?->fields ?? [], null, 'name');
+
+        self::assertTrue($fields['product']->trim);
+        self::assertFalse($fields['period']->trim);
+    }
 }

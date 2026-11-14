@@ -31,6 +31,42 @@ final readonly class CollectedFormField
      *                                                field with no children: one whose type reads the submitted
      *                                                value whole, so the form shows nothing of what it takes.
      *                                                Null for any other field, and where `_self` is not a shape
+     * @param bool                     $trim          the field's `trim` option: whether the form trims what it is
+     *                                                 sent (Symfony's StringUtil::trim) before it is validated
+     * @param mixed                    $blankValue    what the field reaches validation as when it is left out of a
+     *                                                 request, sent as null or sent blank — it is submitted null, and
+     *                                                 this is what its form makes of that: null for most; '' for a
+     *                                                 text field whose `empty_data` is '', which TextType keeps a
+     *                                                 string; [] for a collection or a multiple choice; false for a
+     *                                                 checkbox. Read only where asked
+     *                                                 ({@see \PTGS\TypeBridge\Support\FormTypeInspector::inspect()}):
+     *                                                 an MCP tool's form; null otherwise
+     * @param list<Constraint>         $entryConstraints what each entry of a collection is validated against: its
+     *                                                 `entry_options` constraints and an All on its property
+     * @param mixed                    $entryBlankValue what a collection entry reaches validation as when it is
+     *                                                 sent as null or blank, as `$blankValue` says of a field
+     * @param list<Constraint>         $formConstraints the field's own `constraints` option alone, which Symfony
+     *                                                 validates wherever the field is submitted; `$constraints`
+     *                                                 has its property's too, where the object it is on is validated
+     * @param bool                     $transformsValue whether the form transforms a submitted value before it is
+     *                                                 validated: a model transformer, a view transformer but
+     *                                                 TextType's own (which only turns a null into ''), or a
+     *                                                 listener rewriting it, its own or a form's holding it. What
+     *                                                 a constraint then sees is not what was sent
+     * @param list<Constraint>         $heldConstraints the constraints on the property the field binds, where the
+     *                                                 object it is on is validated — Default group only: all a field
+     *                                                 that is never submitted is held to, its own `constraints`
+     *                                                 option running only when it is
+     * @param mixed                    $initialValue   what a new object of the data class holds at that property:
+     *                                                 its default, or a promoted one's from the constructor; null
+     *                                                 where it declares none, as the validator reads one never set
+     * @param bool                     $entryCompound  whether a collection's entry type is a form of fields, so
+     *                                                 one with a data class and none of its own reads an object
+     *                                                 whole; not a file input or a scalar type with a data class
+     * @param bool                     $refusedMissing whether its own `constraints` option holds a NotBlank or a
+     *                                                 NotNull at its top, in any group: all a processor submitting
+     *                                                 with `clearMissing` off asks of a field left out, which
+     *                                                 Symfony validates nothing of
      */
     public function __construct(
         public string $name,
@@ -53,6 +89,16 @@ final readonly class CollectedFormField
         public array $constraints = [],
         public ?string $ownerClass = null,
         public ?ShapeType $contract = null,
+        public bool $trim = true,
+        public mixed $blankValue = null,
+        public array $entryConstraints = [],
+        public mixed $entryBlankValue = null,
+        public bool $transformsValue = false,
+        public array $formConstraints = [],
+        public array $heldConstraints = [],
+        public mixed $initialValue = null,
+        public bool $refusedMissing = false,
+        public bool $entryCompound = false,
     ) {}
 
     /**
@@ -85,6 +131,16 @@ final readonly class CollectedFormField
             constraints: $this->constraints,
             ownerClass: $this->ownerClass,
             contract: $contract,
+            trim: $this->trim,
+            blankValue: $this->blankValue,
+            entryConstraints: $this->entryConstraints,
+            entryBlankValue: $this->entryBlankValue,
+            transformsValue: $this->transformsValue,
+            formConstraints: $this->formConstraints,
+            heldConstraints: $this->heldConstraints,
+            initialValue: $this->initialValue,
+            refusedMissing: $this->refusedMissing,
+            entryCompound: $this->entryCompound,
         );
     }
 }
