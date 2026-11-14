@@ -7,7 +7,6 @@ namespace PTGS\TypeBridge\Tests\Parser;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Parser\ClassConstantType;
-use PTGS\TypeBridge\Parser\GenericType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\MapType;
@@ -27,14 +26,27 @@ final class PhpDocShapeParserGrammarTest extends TestCase
 {
     public function test_a_keyword_with_arguments_is_no_bare_keyword(): void
     {
-        // `iterable` alone is any array; `iterable<string>` is a generic, as before PHPStan's bare
-        // keywords were read — a shape holding one still parses.
+        // `iterable` alone is any array; `iterable<string>` is an array of strings, as PHPStan reads
+        // it — keyed by anything, `iterable<mixed, string>` — and a shape holding one still parses.
         $shape = (new PhpDocShapeParser())->parse('array{tags?: iterable<string>, name: string}');
 
         self::assertInstanceOf(ShapeType::class, $shape);
-        self::assertInstanceOf(GenericType::class, $shape->fields[0]->type);
-        self::assertSame('iterable', $shape->fields[0]->type->name);
+        self::assertInstanceOf(MapType::class, $shape->fields[0]->type);
+        self::assertInstanceOf(ScalarType::class, $shape->fields[0]->type->key);
+        self::assertSame('array-key', $shape->fields[0]->type->key->type);
+        self::assertInstanceOf(ScalarType::class, $shape->fields[0]->type->value);
+        self::assertSame('string', $shape->fields[0]->type->value->type);
         self::assertInstanceOf(MapType::class, (new PhpDocShapeParser())->parse('iterable'));
+    }
+
+    public function test_an_iterable_with_its_key_is_an_array_of_that_key(): void
+    {
+        $map = (new PhpDocShapeParser())->parse('iterable<int, list<string>>');
+
+        self::assertInstanceOf(MapType::class, $map);
+        self::assertInstanceOf(ScalarType::class, $map->key);
+        self::assertSame('int', $map->key->type);
+        self::assertInstanceOf(ListType::class, $map->value);
     }
 
     /**

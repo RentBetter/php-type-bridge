@@ -513,6 +513,17 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertMatchesRegularExpression('~^  count: (number \\| Record<string, unknown> \\| unknown\\[\\]|Record<string, unknown> \\| unknown\\[\\] \\| number);$~m', $notes);
     }
 
+    public function test_native_object_and_iterable_are_what_the_same_keywords_in_a_docblock_are(): void
+    {
+        // `object` is anything but null, `iterable` any array — spelled natively or in a docblock —
+        // and `iterable<V>` the array of V it is sent as.
+        $things = self::emit(self::fixtures('NativeKeywordFixtures'))['Things'];
+
+        self::assertStringContainsString("  native: NonNullable<unknown>;\n  documented: NonNullable<unknown>;\n  maybe: NonNullable<unknown> | null;\n", $things);
+        self::assertStringContainsString("  items: Record<string, unknown> | unknown[];\n  documentedItems: Record<string, unknown> | unknown[];\n", $things);
+        self::assertStringContainsString("  tags: Record<string, string> | string[];\n  flags: Record<number, boolean>;\n", $things);
+    }
+
     public function test_a_native_parent_type_is_the_parent_class(): void
     {
         self::assertStringContainsString("export interface ShowNoteVersionResponse {\n  previous: NoteVersion | null;\n  number: number;\n}", self::emit(self::fixtures('NativeTypedFixtures'))['Notes']);
