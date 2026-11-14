@@ -138,9 +138,10 @@ final class AliasedMapKeys
         $children = ParsedTypes::children($type);
         $keyed = array_map(fn (ParsedType $child): ParsedType => $this->keyed($child, $imports, $domain), $children);
         if ($type instanceof MapType) {
-            // A key no name is in was keyed as it was built; one a name is in, as what it stands for.
-            $standsFor = $this->standsFor($keyed[0], $imports, $domain, []);
-            if (MapType::keyOf($standsFor) !== $standsFor) {
+            // A key no name is in was keyed as it was built; one a name is in, as what it stands for:
+            // any key where that is one no array has, or every one an array has.
+            $keyedAs = MapType::keyOf($this->standsFor($keyed[0], $imports, $domain, []));
+            if ($keyedAs instanceof ScalarType && 'array-key' === $keyedAs->type) {
                 $keyed[0] = new ScalarType('array-key');
             }
         }

@@ -432,7 +432,11 @@ final class ResponseClassCollector
         }
 
         $where = \sprintf('The template param %s binds to `%s`', $class, $written);
-        $type = $this->parser->parse($written);
+        try {
+            $type = $this->parser->parse($written);
+        } catch (RuntimeException $e) {
+            throw new RuntimeException(\sprintf('%s, which can\'t be read: %s', $where, $e->getMessage()), previous: $e);
+        }
         $unresolved = $this->docHelper->unresolvedImportUsedIn($type, $context['unresolved'], $where);
         if (null !== $unresolved) {
             throw $unresolved;
@@ -500,7 +504,7 @@ final class ResponseClassCollector
     {
         $traits = array_values($holder->getTraits());
 
-        return [] === $traits || $this->files->declaresProperty((string) $holder->getFileName(), $holder->getName(), $property) ? [] : $traits;
+        return [] === $traits || $this->files->declaresProperty($holder, $property) ? [] : $traits;
     }
 
     /**

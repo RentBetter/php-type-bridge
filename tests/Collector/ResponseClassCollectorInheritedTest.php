@@ -507,7 +507,7 @@ final class ResponseClassCollectorInheritedTest extends TestCase
     public function test_a_template_bound_the_parser_cannot_read_fails_naming_the_param(): void
     {
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('The template param PTGS\\TypeBridge\\Tests\\Fixture\\UnreadableBoundFixtures\\Things\\BaseBoxResponse binds to `\\Countable&\\Traversable`');
+        $this->expectExceptionMessage('The template param PTGS\\TypeBridge\\Tests\\Fixture\\UnreadableBoundFixtures\\Things\\BaseBoxResponse binds to `(\\Countable & \\Traversable)`, which can\'t be read');
 
         self::emit(self::fixtures('UnreadableBoundFixtures'));
     }

@@ -8,6 +8,7 @@ use PHPStan\PhpDocParser\Ast\PhpDoc\TypeAliasImportTagValueNode;
 use PTGS\TypeBridge\Attribute\PhpStanOnly;
 use PTGS\TypeBridge\Model\ImportedType;
 use InvalidArgumentException;
+use ReflectionClass;
 
 /**
  * What a class's file says its types mean — the aliases it declares, the types it imports, the
@@ -22,7 +23,7 @@ use InvalidArgumentException;
  */
 final class ClassFileTypes
 {
-    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>, properties: array<string, array<string, true>>}|false> by file; false where it can't be read */
+    /** @var array<string, array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}|false> by file; false where it can't be read */
     private array $files = [];
 
     /** @var array<string, bool> by class */
@@ -42,6 +43,9 @@ final class ClassFileTypes
 
     /** @var array<string, array{imports: array<string, ImportedType>, unresolved: array<string, string>}> by source directory and class: its imports as written, none followed */
     private array $written = [];
+
+    /** @var array<string, array<string, true>> by class or trait, the properties its own body declares */
+    private array $declaredProperties = [];
 
     public function __construct(
         public readonly PhpDocTypeHelper $docHelper = new PhpDocTypeHelper(),
@@ -160,20 +164,26 @@ final class ClassFileTypes
     }
 
     /**
-     * Whether the class or trait declares the property in its own body, in the file it is written
-     * in ({@see DeclaredProperties}), rather than takes it from a trait it uses.
+     * Whether the class or trait declares the property in its own body ({@see DeclaredProperties}),
+     * rather than takes it from a trait it uses. Read off its file when first asked of it.
+     *
+     * @param ReflectionClass<object> $class
      */
-    public function declaresProperty(string $file, string $class, string $property): bool
+    public function declaresProperty(ReflectionClass $class, string $property): bool
     {
-        $read = '' === $file ? false : $this->read($file);
+        if (!isset($this->declaredProperties[$class->getName()])) {
+            $file = $class->getFileName();
+            $source = false === $file || !is_file($file) ? false : file_get_contents($file);
+            $this->declaredProperties[$class->getName()] = false === $source ? [] : DeclaredProperties::inSource($source, (int) $class->getStartLine());
+        }
 
-        return false !== $read && isset($read['properties'][$class][$property]);
+        return isset($this->declaredProperties[$class->getName()][$property]);
     }
 
     /**
      * What the file declares, imports and `use`s, read out of it once.
      *
-     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>, properties: array<string, array<string, true>>}|false
+     * @return array{definitions: array<string, string>, classImports: array<string, string>, importTags: list<TypeAliasImportTagValueNode>, uses: array<string, list<string>>}|false
      */
     private function read(string $file): array|false
     {

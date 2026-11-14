@@ -143,6 +143,9 @@ final class TypeScriptEmitter
         type ExpandBelow<P extends string, K extends string> = P extends `${K}.${infer Rest}` ? Rest : never;
         TS;
 
+    /** The global types of TypeScript's the generated code writes: a module type of one of these names would shadow it. */
+    private const array TYPESCRIPT_GLOBALS = ['Array', 'Exclude', 'NonNullable', 'Omit', 'Record'];
+
     /** The include and expand helpers by what each is for, in the order they are declared. */
     private const array INCLUDE_HELPERS = ['including' => self::WITH_INCLUDES_HELPER, 'expanding' => self::WITH_EXPANDS_HELPER];
 
@@ -248,13 +251,14 @@ final class TypeScriptEmitter
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
         $this->enumsByDomain = $this->referencedEnums($domains, $responses);
         $this->includeHelpers = $this->includeHelpersUsed($domains, $responses);
-        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($domains, $responses, $contracts), array_keys($this->typeAliases));
+
+        // Every module written: one whose enum something emitted elsewhere names, if only for the enum.
+        $allDomains = array_values(array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts), array_keys($this->enumsByDomain))));
+        sort($allDomains);
+
+        $this->symbols = new SymbolRegistry($this->buildSymbolMaps($allDomains, $domains, $responses, $contracts), array_keys($this->typeAliases));
         $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources, $responses);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
-
-        // A module whose enum something emitted elsewhere names is written, if only for the enum.
-        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts), array_keys($this->enumsByDomain)));
-        sort($allDomains);
 
         $rootBlocks = [];
         $output = [];
@@ -273,10 +277,10 @@ final class TypeScriptEmitter
         $this->rootBlocks = $rootBlocks;
         $root = \in_array('', $allDomains, true) ? $this->emittedModules[''] : null;
         if (null !== $root || [] !== $rootBlocks) {
-            $output[''] = $this->assembler->assemble(
+            $output[''] = $this->unshadowed('', $this->assembler->assemble(
                 null === $root ? [] : $this->renderImportLines('', $root['imports'], $root['foreignAliases']),
                 [...($root['blocks'] ?? []), ...array_values($rootBlocks)],
-            );
+            ));
         }
 
         return $output;
@@ -506,8 +510,11 @@ final class TypeScriptEmitter
             // One named as an endpoint of the module is declared in it, as without a root module: an
             // import may not share a name with the module's `const` (TS2395), where a type it declares
             // may.
+            // A config alias only another names is declared there for it, and imported only where the
+            // module's own code names it too.
             $consts = array_fill_keys(array_map(static fn (CollectedEndpointContract $contract): string => $contract->name, $contracts), true);
             $own = [];
+            $imported = [];
             foreach ($shared as $block) {
                 $rootBlocks[$block->sortKey ?? $block->code] = $block;
                 if ('' === $domain || 'WithIncludes' === $block->sortKey || null === $block->sortKey) {
@@ -516,7 +523,13 @@ final class TypeScriptEmitter
                 if (isset($consts[$block->sortKey])) {
                     $own[] = $block;
                 } else {
-                    $imports[''][] = $block->sortKey;
+                    $imported[] = $block->sortKey;
+                }
+            }
+            $named = $this->configAliasesNamedIn([...$own, ...$blocks]);
+            foreach ($imported as $name) {
+                if (!isset($this->typeAliases[$name]) || isset($named[$name])) {
+                    $imports[''][] = $name;
                 }
             }
             $blocks = [...$own, ...$blocks];
@@ -526,7 +539,30 @@ final class TypeScriptEmitter
 
         $this->emittedModules[$domain] = ['imports' => $imports, 'foreignAliases' => $foreignAliases, 'blocks' => $blocks];
 
-        return $this->assembler->assemble($this->renderImportLines($domain, $imports, $foreignAliases), $blocks);
+        return $this->unshadowed($domain, $this->assembler->assemble($this->renderImportLines($domain, $imports, $foreignAliases), $blocks));
+    }
+
+    /**
+     * The module's code, where no type it declares shadows a global type of TypeScript's its code
+     * uses — `Record<string, V>` beside an `interface Record` reads the module's, and fails. One it
+     * imports is imported under another name ({@see self::computeForeignAliases()}).
+     */
+    private function unshadowed(string $domain, string $code): string
+    {
+        foreach (self::TYPESCRIPT_GLOBALS as $global) {
+            $declared = $this->claimedNames[$domain][$global] ?? null;
+            if (null !== $declared && 1 === preg_match('/\\b' . $global . '</', $code)) {
+                throw new RuntimeException(\sprintf(
+                    'TypeScript naming collision in domain "%s": "%s" is both TypeScript\'s global %s, which the module\'s code uses, and %s.',
+                    $domain,
+                    $global,
+                    $global,
+                    $declared,
+                ));
+            }
+        }
+
+        return $code;
     }
 
     /**
@@ -590,7 +626,8 @@ final class TypeScriptEmitter
     }
 
     /**
-     * Declarations for the config type aliases this domain's code actually mentions.
+     * Declarations for the config type aliases this domain's code actually mentions, and those they
+     * name in turn (`NoteId: 'UuidStr'`), in the order the config lists them.
      *
      * Emitted per domain rather than into a shared module so each domain's file stays
      * self-contained under the default relative-sibling import strategy. Two domains
@@ -602,22 +639,45 @@ final class TypeScriptEmitter
      */
     private function typeAliasBlocks(array $blocks): array
     {
-        if ([] === $this->typeAliases) {
-            return [];
+        $named = $this->configAliasesNamedIn($blocks);
+        for ($pending = array_keys($named); [] !== $pending;) {
+            $name = array_pop($pending);
+            foreach (array_keys($this->configAliasesNamedIn([new EmittedBlock(10, '', $this->typeAliases[$name])])) as $next) {
+                if (!isset($named[$next])) {
+                    $named[$next] = true;
+                    $pending[] = $next;
+                }
+            }
         }
-
-        $code = implode("\n", array_map(static fn (EmittedBlock $block): string => $block->code, $blocks));
 
         $aliasBlocks = [];
         foreach ($this->typeAliases as $aliasName => $tsType) {
-            if (1 !== preg_match('/\\b' . preg_quote($aliasName, '/') . '\\b/', $code)) {
-                continue;
+            if (isset($named[$aliasName])) {
+                $aliasBlocks[] = new EmittedBlock(10, '// Aliases', \sprintf('export type %s = %s;', $aliasName, $tsType), $aliasName);
             }
-
-            $aliasBlocks[] = new EmittedBlock(10, '// Aliases', \sprintf('export type %s = %s;', $aliasName, $tsType), $aliasName);
         }
 
         return $aliasBlocks;
+    }
+
+    /**
+     * The config type aliases the blocks' code names.
+     *
+     * @param list<EmittedBlock> $blocks
+     * @return array<string, true>
+     */
+    private function configAliasesNamedIn(array $blocks): array
+    {
+        $code = implode("\n", array_map(static fn (EmittedBlock $block): string => $block->code, $blocks));
+
+        $named = [];
+        foreach (array_keys($this->typeAliases) as $aliasName) {
+            if (1 === preg_match('/\\b' . preg_quote($aliasName, '/') . '\\b/', $code)) {
+                $named[$aliasName] = true;
+            }
+        }
+
+        return $named;
     }
 
     /**
@@ -866,19 +926,20 @@ final class TypeScriptEmitter
     }
 
     /**
+     * @param list<string> $modules every module written ({@see self::emit()}), one written only for an
+     *        enum named from elsewhere included: its names collide as any other's
      * @param array<string, CollectedDomain> $domains
      * @param array<string, list<CollectedApiResponseClass>> $responses
      * @param array<string, list<CollectedEndpointContract>> $contracts
      * @return array<string, array<string, string>>
      */
-    private function buildSymbolMaps(array $domains, array $responses, array $contracts): array
+    private function buildSymbolMaps(array $modules, array $domains, array $responses, array $contracts): array
     {
         $maps = [];
         $registrations = [];
-        // Every module written, one written only for an enum named from elsewhere included: its
-        // names collide as any other's. The root module, where one is set, declares what every
-        // module shares, whether it has types of its own or not.
-        $allDomains = array_unique(array_merge(array_keys($domains), array_keys($responses), array_keys($contracts), array_keys($this->enumsByDomain), $this->domainMapper->hasRootModule() ? [''] : []));
+        // The root module, where one is set, declares what every module shares, whether it has types
+        // of its own or not.
+        $allDomains = $this->domainMapper->hasRootModule() ? array_unique([...$modules, '']) : $modules;
 
         foreach ($allDomains as $domain) {
             $maps[$domain] = [];
@@ -1067,15 +1128,15 @@ final class TypeScriptEmitter
 
     /**
      * The names the module imports others' types under: their own, but where one is a name it takes
-     * itself — every one it claims ({@see self::buildSymbolMaps()}), and its endpoints' consts — the
-     * module's prefixed.
+     * itself — every one it claims ({@see self::buildSymbolMaps()}), its endpoints' consts, and the
+     * global types of TypeScript's its code may write — the module's prefixed.
      *
      * @param array<string, list<string>> $imports
      * @return array<string, array<string, string>>
      */
     private function computeForeignAliases(string $domain, array $imports): array
     {
-        $usedNames = array_map(static fn (): bool => true, $this->claimedNames[$domain] ?? []) + array_fill_keys($this->endpointConsts[$domain] ?? [], true);
+        $usedNames = array_map(static fn (): bool => true, $this->claimedNames[$domain] ?? []) + array_fill_keys($this->endpointConsts[$domain] ?? [], true) + array_fill_keys(self::TYPESCRIPT_GLOBALS, true);
         $aliases = [];
 
         $importDomains = array_keys($imports);

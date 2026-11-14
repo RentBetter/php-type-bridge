@@ -7,58 +7,69 @@ namespace PTGS\TypeBridge\Support;
 use PhpToken;
 
 /**
- * The properties each class or trait of a file declares in its own body — a promoted constructor
- * param among them — rather than takes from a trait it uses. Reflection can't tell the two apart
- * where they agree: PHP lets a class redeclare a trait's property alike, doc comment and all, and
- * names the class as declaring it either way. Its source can. Read in the one pass over a file's
- * tokens ({@see PhpDocTypeHelper::readFile()}).
+ * The properties a class or trait declares in its own body — a promoted constructor param among
+ * them — rather than takes from a trait it uses. Reflection can't tell the two apart where they
+ * agree: PHP lets a class redeclare a trait's property alike, doc comment and all, and names the
+ * class as declaring it either way. Its source can. The class is found where Reflection says it
+ * starts, so which class a file declares, and in which namespace, is Reflection's to say alone.
  */
 final class DeclaredProperties
 {
     private const array MODIFIERS = ['public', 'protected', 'private', 'var', 'readonly', 'static', 'final', 'abstract', 'public(set)', 'protected(set)', 'private(set)'];
 
     /**
-     * By class, in full, the properties its body declares.
+     * The properties the body of the class starting at `$startLine` of the source declares.
      *
-     * @param list<PhpToken> $tokens    the file's
-     * @param string         $namespace the namespace it declares, '' for none
-     *
-     * @return array<string, array<string, true>>
+     * @return array<string, true>
      */
-    public static function inTokens(array $tokens, string $namespace): array
+    public static function inSource(string $source, int $startLine): array
     {
-        $declared = [];
-        $count = \count($tokens);
-        for ($i = 0; $i < $count; ++$i) {
-            if (!$tokens[$i]->is([T_CLASS, T_TRAIT, T_ENUM, T_INTERFACE])) {
-                continue;
-            }
-            // A declaration's keyword is followed by its name: not `Foo::class`, nor `new class`.
-            $name = self::nextSignificant($tokens, $i);
-            if (null === $name || !$tokens[$name]->is(T_STRING)) {
-                continue;
-            }
+        $tokens = array_values(PhpToken::tokenize($source));
+        $body = self::bodyOpening($tokens, $startLine);
+        if (null === $body) {
+            return [];
+        }
 
-            $class = ('' === $namespace ? '' : $namespace . '\\') . $tokens[$name]->text;
-            $declared[$class] = [];
-            for ($i = $name; $i < $count && '{' !== $tokens[$i]->text; ++$i) {
-            }
-            $depth = 0;
-            for (; $i < $count; ++$i) {
-                $token = $tokens[$i];
-                if (\in_array($token->text, ['{', '${'], true)) {
-                    ++$depth;
-                } elseif ('}' === $token->text) {
-                    if (0 === --$depth) {
-                        break;
-                    }
-                } elseif (1 === $depth && $token->is(T_VARIABLE) && self::isDeclaration($tokens, $i)) {
-                    $declared[$class][substr($token->text, 1)] = true;
+        $declared = [];
+        $depth = 0;
+        $count = \count($tokens);
+        for ($i = $body; $i < $count; ++$i) {
+            $token = $tokens[$i];
+            if (\in_array($token->text, ['{', '${'], true)) {
+                ++$depth;
+            } elseif ('}' === $token->text) {
+                if (0 === --$depth) {
+                    break;
                 }
+            } elseif (1 === $depth && $token->is(T_VARIABLE) && self::isDeclaration($tokens, $i)) {
+                $declared[substr($token->text, 1)] = true;
             }
         }
 
         return $declared;
+    }
+
+    /**
+     * Where the body opens of the class declared from `$startLine` on: the first `{` after a
+     * declaration's keyword — one its name follows, not `Foo::class` in an attribute.
+     *
+     * @param list<PhpToken> $tokens
+     */
+    private static function bodyOpening(array $tokens, int $startLine): ?int
+    {
+        $count = \count($tokens);
+        $declared = false;
+        for ($i = 0; $i < $count; ++$i) {
+            if (!$declared) {
+                $declared = $tokens[$i]->line >= $startLine
+                    && $tokens[$i]->is([T_CLASS, T_TRAIT, T_ENUM, T_INTERFACE])
+                    && true === self::nextSignificant($tokens, $i)?->is(T_STRING);
+            } elseif ('{' === $tokens[$i]->text) {
+                return $i;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -84,16 +95,14 @@ final class DeclaredProperties
     }
 
     /**
-     * Where the next token that isn't whitespace or a comment is.
-     *
      * @param list<PhpToken> $tokens
      */
-    private static function nextSignificant(array $tokens, int $after): ?int
+    private static function nextSignificant(array $tokens, int $after): ?PhpToken
     {
         $count = \count($tokens);
         for ($i = $after + 1; $i < $count; ++$i) {
             if (!$tokens[$i]->isIgnorable()) {
-                return $i;
+                return $tokens[$i];
             }
         }
 

@@ -7,13 +7,31 @@ namespace PTGS\TypeBridge\Tests\Command;
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Command\GenerateTypesCommand;
 use PTGS\TypeBridge\Tests\Fixture\FixtureProject;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 use Symfony\Component\Console\Tester\CommandTester;
 
 final class GenerateTypesCommandTest extends TestCase
 {
+    /** @var list<string> the directories the test has written under the system's temp dir */
+    private array $workspaces = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->workspaces as $workspace) {
+            if (!is_dir($workspace)) {
+                continue;
+            }
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($workspace, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $entry) {
+                $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+            }
+            rmdir($workspace);
+        }
+    }
+
     public function test_it_loads_typescript_naming_from_a_config_file(): void
     {
-        $workspace = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+        $workspace = $this->workspace();
         mkdir($workspace, recursive: true);
 
         $configFile = $workspace . '/type-bridge.php';
@@ -57,7 +75,7 @@ PHP);
      */
     public function test_an_endpoint_constant_takes_the_served_path_from_the_routing_config(): void
     {
-        $outputDir = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+        $outputDir = $this->workspace();
         $fixture = __DIR__ . '/../Fixture/RoutedMcpFixtures';
 
         $tester = new CommandTester(new GenerateTypesCommand());
@@ -78,7 +96,7 @@ PHP);
     {
         // Its #[Route] is confined to dev: no tool of it is served in prod, which the MCP manifest
         // says; its Endpoint is described by that route all the same.
-        $outputDir = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+        $outputDir = $this->workspace();
         $tester = new CommandTester(new GenerateTypesCommand());
 
         self::assertSame(0, $tester->execute(['source' => __DIR__ . '/../Fixture/DevRoutedApp', 'output' => $outputDir]));
@@ -89,7 +107,7 @@ PHP);
     {
         // DevOnlyRule's declaration throws without its require-dev interface: the command runs on,
         // as the collectors do, and emits nothing of it.
-        $outputDir = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+        $outputDir = $this->workspace();
         $tester = new CommandTester(new GenerateTypesCommand());
 
         self::assertSame(0, $tester->execute(['source' => __DIR__ . '/../Fixture/UnloadableFixtures', 'output' => $outputDir]));
@@ -103,7 +121,7 @@ PHP);
     {
         $fixture = __DIR__ . '/../Fixture/TwiceRoutedApp';
         foreach (['dev' => "path: '/dev/notes/{code}'", 'prod' => "path: '/env/notes/{id}'"] as $env => $path) {
-            $workspace = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
+            $workspace = $this->workspace();
             mkdir($workspace);
             file_put_contents($workspace . '/type-bridge.php', "<?php\n\nreturn ['routingEnv' => '" . $env . "'];\n");
 
@@ -114,5 +132,13 @@ PHP);
             self::assertNotFalse($notes);
             self::assertMatchesRegularExpression('/export const ShowEnvNote\b[^;]*' . preg_quote($path, '/') . '/', $notes, $env);
         }
+    }
+
+    /**
+     * A directory under the system's temp dir, removed when the test is done.
+     */
+    private function workspace(): string
+    {
+        return $this->workspaces[] = sys_get_temp_dir() . '/type-bridge-command-' . bin2hex(random_bytes(6));
     }
 }

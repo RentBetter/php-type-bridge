@@ -55,8 +55,9 @@ final readonly class MapType extends ParsedType
 
     /**
      * Whether the key is every one an array has: `array-key`; a numeric string, which PHP keys as
-     * the int it spells and PHPStan reads as `int|numeric-string`; or a union of an int's — a float
-     * is keyed as the int it truncates to — and a string's.
+     * the int it spells where it spells one and PHPStan reads as `int|numeric-string`, or `numeric`,
+     * which is one or a number; or a union of an int's — a float is keyed as the int it truncates
+     * to — and a string's.
      */
     private static function isAnyKey(ParsedType $type): bool
     {
@@ -69,10 +70,10 @@ final readonly class MapType extends ParsedType
             } elseif ($member instanceof ScopedType) {
                 $types[] = $member->inner;
             } elseif ($member instanceof ScalarType) {
-                $bases['numeric-string' === $member->type ? 'array-key' : $member->base()] = true;
+                $bases['numeric-string' === $member->type || 'numeric' === $member->base() ? 'array-key' : $member->base()] = true;
             }
         }
 
-        return isset($bases['array-key']) || ((isset($bases['int']) || isset($bases['float']) || isset($bases['numeric'])) && isset($bases['string']));
+        return isset($bases['array-key']) || ((isset($bases['int']) || isset($bases['float'])) && isset($bases['string']));
     }
 }

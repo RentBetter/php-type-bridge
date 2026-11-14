@@ -201,6 +201,15 @@ final class SharedNameTest extends TestCase
         $this->emit('GlobalNamedFixtures');
     }
 
+    public function test_with_a_root_module_a_config_alias_named_as_a_global_its_helpers_use_is_a_collision(): void
+    {
+        // The root module declares `WithIncludes`, which writes `Omit<…>`.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "": "Omit" is both TypeScript\'s global Omit, which the module\'s code uses, and config type alias Omit.');
+
+        $this->emit('UnusedHelperNamedFixtures', new OutputStructure(rootModule: 'genTypes.ts'), includes: new IncludeConvention(['included'], refTypes: ['ref']), typeAliases: ['Omit' => 'string']);
+    }
+
     public function test_a_type_named_as_a_typescript_global_is_imported_under_another_name(): void
     {
         $notes = $this->emit('GlobalImportedFixtures')['Notes'];

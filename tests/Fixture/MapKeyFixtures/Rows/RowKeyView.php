@@ -18,6 +18,7 @@ use PTGS\TypeBridge\Tests\Fixture\MapKeyFixtures\Keys\LooseView;
  * @phpstan-type Anything = Loose
  * @phpstan-type MaybeOrX = MaybeId|'x'
  * @phpstan-type ArrayKey = array-key
+ * @phpstan-type IntKey = int
  * @phpstan-type RowKeys = array{
  *     byMaybe: array<MaybeId, string>,
  *     byAny: array<AnyKey, string>,
@@ -26,6 +27,7 @@ use PTGS\TypeBridge\Tests\Fixture\MapKeyFixtures\Keys\LooseView;
  *     byAnything: array<Anything, string>,
  *     byMaybeOrX: array<MaybeOrX, string>,
  *     byArrayKey: array<ArrayKey, string>,
+ *     byIntKey: array<IntKey, string>,
  * }
  */
 final class RowKeyView {}
