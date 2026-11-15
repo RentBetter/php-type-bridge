@@ -31,6 +31,13 @@ final class ClassFileTypesTest extends TestCase
         self::assertSame('PTGS\\TypeBridge\\Tests\\Fixture\\EnumTypedFixtures\\Notes\\ErrorCode', $imports['ErrorCode'] ?? null);
     }
 
+    public function test_an_anonymous_classs_trait_and_a_closures_variables_are_no_imports(): void
+    {
+        $imports = (new ClassFileTypes())->classImports(__DIR__ . '/../Fixture/ClassConstImportFixtures/AnonymousView.php');
+
+        self::assertSame(['ErrorCode' => 'PTGS\\TypeBridge\\Tests\\Fixture\\EnumTypedFixtures\\Notes\\ErrorCode'], $imports);
+    }
+
     public function test_an_import_of_an_alias_kept_for_php_stan_is_set_aside_with_why(): void
     {
         $classFiles = (new PhpFileClassLocator())->classesIn(self::SRC);

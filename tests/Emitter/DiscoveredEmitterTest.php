@@ -29,6 +29,8 @@ use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Diary;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\DiaryEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Journal;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\JournalEmitter;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Script;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\ScriptedEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\StampEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Tally;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\TallyEmitter;
@@ -198,6 +200,42 @@ final class DiscoveredEmitterTest extends TestCase
         $journals = $emitter->emitDiscovered([Journal::class])['Journals'];
         self::assertStringContainsString('Date as CalendarDate', $journals);
         self::assertStringContainsString('export interface Page { on: Date; }', $journals);
+    }
+
+    /**
+     * @return iterable<string, array{string, list<string>, list<array{string, string}>, string}>
+     */
+    public static function namesTaken(): iterable
+    {
+        // Journals imports Calendar's `Date` as CalendarDate, `Stamp` naming `Date`, and declares Entry.
+        yield 'an import the module has under another name' => ['Journals', ['export interface Page { on: Date; }'], [['Calendar', 'Date']], 'a discovered emitter imports "Date" from "Calendar", which the module imports from there as "CalendarDate".'];
+        yield 'a declaration the module has' => ['Journals', ['export interface Entry { x: string; }'], [], 'a discovered emitter declares "Entry", which the module declares as type'];
+        yield 'a declaration of a name the module imports' => ['Journals', ['export type CalendarDate = number;'], [], 'a discovered emitter declares "CalendarDate", which the module imports from "Calendar".'];
+        yield 'two imports of one name' => ['Shelves', ['export type Pair = [Book, Book];'], [['Library', 'Book'], ['Store', 'Book']], 'a discovered emitter imports "Book" from "Store", which a discovered emitter imports from "Library".'];
+        yield 'a declaration of a name imported' => ['Shelves', ['export type Book = string;'], [['Library', 'Book']], 'a discovered emitter declares "Book", which a discovered emitter imports from "Library".'];
+    }
+
+    /**
+     * @param list<string>                 $code
+     * @param list<array{string, string}> $imports
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('namesTaken')]
+    public function test_a_name_a_discovered_emitter_writes_takes_none_its_module_has(string $domain, array $code, array $imports, string $collision): void
+    {
+        // Its code names what it declares and imports as it is, so none can take another name.
+        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = [$domain, $code, $imports];
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([ScriptedEmitter::class]),
+            typeAliases: ['Stamp' => 'Date'],
+        );
+        $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasImportFixtures'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "' . $domain . '": ' . $collision);
+
+        $emitter->emitDiscovered([Script::class]);
     }
 
     public function test_returns_empty_without_discovered_emitters(): void

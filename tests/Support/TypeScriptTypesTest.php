@@ -128,6 +128,8 @@ final class TypeScriptTypesTest extends TestCase
         self::assertSame(['string', 'Date'], TypeScriptTypes::namesIn('{ [key: string]: Date }'));
         self::assertSame(['Date', 'void'], TypeScriptTypes::namesIn('(at: Date, readonly by?: Date) => void'));
         self::assertSame(['string', 'Foo'], TypeScriptTypes::namesIn("{\n  a: string\n  b: Foo\n}"), 'A key on a line of its own');
+        self::assertSame(['T', 'extends', 'U', 'X', 'Y'], TypeScriptTypes::namesIn("T extends U ?\n  X\n  : Y"), 'A branch on a line of its own');
+        self::assertSame(['Region', 'Locale'], TypeScriptTypes::namesIn('`${Region}-${Locale}`'), "A template literal's holes");
     }
 
     public function test_a_types_json_schema_is_what_json_can_say_of_it(): void
