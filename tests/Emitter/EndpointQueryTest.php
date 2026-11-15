@@ -109,8 +109,9 @@ final class EndpointQueryTest extends TestCase
 
     public function test_a_date_in_a_query_is_a_date(): void
     {
-        // A Date is an object, its methods none of a query's keys: it is sent as it is.
-        self::assertStringContainsString('T extends string | number | boolean | bigint | symbol | Date | null | undefined', EndpointContractEmitter::AS_QUERY_HELPER);
+        // A Date is an object, its methods none of a query's keys: it is sent as it is — TypeScript's
+        // Date, whatever a module of its own declares or imports by that name.
+        self::assertStringContainsString('T extends string | number | boolean | bigint | symbol | globalThis.Date | null | undefined', EndpointContractEmitter::AS_QUERY_HELPER);
     }
 
     public function test_an_inherited_key_that_may_be_null_is_one_a_query_may_leave_out(): void
@@ -439,7 +440,7 @@ final class EndpointQueryTest extends TestCase
         // asked that first would map it into an object of every string method.
         $reports = $this->emit()['Reports'];
 
-        self::assertStringContainsString('export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | Date | null | undefined', $reports);
+        self::assertStringContainsString('export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | globalThis.Date | null | undefined', $reports);
     }
 
     public function test_a_body_extending_a_shape_takes_the_keys_it_inherits_as_that_shape_declares_them(): void

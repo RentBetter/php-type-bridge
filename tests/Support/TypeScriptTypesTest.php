@@ -118,6 +118,11 @@ final class TypeScriptTypesTest extends TestCase
         self::assertNull(TypeScriptTypes::keyKind("'a' | 'b'"), 'A literal is a key, not every string');
         self::assertNull(TypeScriptTypes::keyKind('(string | number) & (boolean | number)'), 'An intersection, not a union in brackets');
         self::assertNull(TypeScriptTypes::keyKind('Loop', $aliases), 'An alias that names itself says nothing');
+        // What no array is keyed by is any key, as PHP makes of it.
+        self::assertSame('any', TypeScriptTypes::keyKind('boolean'));
+        self::assertSame('any', TypeScriptTypes::keyKind('{ id: string }'));
+        self::assertSame('any', TypeScriptTypes::keyKind('string | null'));
+        self::assertNull(TypeScriptTypes::keyKind('Unknown'), 'A name this says nothing of');
     }
 
     public function test_the_names_a_type_uses_are_none_quoted_keyed_or_read_off_another(): void

@@ -217,6 +217,18 @@ final class ClassLevelRouteTest extends TestCase
         (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src));
     }
 
+    public function testAnEndpointBesideARouteSymfonyRefusesIsItsOwnRoute(): void
+    {
+        // Another method's requirement Symfony refuses — a controller nothing imports, so the
+        // router never reads it: the endpoint's own #[Route], its class's merged in, as written.
+        $src = __DIR__ . '/../Fixture/BrokenSiblingRouteFixtures';
+        $contract = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->collectIndex($src))['Notes'][0];
+
+        self::assertSame('/api/notes/{id}', $contract->httpPath);
+        self::assertSame('GET', $contract->httpMethod);
+        self::assertSame(['id'], array_map(static fn ($param): string => $param->name, $contract->request?->pathParams ?? []));
+    }
+
     public function testARouteAttributeThatThrowsIsNoRouteToGuess(): void
     {
         // A project's #[Route] that refuses its arguments: Symfony's loader can't read the class, and

@@ -81,6 +81,14 @@ final class MapKeyTest extends TestCase
         self::assertStringContainsString("export interface Mixed {\n  byTextOrInt: Record<string, string> | string[];\n  byNested: Record<string, string> | string[];\n  byGrouped: Record<string, string> | string[];\n  byTextOrCode: Record<Text | Code, string>;\n  byNumOrString: Record<string, string> | string[];\n}", $rows);
     }
 
+    public function test_a_key_a_project_wide_alias_of_no_key_names_is_any_key(): void
+    {
+        // A boolean keys no array: PHP makes an int of it, as of a module's alias of `bool`.
+        $rows = self::emit(__DIR__ . '/../Fixture/ConfigAliasBoolKeyFixtures', ['Flag' => 'boolean'])['Rows'];
+
+        self::assertStringContainsString("export interface Flagged {\n  byFlag: Record<string, string> | string[];\n  byLocal: Record<string, string> | string[];\n}", $rows);
+    }
+
     public function test_a_module_whose_maps_are_keyed_as_they_were_is_the_same_module(): void
     {
         // `array<string>` is keyed by any key already: nothing is rebuilt to say so again.
