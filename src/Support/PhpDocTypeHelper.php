@@ -407,22 +407,6 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * The first token from `$at` on, in the direction `$step` goes, that isn't whitespace or a comment.
-     *
-     * @param array<\PhpToken> $tokens
-     */
-    private static function significantNext(array $tokens, int $at, int $step): ?\PhpToken
-    {
-        for ($i = $at + $step; isset($tokens[$i]); $i += $step) {
-            if (!$tokens[$i]->isIgnorable()) {
-                return $tokens[$i];
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * The namespace a file declares, '' for none.
      *
      * @param array<\PhpToken> $tokens
@@ -456,11 +440,11 @@ final class PhpDocTypeHelper
         for ($i = 0; $i < $count; $i++) {
             $token = $tokens[$i];
             // A class-like keyword ends them — a declaration's, an anonymous class's — but `Foo::class`'s.
-            if ($token->is([\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM]) && !self::significantNext($tokens, $i, -1)?->is(\T_DOUBLE_COLON)) {
+            if ($token->is([\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM]) && !Tokens::significant($tokens, $i, -1)?->is(\T_DOUBLE_COLON)) {
                 break;
             }
             // A closure's `use (…)` imports nothing.
-            if (!$token->is(\T_USE) || '(' === self::significantNext($tokens, $i, 1)?->text) {
+            if (!$token->is(\T_USE) || '(' === Tokens::significant($tokens, $i)?->text) {
                 continue;
             }
 

@@ -129,7 +129,7 @@ final class ClassTypeResolver
         }
 
         $reflection = new ReflectionClass($class);
-        foreach ($this->lineage($reflection) as $candidate) {
+        foreach (self::lineage($reflection) as $candidate) {
             if (isset($this->selfShapes[$candidate])) {
                 $shape = $this->selfShapes[$candidate];
 
@@ -176,12 +176,13 @@ final class ClassTypeResolver
     }
 
     /**
-     * The class, then its parents, then its interfaces: nearest first.
+     * The class, then its parents, then its interfaces: nearest first. Where a class's `_self` is
+     * looked for, by its TypeScript and by a tool's reading of it alike.
      *
      * @param ReflectionClass<object> $class
      * @return list<string>
      */
-    private function lineage(ReflectionClass $class): array
+    public static function lineage(ReflectionClass $class): array
     {
         $lineage = [];
         for ($current = $class; false !== $current; $current = $current->getParentClass()) {

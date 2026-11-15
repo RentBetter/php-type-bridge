@@ -568,7 +568,7 @@ final class TypeScriptEmitter
      * declaration or import has it; one imported, likewise — but the import the module has of it
      * from the same module, under its own name, which is the one import.
      *
-     * @param list<EmittedBlock> $blocks  what the discovered emitters declare in the module
+     * @param list<EmittedBlock> $blocks  what the discovered emitters declare in the module, by the names each states
      * @param list<EmitImport>   $imports what they import into it
      * @param array{imports: array<string, list<string>>, foreignAliases: array<string, array<string, string>>, blocks: list<EmittedBlock>}|null $emitted what emit() wrote in it
      *
@@ -622,7 +622,7 @@ final class TypeScriptEmitter
         }
         $names = array_fill_keys(array_keys($own), true);
         foreach ($blocks as $block) {
-            foreach (array_keys(self::declaredIn([$block])) as $name) {
+            foreach ($block->declares as $name) {
                 $by = $taken[$name] ?? (isset($own[$name]) ? \sprintf('a discovered emitter imports from "%s"', $own[$name]) : (isset($names[$name]) ? 'a discovered emitter declares too' : null));
                 if (null !== $by) {
                     $fail(\sprintf('declares "%s"', $name), $by);
@@ -642,27 +642,6 @@ final class TypeScriptEmitter
     private function namesInAlias(string $alias): array
     {
         return $this->aliasNames[$alias] ??= TypeScriptTypes::namesIn($this->typeAliases[$alias] ?? '');
-    }
-
-    /**
-     * The names blocks declare: each `export interface`, `type`, `class`, `enum`, `const` or
-     * `function` — what a discovered emitter writes, which no symbol map holds.
-     *
-     * @param list<EmittedBlock> $blocks
-     *
-     * @return array<string, true>
-     */
-    private static function declaredIn(array $blocks): array
-    {
-        $declared = [];
-        foreach ($blocks as $block) {
-            // A statement's start, its modifiers, its keyword and the name it declares — exported or
-            // not, `export const enum X` and `export abstract class X` among them.
-            preg_match_all('/(?:^|[;{}])\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:const\s+enum|interface|type|class|enum|const|let|var|function\*?|namespace|module)\s+([A-Za-z_$][\w$]*)/m', $block->code, $names);
-            $declared += array_fill_keys($names[1], true);
-        }
-
-        return $declared;
     }
 
     /**

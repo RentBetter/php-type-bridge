@@ -148,7 +148,6 @@ final class PortableRegex
         // them as ECMA does, by byte. Read as Unicode, `\d` and `\w` are published as their ASCII sets.
         $negatable = true === $unicode;
         $boundaries = false === $unicode ? 'bB' : '';
-        $widened = false !== $unicode;
 
         $length = \strlen($fragment);
         $depth = 0;
@@ -174,7 +173,7 @@ final class PortableRegex
             }
 
             if ('[' === $char) {
-                $close = self::classEnd($fragment, $i, negatable: $negatable, widened: $widened);
+                $close = self::classEnd($fragment, $i, negatable: $negatable);
                 if (null === $close) {
                     return false;
                 }
@@ -296,11 +295,11 @@ final class PortableRegex
      * Where the class opening at `$open` closes, when every part of it reads the same in both
      * dialects: literals, escaped syntax characters and `\n \r \t \f \b \-`, `\d` and `\w`, and
      * ranges between two literals in order — and negated only where the mode matches code points
-     * (`$negatable`), and then with no class escape published as a narrower set (`$widened`), which
+     * (`$negatable`), and then with no class escape, which Unicode mode publishes as a narrower set:
      * refusing fewer would take more. Null otherwise: a `[` inside (a POSIX class, or nesting), a
      * range from or to a class escape, an empty class.
      */
-    private static function classEnd(string $fragment, int $open, bool $negatable, bool $widened): ?int
+    private static function classEnd(string $fragment, int $open, bool $negatable): ?int
     {
         $classEscapes = self::CLASS_ESCAPES;
         $length = \strlen($fragment);
@@ -309,9 +308,7 @@ final class PortableRegex
             if (!$negatable) {
                 return null;
             }
-            if ($widened) {
-                $classEscapes = '';
-            }
+            $classEscapes = '';
             ++$i;
         }
         if (']' === ($fragment[$i] ?? '')) {

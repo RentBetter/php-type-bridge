@@ -70,7 +70,7 @@ final class DeclaredProperties
             if (!$declared) {
                 $declared = $tokens[$i]->line >= $startLine
                     && $tokens[$i]->is([T_CLASS, T_TRAIT, T_ENUM, T_INTERFACE])
-                    && true === self::nextSignificant($tokens, $i)?->is(T_STRING);
+                    && true === Tokens::significant($tokens, $i)?->is(T_STRING);
             } elseif ('{' === $tokens[$i]->text) {
                 return $i;
             }
@@ -100,20 +100,5 @@ final class DeclaredProperties
         }
 
         return false;
-    }
-
-    /**
-     * @param list<PhpToken> $tokens
-     */
-    private static function nextSignificant(array $tokens, int $after): ?PhpToken
-    {
-        $count = \count($tokens);
-        for ($i = $after + 1; $i < $count; ++$i) {
-            if (!$tokens[$i]->isIgnorable()) {
-                return $tokens[$i];
-            }
-        }
-
-        return null;
     }
 }

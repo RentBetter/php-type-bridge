@@ -8,6 +8,7 @@ use LogicException;
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\McpTool;
+use PTGS\TypeBridge\Emitter\ClassTypeResolver;
 use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
@@ -1019,13 +1020,8 @@ final class EndpointContractCollector
         if (!PhpFileClassLocator::loads($class)) {
             return null;
         }
-        $reflection = new ReflectionClass($class);
-        $lineage = [];
-        for ($current = $reflection; false !== $current; $current = $current->getParentClass()) {
-            $lineage[] = $current->getName();
-        }
-
-        foreach ([...$lineage, ...$reflection->getInterfaceNames()] as $candidate) {
+        // Where its TypeScript looks, in the order it does.
+        foreach (ClassTypeResolver::lineage(new ReflectionClass($class)) as $candidate) {
             $file = $classFiles[$candidate] ?? null;
             if (null === $file) {
                 continue;
