@@ -117,6 +117,24 @@ final class DeclaredRoutes
         return $this->errors[$className] ?? null;
     }
 
+    /**
+     * The route the method's own #[Route] declares, its class's merged in, read alone as Symfony
+     * reads it — for a class it can't read whole, a #[Route] of another method's refused: one the
+     * router never reads where nothing imports the class. Null where Symfony refuses this one too,
+     * or none routes it.
+     */
+    public function ownRouteFor(string $className, string $methodName): ?Route
+    {
+        if (!PhpFileClassLocator::loads($className) || !method_exists($className, $methodName)) {
+            return null;
+        }
+        try {
+            return RoutePathResolver::routeIn(RoutePathResolver::byController((new ControllerAttributeClassLoader($this->env))->loadMethod($className, $methodName)), $className, $methodName);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
     private function routeIn(string $className, string $methodName, string $env): ?Route
     {
         return RoutePathResolver::routeIn($this->routes[$className][$env] ??= $this->read($className, $env), $className, $methodName);

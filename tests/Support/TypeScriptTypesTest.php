@@ -121,6 +121,8 @@ final class TypeScriptTypesTest extends TestCase
         // What no array is keyed by is any key, as PHP makes of it.
         self::assertSame('any', TypeScriptTypes::keyKind('boolean'));
         self::assertSame('any', TypeScriptTypes::keyKind('{ id: string }'));
+        self::assertSame('any', TypeScriptTypes::keyKind('string[] | number'));
+        self::assertSame('any', TypeScriptTypes::keyKind('(id: string) => void'));
         self::assertSame('any', TypeScriptTypes::keyKind('string | null'));
         self::assertNull(TypeScriptTypes::keyKind('Unknown'), 'A name this says nothing of');
     }

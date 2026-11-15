@@ -67,7 +67,8 @@ final class TypeScriptTypes
     /**
      * Which key the type is, as `Record<K, V>` reads its K, read through the config's aliases and
      * out of brackets: 'any' for every key an array has — a `string` and a `number` both,
-     * `PropertyKey`, or anything at all (`any`, `unknown`); 'string' or 'number' for one of them
+     * `PropertyKey`, or anything at all (`any`, `unknown`) — or with what no array is keyed by in it,
+     * a boolean, a null or an object, which PHP makes a key of; 'string' or 'number' for one of them
      * alone; null for any other, a literal's or a template's among them.
      *
      * @param array<string, string> $aliases the config's aliases, name => TypeScript
@@ -79,6 +80,14 @@ final class TypeScriptTypes
         $members = self::members($type, $aliases, 0);
         if (isset($members['PropertyKey']) || isset($members['any']) || isset($members['unknown']) || (isset($members['string']) && isset($members['number']))) {
             return 'any';
+        }
+        // What no array is keyed by — a boolean, a null, an object, a list, a function — PHP makes an
+        // int or a string of.
+        foreach (array_map(strval(...), array_keys($members)) as $member) {
+            if (\in_array($member, ['boolean', 'true', 'false', 'null', 'undefined', 'void', 'object', 'bigint'], true)
+                || str_starts_with($member, '{') || str_starts_with($member, '[') || str_ends_with($member, '[]') || str_contains(self::topLevel($member), '=>')) {
+                return 'any';
+            }
         }
 
         return match (array_keys($members)) {

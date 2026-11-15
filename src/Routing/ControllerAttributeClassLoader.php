@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\Routing;
 
+use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
 use ReflectionProperty;
@@ -64,6 +65,28 @@ final class ControllerAttributeClassLoader extends AttributeClassLoader
         $this->read = [];
 
         return parent::load($class, $type);
+    }
+
+    /**
+     * The routes one method's #[Route]s make, its class's merged in, as load() makes them: for a
+     * class one of whose other methods' Symfony refuses, which load() can't read whole. Symfony
+     * reads each of this method's as it would, and refuses one of them as it would.
+     *
+     * @param class-string $className
+     */
+    public function loadMethod(string $className, string $methodName): RouteCollection
+    {
+        $this->read = [];
+        $this->defaultRouteIndex = 0;
+        $class = new ReflectionClass($className);
+        $method = $class->getMethod($methodName);
+        $globals = $this->getGlobals($class);
+        $collection = new RouteCollection();
+        foreach ($method->getAttributes(RouteAttribute::class, ReflectionAttribute::IS_INSTANCEOF) as $attribute) {
+            $this->addRoute($collection, $attribute->newInstance(), $globals, $class, $method);
+        }
+
+        return $collection;
     }
 
     /**

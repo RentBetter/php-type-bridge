@@ -92,8 +92,8 @@ export interface UpdateProjectResponse {
 }
 
 // Endpoint inputs
-/** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out, and only so — and a list's item is never null. A primitive, a branded one included, and a Date are as they are, and a list or a tuple stays one. */
-export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | Date | null | undefined
+/** T as a query string sends it: a key that may be null may be left out, at any depth, since a query string sends a null by leaving the key out, and only so — and a list's item is never null. A primitive, a branded one included, and a Date — TypeScript's, whatever a module names Date — are as they are, and a list or a tuple stays one. */
+export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | globalThis.Date | null | undefined
   ? T
   : T extends readonly unknown[]
     ? { [K in keyof T]: AsQuery<Exclude<T[K], null>> }

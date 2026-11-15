@@ -457,17 +457,21 @@ final class EndpointContractCollector
      * The route a method's class's attributes declare, a class-level #[Route] merged in as the
      * router merges it ({@see DeclaredRoutes}): what a method is described by — its HTTP method, its
      * path and its params — where no routing config serves it. Unlike an MCP tool's, an endpoint the
-     * router does not know keeps its declared route rather than failing generation. Null when nothing
-     * routes it.
+     * router does not know keeps its declared route rather than failing generation, and one of a class
+     * whose other #[Route] Symfony refuses its own. Null when nothing routes it.
      */
     private function declaredRoute(string $className, string $methodName): ?Route
     {
         $declared = $this->declaredRoutes->routeFor($className, $methodName);
-        if (null === $declared && null !== $error = $this->declaredRoutes->loadError($className)) {
-            throw new RuntimeException(\sprintf('The #[Route]s of %s cannot be read as Symfony reads them: %s', $className, $error));
+        $error = null === $declared ? $this->declaredRoutes->loadError($className) : null;
+        if (null === $error) {
+            return $declared;
         }
 
-        return $declared;
+        // Symfony refuses a #[Route] of the class's: perhaps another method's, which the router never
+        // reads where nothing imports the class. This method's own, read alone, where Symfony takes it.
+        return $this->declaredRoutes->ownRouteFor($className, $methodName)
+            ?? throw new RuntimeException(\sprintf('The #[Route]s of %s cannot be read as Symfony reads them: %s', $className, $error));
     }
 
     /**
