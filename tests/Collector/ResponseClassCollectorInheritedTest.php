@@ -249,6 +249,16 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertSame(1, substr_count($emitted['Notes'], 'export type Status ='));
     }
 
+    public function test_an_enum_a_modules_response_name_wins_over_declares_no_values(): void
+    {
+        // NoteView's bare `Status` is the module's response of that name, as an alias of it would
+        // be: the enum's values are named by nothing, so nothing declares them to collide with it.
+        $notes = self::emit(self::fixtures('EnumResponseNameFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface Note {\n  state: Status;\n}", $notes);
+        self::assertStringNotContainsString("'open'", $notes);
+    }
+
     public function test_a_config_alias_on_a_library_property_is_the_emitting_modules_own(): void
     {
         // PHPStan reads a project-wide alias in any file, a library's included.

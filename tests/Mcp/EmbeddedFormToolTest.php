@@ -195,6 +195,9 @@ final class EmbeddedFormToolTest extends TestCase
                 'kind' => ['enum' => ['active', 'archived']],
                 'sort' => ['type' => 'object', 'properties' => ['code' => ['type' => 'string']], 'required' => ['code']],
                 'tier' => ['enum' => ['gold', 'silver']],
+                // Project-wide aliases as their TypeScript says: a nullable string, two literals.
+                'owner' => ['type' => ['string', 'null']],
+                'lang' => ['enum' => ['en', 'fr']],
             ],
             'required' => ['status', 'id'],
         ], $this->schema()['properties']['ref'] ?? null);
@@ -349,7 +352,7 @@ final class EmbeddedFormToolTest extends TestCase
      */
     private function schema(array $aliases = [], bool $clearMissing = true): array
     {
-        $config = TypeBridgeConfig::fromArray(['typeAliases' => ['UuidStr' => 'string', ...$aliases], 'clearMissing' => $clearMissing]);
+        $config = TypeBridgeConfig::fromArray(['typeAliases' => ['UuidStr' => 'string', 'MaybeUuid' => 'UuidStr | null', 'Lang' => "'en' | 'fr'", ...$aliases], 'clearMissing' => $clearMissing]);
 
         return (new McpManifestGenerator())->generate(self::SRC, $config)['tools'][0]['inputSchema'];
     }

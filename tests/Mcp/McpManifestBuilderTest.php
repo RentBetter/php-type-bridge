@@ -847,26 +847,31 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame($strings, $properties['byNumber']);
     }
 
-    public function testAMapWithAnIntAmongItsKeysTakesAList(): void
+    public function testAMapWhoseKeyIsEveryIntTakesAList(): void
     {
-        // A list decodes to the ints 0..n, which a key of an int or a literal, or an int literal,
-        // takes: the server does.
-        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape("array{withTotal: array<int|'total', string>, firstTwo: array<0|1, string>, named: array<'a'|'b', string>}"));
+        // A list decodes to the ints 0..n, every one of which a key of an int takes, beside a
+        // literal or not. A key of int literals — or an int-backed enum's values, or a project-wide
+        // alias of literals — takes only some of them: the TypeScript is a Record of those keys,
+        // which no list is.
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape("array{withTotal: array<int|'total', string>, firstTwo: array<0|1, string>, named: array<'a'|'b', string>, byLang: array<Lang, string>, byKey: array<Key, string>}"));
 
-        $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
+        $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]), typeAliases: ['Lang' => "'en' | 'fr'", 'Key' => 'string | number'])['inputSchema']['properties']['spec']['properties'];
         $strings = ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]];
+        $object = ['type' => 'object', 'additionalProperties' => ['type' => 'string']];
         self::assertSame($strings, $properties['withTotal']);
-        self::assertSame($strings, $properties['firstTwo']);
-        self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'string']], $properties['named']);
+        self::assertSame($object, $properties['firstTwo']);
+        self::assertSame($object, $properties['named']);
+        self::assertSame($object, $properties['byLang']);
+        self::assertSame($strings, $properties['byKey']);
 
-        // An int-backed enum's values are ints; a string-backed one's strings.
+        // An int-backed enum's values are some ints; a string-backed one's strings.
         $enums = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: new ShapeType([
             new ShapeField('bySeverity', new MapType(new ValueOfType(Severity::class), new ScalarType('string')), optional: false),
             new ShapeField('byStatus', new MapType(new ValueOfType(ProjectStatus::class), new ScalarType('string')), optional: false),
         ]));
         $properties = $this->toolWithBody('PUT', [$enums], new ShapeType([]))['inputSchema']['properties']['spec']['properties'];
-        self::assertSame($strings, $properties['bySeverity']);
-        self::assertSame(['type' => 'object', 'additionalProperties' => ['type' => 'string']], $properties['byStatus']);
+        self::assertSame($object, $properties['bySeverity']);
+        self::assertSame($object, $properties['byStatus']);
     }
 
     public function testAMapKeyedByAnAliasOfTheDataClassIsReadAsItIsDeclared(): void

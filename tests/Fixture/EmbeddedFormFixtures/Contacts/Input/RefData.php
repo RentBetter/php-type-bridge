@@ -18,6 +18,8 @@ use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactTier
  *     kind?: ContactStatus,
  *     sort?: ContactKind,
  *     tier?: ContactTier,
+ *     owner?: MaybeUuid,
+ *     lang?: Lang,
  * }
  */
 final class RefData

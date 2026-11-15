@@ -36,6 +36,10 @@ final class PortableRegexTest extends TestCase
         yield 'a negated class by character' => ['[^a]+', true, true];
         yield 'a range out of order' => ['[z-a]', false, false];
         yield 'a possessive quantifier' => ['a++', false, false];
+        // PCRE2 compiles a count of at most 65535: a pattern with a greater one matches nothing.
+        yield 'the greatest count PCRE takes' => ['[a-z]{1,65535}', false, true];
+        yield 'a count PCRE refuses' => ['[a-z]{1,65536}', false, false];
+        yield 'a least count PCRE refuses' => ['[a-z]{65536,}', false, false];
     }
 
     #[DataProvider('fragments')]
