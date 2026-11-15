@@ -12,11 +12,13 @@ use PTGS\TypeBridge\Emitter\EmitMode;
 use PTGS\TypeBridge\Emitter\TypeEmitter;
 use ReflectionClass;
 use ReflectionEnum;
+use ReflectionEnumBackedCase;
 
 /**
- * Built-in convention: a string-backed enum referenced via `value-of<Enum>` emits
- * as a union of its backing values. Referenced — only the enums actually touched
- * by another declaration are emitted.
+ * Built-in convention: a backed enum referenced via `value-of<Enum>`, or named where it is sent as
+ * its value, emits as a union of its backing values — strings or ints, as json_encode writes them.
+ * Referenced — only the enums actually touched by another declaration are emitted. It claims a
+ * string-backed one alone, so an int-backed one stays its project emitter's where one claims it.
  */
 #[AsTypeBridgeEmitter('value-of', mode: EmitMode::Referenced)]
 final class ValueOfEnumEmitter implements TypeEmitter
@@ -36,10 +38,21 @@ final class ValueOfEnumEmitter implements TypeEmitter
 
     public function emit(ReflectionClass $class, EmitContext $context): EmittedType
     {
-        $values = array_map(
-            static fn(string $value): string => "'" . $value . "'",
-            $context->enumResolver->resolve($class->getName()),
-        );
+        $name = $class->getName();
+        $enum = enum_exists($name) ? new ReflectionEnum($name) : null;
+        if (null !== $enum && 'int' === $enum->getBackingType()?->getName()) {
+            $values = [];
+            foreach ($enum->getCases() as $case) {
+                if ($case instanceof ReflectionEnumBackedCase) {
+                    $values[] = (string) $case->getBackingValue();
+                }
+            }
+        } else {
+            $values = array_map(
+                static fn(string $value): string => "'" . $value . "'",
+                $context->enumResolver->resolve($class->getName()),
+            );
+        }
 
         $code = \sprintf(
             'export type %s = %s;',

@@ -8,7 +8,6 @@ use LogicException;
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\McpTool;
-use PTGS\TypeBridge\Attribute\ValueOfName;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
@@ -959,8 +958,8 @@ final class EndpointContractCollector
     /**
      * A key typed with a class, as the class is sent and its TypeScript names it: its `_self`, read
      * where it is declared, as an alias is — an enum's too, which declaring one sends it as that
-     * shape; else an enum's values, but for one that names its value union otherwise
-     * (#[ValueOfName]). As written where the class declares none, or names itself at any remove.
+     * shape; else an enum's values, whatever its value union is named (#[ValueOfName]). As written
+     * where the class declares none, or names itself at any remove.
      *
      * @param array<string, string> $classFiles
      * @param array<string, true>   $reading
@@ -968,7 +967,7 @@ final class EndpointContractCollector
     private function readClass(NameRefType $type, string $class, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
         $declared = $this->selfOf($class, $srcDir, $classFiles);
-        if (null === $declared && PhpFileClassLocator::loadsEnum($class) && null === ValueOfName::of($class)) {
+        if (null === $declared && PhpFileClassLocator::loadsEnum($class)) {
             return new ValueOfType($class);
         }
 

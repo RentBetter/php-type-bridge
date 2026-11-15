@@ -260,7 +260,8 @@ final class TypeScriptEmitter
         $responses = $keys->inResponses($responses);
 
         $this->names = new EmittedNames($this->naming, $this->enumResolver);
-        $this->enumsByDomain = $this->referencedEnums($domains, $responses);
+        $this->classTypes = $classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources, $responses);
+        $this->enumsByDomain = $this->referencedEnums($domains, $responses, $classTypes);
         $this->includeHelpers = $this->includeHelpersUsed($domains, $responses);
 
         // Every module written: one whose enum something emitted elsewhere names, if only for the enum.
@@ -268,7 +269,6 @@ final class TypeScriptEmitter
         sort($allDomains);
 
         $this->symbols = new SymbolRegistry($this->buildSymbolMaps($allDomains, $domains, $responses, $contracts), array_keys($this->typeAliases));
-        $this->classTypes = new ClassTypeResolver($domains, $this->names, $this->registry, $this->rootSources, $responses);
         $this->converter = new TypeToTsConverter($this->names, $this->symbols, $this->enumIds(), $this->classTypes, $this->includes);
 
         $rootBlocks = [];
@@ -787,16 +787,16 @@ final class TypeScriptEmitter
 
     /**
      * Every enum the types and responses name, each under the module it is declared in: by
-     * `value-of<…>`, or by its class where it is written as its value ({@see ClassTypeResolver::writtenAsItsValue()})
-     * — a native `Status $status`, a key `status: Status` — and no alias of the module the name is
-     * written in has the name, which would win.
+     * `value-of<…>`, or by its class where the class resolver sends it as its values ({@see ClassTypeResolver::writesItsValues()})
+     * — a native `Status $status`, a key `status: Status`, of an enum no `_self` or emitter gives a
+     * type — and no alias of the module the name is written in has the name, which would win.
      *
      * @param array<string, CollectedDomain>                 $domains
      * @param array<string, list<CollectedApiResponseClass>> $responses
      *
      * @return array<string, list<string>>
      */
-    private function referencedEnums(array $domains, array $responses): array
+    private function referencedEnums(array $domains, array $responses, ClassTypeResolver $classTypes): array
     {
         /** @var list<array{ParsedType, string|null}> $types each with the module whose aliases its names are */
         $types = [];
@@ -821,7 +821,7 @@ final class TypeScriptEmitter
             $named = match (true) {
                 $type instanceof ValueOfType => $type->enumClass,
                 $type instanceof NameRefType && null !== $type->class && !isset($this->typeAliases[$type->name])
-                    && (null === $domain || !isset($aliases[$domain][$type->name])) && ClassTypeResolver::writtenAsItsValue($type->class) => $type->class,
+                    && (null === $domain || !isset($aliases[$domain][$type->name])) && $classTypes->writesItsValues($type->class) => $type->class,
                 default => null,
             };
             if (null !== $named) {

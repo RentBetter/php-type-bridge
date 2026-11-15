@@ -179,7 +179,7 @@ final class FormTypeInspector
             $fields[] = new CollectedFormField(
                 name: $name,
                 formTypeClass: $formTypeClass,
-                required: $config->getRequired(),
+                required: $fieldRequired,
                 mapped: $config->getMapped(),
                 compound: $config->getCompound(),
                 dataClass: $config->getDataClass(),

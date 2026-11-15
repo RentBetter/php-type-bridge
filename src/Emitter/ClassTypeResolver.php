@@ -75,12 +75,52 @@ final class ClassTypeResolver
         return $this->resolved[$class] ??= $this->lookUp($class);
     }
 
+    /**
+     * Whether the class is sent as its values: a backed enum json_encode writes as its backing value
+     * ({@see self::writtenAsItsValue()}) that nothing gives a type of its own — no `_self`, its own,
+     * an ancestor's or one it imports, and no emitter. The enums whose values the emitter declares
+     * for a name ({@see TypeScriptEmitter::referencedEnums()}).
+     */
+    public function writesItsValues(string $class): bool
+    {
+        return self::writtenAsItsValue($class) && null === $this->declared($class);
+    }
+
     private function lookUp(string $class): EmitImport
     {
         if (!PhpFileClassLocator::loads($class)) {
             throw new RuntimeException(\sprintf('A shape names "%s" as a type, and there is no such class.', $class));
         }
 
+        $declared = $this->declared($class);
+        if (null !== $declared) {
+            return $declared;
+        }
+
+        // A backed enum that doesn't serialise itself is written as its backing value: its values, as
+        // `value-of<…>` names them, declared in its module ({@see TypeScriptEmitter::emit()}).
+        if (self::writtenAsItsValue($class)) {
+            return new EmitImport($this->names->enumDomain($class), $this->names->enumName($class));
+        }
+
+        throw new RuntimeException(\sprintf(
+            'A shape names %s as a type, meaning the JSON it serialises to, but neither it nor a parent or '
+            . 'interface declares a `_self` shape in the source tree, and no emitter publishes a type for it. Give it a '
+            . '`@phpstan-type _self` describing what jsonSerialize() returns — or, if the shape naming it is '
+            . 'never serialised, mark that shape\'s class #[PhpStanOnly].',
+            $class,
+        ));
+    }
+
+    /**
+     * What a class is sent as where something declares it: a response, its interface; a `_self`, the
+     * class's own or one it imports, else its nearest ancestor's; an emitter's type. Null where
+     * nothing does.
+     *
+     * @param class-string $class
+     */
+    private function declared(string $class): ?EmitImport
+    {
         // A response is sent as the interface of its public properties the module declares for it.
         if (isset($this->responses[$class])) {
             $response = $this->responses[$class];
@@ -102,28 +142,15 @@ final class ClassTypeResolver
         }
 
         $emitter = $this->registry->typeSymbolEmitterFor($reflection);
-        if (null !== $emitter) {
-            return $this->rootSources->place($emitter->typeSymbol($reflection), $reflection);
-        }
 
-        // A backed enum that doesn't serialise itself is written as its backing value: its values, as
-        // `value-of<…>` names them, declared in its module ({@see TypeScriptEmitter::emit()}).
-        if (self::writtenAsItsValue($class)) {
-            return new EmitImport($this->names->enumDomain($class), $this->names->enumName($class));
-        }
-
-        throw new RuntimeException(\sprintf(
-            'A shape names %s as a type, meaning the JSON it serialises to, but neither it nor a parent or '
-            . 'interface declares a `_self` shape in the source tree, and no emitter publishes a type for it. Give it a '
-            . '`@phpstan-type _self` describing what jsonSerialize() returns — or, if the shape naming it is '
-            . 'never serialised, mark that shape\'s class #[PhpStanOnly].',
-            $class,
-        ));
+        return null === $emitter ? null : $this->rootSources->place($emitter->typeSymbol($reflection), $reflection);
     }
 
     /**
      * Whether the class is a backed enum json_encode writes as its backing value: one that doesn't
      * serialise itself (JsonSerializable).
+     *
+     * @phpstan-assert-if-true class-string<BackedEnum> $class
      */
     public static function writtenAsItsValue(string $class): bool
     {
