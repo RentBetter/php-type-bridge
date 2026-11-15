@@ -165,6 +165,27 @@ final class PhpDocShapeParserGrammarTest extends TestCase
         self::assertInstanceOf(ListType::class, $parser->parse('List'));
         $union = $parser->parse('string|NULL');
         self::assertTrue(ShapeField::admitsNull($union));
+        // Every keyword the parser reads: a literal, a generic, a shape, a refinement.
+        self::assertEquals(new UnionType([new ScalarType('string'), new \PTGS\TypeBridge\Parser\LiteralType(false)]), $parser->parse('string|FALSE'));
+        self::assertInstanceOf(MapType::class, $parser->parse('Array<string, int>'));
+        self::assertInstanceOf(ListType::class, $parser->parse('List<int>'));
+        self::assertInstanceOf(ShapeType::class, $parser->parse('ARRAY{a: int}'));
+        foreach (['Array-Key' => 'array-key', 'Non-Empty-String' => 'non-empty-string'] as $spelling => $refinement) {
+            $type = $parser->parse($spelling);
+            self::assertInstanceOf(ScalarType::class, $type, $spelling);
+            self::assertSame($refinement, $type->type, $spelling);
+        }
+    }
+
+    public function test_a_keyword_a_namespace_starts_with_is_a_class(): void
+    {
+        $parser = new PhpDocShapeParser();
+
+        foreach (['Integer\\Amount', 'Object\\Dto', 'List\\Item', 'Numeric\\Money', 'string\\Format'] as $class) {
+            $type = $parser->parse($class);
+            self::assertInstanceOf(NameRefType::class, $type, $class);
+            self::assertSame($class, $type->class, $class);
+        }
     }
 
     public function test_a_longer_name_that_starts_with_a_keyword_is_still_a_name(): void

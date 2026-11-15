@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Emitter;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Emitter\Builtin\EndpointContractEmitter;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
@@ -104,6 +105,12 @@ final class EndpointQueryTest extends TestCase
         self::assertStringContainsString('export type ShowReportQuery = AsQuery<ReportFilterData>;', $reports);
         self::assertStringContainsString('export type ListProductReportsQuery = AsQuery<NullableProductFilterData>;', $reports);
         self::assertSame(1, substr_count($reports, 'export type AsQuery<T> = '));
+    }
+
+    public function test_a_date_in_a_query_is_a_date(): void
+    {
+        // A Date is an object, its methods none of a query's keys: it is sent as it is.
+        self::assertStringContainsString('T extends string | number | boolean | bigint | symbol | Date | null | undefined', EndpointContractEmitter::AS_QUERY_HELPER);
     }
 
     public function test_an_inherited_key_that_may_be_null_is_one_a_query_may_leave_out(): void

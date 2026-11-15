@@ -107,6 +107,19 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame('string', $schema['properties']['inner']['properties']['labels']['items']['type'] ?? null);
     }
 
+    public function test_classes_that_all_name_one_another_are_read_within_the_bound(): void
+    {
+        // Seven, each naming the other six: a read cut short where it named one being read is kept
+        // for where that one is being read again, so they aren't read in every order of them.
+        $src = __DIR__ . '/../Fixture/WebInputFixtures';
+        $contracts = array_column((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Web'], null, 'name');
+        $n2 = $contracts['ListWeb']->request?->query?->keys()?->fields[0]->type;
+
+        self::assertInstanceOf(ShapeType::class, $n2, 'N2Data, read');
+        self::assertInstanceOf(NameRefType::class, $n2->fields[0]->type, 'N1Data, being read, is not read again inside N2Data');
+        self::assertCount(1, (new McpManifestGenerator())->generate($src, new TypeBridgeConfig())['tools']);
+    }
+
     public function test_a_self_its_class_imports_is_its_shape(): void
     {
         // PostalData and RefData import their `_self` from Shapes: `postal`'s `street` may be left
