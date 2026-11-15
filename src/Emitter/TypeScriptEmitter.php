@@ -789,7 +789,8 @@ final class TypeScriptEmitter
      * Every enum the types and responses name, each under the module it is declared in: by
      * `value-of<…>`, or by its class where the class resolver sends it as its values ({@see ClassTypeResolver::writesItsValues()})
      * — a native `Status $status`, a key `status: Status`, of an enum no `_self` or emitter gives a
-     * type — and no alias of the module the name is written in has the name, which would win.
+     * type — and no alias or response of the module the name is written in has the name, which would
+     * win, as the converter reads it ({@see TypeToTsConverter::classSymbol()}).
      *
      * @param array<string, CollectedDomain>                 $domains
      * @param array<string, list<CollectedApiResponseClass>> $responses
@@ -809,6 +810,8 @@ final class TypeScriptEmitter
         }
         foreach ($responses as $domain => $domainResponses) {
             foreach ($domainResponses as $response) {
+                // A response's name is its module's, as an alias's is: one used bare is the response.
+                $aliases[$domain][$response->name] = true;
                 foreach ($response->properties as $property) {
                     $types[] = [$property->parsed, $property->writtenInDomain ?? $domain];
                 }

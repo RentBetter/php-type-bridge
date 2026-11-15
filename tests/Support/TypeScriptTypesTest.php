@@ -119,4 +119,20 @@ final class TypeScriptTypesTest extends TestCase
         self::assertNull(TypeScriptTypes::keyKind('(string | number) & (boolean | number)'), 'An intersection, not a union in brackets');
         self::assertNull(TypeScriptTypes::keyKind('Loop', $aliases), 'An alias that names itself says nothing');
     }
+
+    public function test_a_types_json_schema_is_what_json_can_say_of_it(): void
+    {
+        $aliases = ['Id' => 'string'];
+
+        self::assertSame(['type' => 'string'], TypeScriptTypes::jsonSchema('Id | null', $aliases), 'A null is the reader\'s to say');
+        self::assertSame(['type' => 'string'], TypeScriptTypes::jsonSchema("string | 'a'", $aliases), 'A literal of a type taken whole');
+        self::assertSame(['enum' => ['en', 'fr']], TypeScriptTypes::jsonSchema('\'en\' | "fr"'));
+        self::assertSame(['enum' => [-1, 2, 1.5]], TypeScriptTypes::jsonSchema('-1 | 2 | 1.5'));
+        self::assertSame(['anyOf' => [['type' => 'number'], ['enum' => [true]]]], TypeScriptTypes::jsonSchema('number | true'), 'A boolean literal is no number');
+        self::assertSame(['enum' => [true, false]], TypeScriptTypes::jsonSchema('true | false'));
+        self::assertNull(TypeScriptTypes::jsonSchema('string & {}'), 'A type JSON Schema has no word for');
+        self::assertNull(TypeScriptTypes::jsonSchema("'a' | 'it\\'s'"), 'A literal with an escape in it');
+        self::assertNull(TypeScriptTypes::jsonSchema("'a\\\\b'"), 'An escaped backslash, which is one');
+        self::assertNull(TypeScriptTypes::jsonSchema('null'), 'Nothing but a null');
+    }
 }

@@ -224,7 +224,9 @@ final class PortableRegex
                     return false;
                 }
                 if ('{' === $char) {
+                    // PCRE2 compiles no count past 65535: a pattern with one matches nothing.
                     if (1 !== preg_match('/\G\{(\d+)(?:(,)(\d*))?\}/', $fragment, $match, 0, $i)
+                        || (int) $match[1] > 65535 || (int) ($match[3] ?? 0) > 65535
                         || (isset($match[3]) && '' !== $match[3] && (int) $match[1] > (int) $match[3])) {
                         return false;
                     }

@@ -10,6 +10,7 @@ use PTGS\TypeBridge\Emitter\EmittedBlock;
 use PTGS\TypeBridge\Emitter\EmittedType;
 use PTGS\TypeBridge\Emitter\EmitMode;
 use PTGS\TypeBridge\Emitter\TypeEmitter;
+use PTGS\TypeBridge\Emitter\TypeToTsConverter;
 use ReflectionClass;
 use ReflectionEnum;
 use ReflectionEnumBackedCase;
@@ -48,16 +49,14 @@ final class ValueOfEnumEmitter implements TypeEmitter
                 }
             }
         } else {
-            $values = array_map(
-                static fn(string $value): string => "'" . $value . "'",
-                $context->enumResolver->resolve($class->getName()),
-            );
+            $values = array_map(TypeToTsConverter::stringLiteral(...), $context->enumResolver->resolve($class->getName()));
         }
 
         $code = \sprintf(
             'export type %s = %s;',
             $context->names->enumName($class->getName()),
-            implode(' | ', $values),
+            // An enum with no cases has no value a key could hold.
+            [] === $values ? 'never' : implode(' | ', $values),
         );
 
         return new EmittedType($context->domain, [new EmittedBlock(10, '// Enums', $code)]);

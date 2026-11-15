@@ -672,10 +672,11 @@ final class McpManifestBuilder
     }
 
     /**
-     * Whether an int may key a map, so a list is the map too, as the server decodes one: an int's
-     * key, a float's — keyed as the int it truncates to — an int literal's, an int-backed enum's
-     * values, any key's, a union with one of them in it. Not a string's, a string literal's, a
-     * string-backed enum's values or an enum's ids. A name the builder can't read here may be
+     * Whether every int may key a map, so a list is the map too, as the server decodes one — its
+     * keys 0..n: an int's key, a float's — keyed as the int it truncates to — any key's, a
+     * project-wide alias's whose TypeScript is a number or every key, a union with one of them in
+     * it. Not a literal's, an enum's values or ids, which take only some of those ints, if any: the
+     * TypeScript is a Record of them, which no list is. A name the builder can't read here may be
      * either, so it may be an int.
      */
     private function keyTakesList(ParsedType $key): bool
@@ -683,27 +684,23 @@ final class McpManifestBuilder
         return match (true) {
             $key instanceof UnionType => array_any($key->types, $this->keyTakesList(...)),
             $key instanceof ScalarType => \in_array($key->base(), ['int', 'float', 'numeric', 'array-key'], true),
-            $key instanceof LiteralType => \is_int($key->value),
-            $key instanceof ValueOfType => !PhpFileClassLocator::loadsEnum($key->enumClass) || !is_subclass_of($key->enumClass, BackedEnum::class)
-                || array_any($key->enumClass::cases(), static fn (BackedEnum $case): bool => \is_int($case->value)),
-            $key instanceof IdOfType => false,
-            $key instanceof NameRefType && null === $key->class => 'string' !== ($this->configAliasSchema($key->name)['type'] ?? null),
+            $key instanceof LiteralType, $key instanceof ValueOfType, $key instanceof IdOfType => false,
+            $key instanceof NameRefType && null === $key->class => !isset($this->typeAliases[$key->name])
+                || \in_array(TypeScriptTypes::keyKind($key->name, $this->typeAliases), ['number', 'any'], true),
             default => true,
         };
     }
 
     /**
-     * A project-wide alias as the JSON type its TypeScript is, through any alias it names in turn:
-     * `string`, `number` or `boolean`; null where it is anything else, or no such alias.
+     * A project-wide alias as the JSON Schema its TypeScript is ({@see TypeScriptTypes::jsonSchema()}):
+     * a type, literals' values or a union of them, a null among them left to what reads it; null
+     * where it is anything else, or no such alias.
      *
-     * @return array{type: string}|null
+     * @return array<string, mixed>|null
      */
     private function configAliasSchema(string $name): ?array
     {
-        $standsFor = TypeScriptTypes::standsFor($name, $this->typeAliases);
-        $type = null === $standsFor ? null : TypeScriptTypes::jsonType($standsFor);
-
-        return null === $type ? null : ['type' => $type];
+        return isset($this->typeAliases[$name]) ? TypeScriptTypes::jsonSchema($name, $this->typeAliases) : null;
     }
 
     /**
@@ -754,9 +751,11 @@ final class McpManifestBuilder
         while ($declared instanceof NullableType) {
             $declared = $declared->inner;
         }
-        // A project-wide alias is the JSON type its TypeScript is.
+        // A project-wide alias is the JSON type its TypeScript is, where it is one.
         if ($declared instanceof NameRefType && null === $declared->class) {
-            return $this->configAliasSchema($declared->name)['type'] ?? null;
+            $type = $this->configAliasSchema($declared->name)['type'] ?? null;
+
+            return \is_string($type) ? $type : null;
         }
         if (!$declared instanceof ScalarType) {
             return null;

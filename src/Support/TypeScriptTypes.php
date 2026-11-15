@@ -76,7 +76,7 @@ final class TypeScriptTypes
      */
     public static function keyKind(string $type, array $aliases = []): ?string
     {
-        $members = self::keyMembers($type, $aliases, 0);
+        $members = self::members($type, $aliases, 0);
         if (isset($members['PropertyKey']) || isset($members['any']) || isset($members['unknown']) || (isset($members['string']) && isset($members['number']))) {
             return 'any';
         }
@@ -180,25 +180,83 @@ final class TypeScriptTypes
     }
 
     /**
+     * The JSON Schema a type is, read through the config's aliases and out of brackets, where JSON
+     * can say it: `string`, `number` or `boolean`, literals of them — `'en' | 'fr'` the values it
+     * allows — and a union of those. A `null` among them is passed over: whether a value may be null
+     * is its reader's to say. Null for any other type.
+     *
+     * @param array<string, string> $aliases the config's aliases, name => TypeScript
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function jsonSchema(string $type, array $aliases = []): ?array
+    {
+        $types = [];
+        $values = [];
+        foreach (array_keys(self::members($type, $aliases, 0)) as $member) {
+            $member = (string) $member;
+            $json = self::jsonType($member);
+            $literal = null === $json ? self::literal($member) : null;
+            if (null !== $json) {
+                $types[$json] = true;
+            } elseif (null !== $literal) {
+                $values[] = $literal[0];
+            } elseif ('null' !== $member) {
+                return null;
+            }
+        }
+        // A literal of a type the union takes whole is one of it already.
+        $values = array_values(array_filter($values, static fn (string|int|float|bool $value): bool => !isset($types[match (true) {
+            \is_string($value) => 'string',
+            \is_bool($value) => 'boolean',
+            default => 'number',
+        }])));
+        $schemas = [...array_map(static fn (string $json): array => ['type' => $json], array_keys($types)), ...([] === $values ? [] : [['enum' => $values]])];
+
+        return match (\count($schemas)) {
+            0 => null,
+            1 => $schemas[0],
+            default => ['anyOf' => $schemas],
+        };
+    }
+
+    /**
      * A union's members, each alias among them and each one in brackets read for its own.
      *
      * @param array<string, string> $aliases
      *
      * @return array<string, true>
      */
-    private static function keyMembers(string $type, array $aliases, int $depth): array
+    private static function members(string $type, array $aliases, int $depth): array
     {
         $members = [];
         foreach (self::split(trim($type), '|') as $member) {
             $inner = $depth > 8 ? null : (self::inBrackets($member) ?? $aliases[$member] ?? null);
             if (null !== $inner) {
-                $members += self::keyMembers($inner, $aliases, $depth + 1);
+                $members += self::members($inner, $aliases, $depth + 1);
             } elseif ('' !== $member) {
                 $members[$member] = true;
             }
         }
 
         return $members;
+    }
+
+    /**
+     * The value a literal is — `'en'`, `"en"`, `1`, `-1.5`, `true` — in a list of one; null for one
+     * this can't read, a quoted one with an escape in it among them.
+     *
+     * @return array{string|int|float|bool}|null
+     */
+    private static function literal(string $member): ?array
+    {
+        return match (true) {
+            1 === preg_match('/^(?|\'([^\'\\\\]*)\'|"([^"\\\\]*)")$/', $member, $quoted) => [$quoted[1]],
+            1 === preg_match('/^-?\d+$/', $member) => [(int) $member],
+            1 === preg_match('/^-?\d*\.\d+$/', $member) => [(float) $member],
+            'true' === $member, 'false' === $member => ['true' === $member],
+            default => null,
+        };
     }
 
     /**
