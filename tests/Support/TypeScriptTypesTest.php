@@ -135,6 +135,7 @@ final class TypeScriptTypesTest extends TestCase
 
         self::assertSame(['type' => 'string'], TypeScriptTypes::jsonSchema('Id | null', $aliases), 'A null is the reader\'s to say');
         self::assertSame(['type' => 'string'], TypeScriptTypes::jsonSchema("string | 'a'", $aliases), 'A literal of a type taken whole');
+        self::assertSame(['type' => 'number'], TypeScriptTypes::jsonSchema('number | 1'), 'An int is a number');
         self::assertSame(['enum' => ['en', 'fr']], TypeScriptTypes::jsonSchema('\'en\' | "fr"'));
         self::assertSame(['enum' => [-1, 2, 1.5]], TypeScriptTypes::jsonSchema('-1 | 2 | 1.5'));
         self::assertSame(['anyOf' => [['type' => 'number'], ['enum' => [true]]]], TypeScriptTypes::jsonSchema('number | true'), 'A boolean literal is no number');

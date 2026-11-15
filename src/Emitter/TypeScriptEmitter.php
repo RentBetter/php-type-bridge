@@ -395,8 +395,20 @@ final class TypeScriptEmitter
                     $blocksByDomain[$domain],
                 );
             }
-            // What a discovered emitter declares shadows no global the module uses, as emit()'s own don't.
-            $output[$domain] = $this->unshadowed($domain, $code, self::declaredIn($blocksByDomain[$domain]));
+            // What a discovered emitter declares or imports shadows no global the module uses, as
+            // emit()'s own don't; an import, which its code names as it is, can't be renamed, so it
+            // may not take a name the module declares either.
+            $imported = [];
+            foreach ($importsByDomain[$domain] ?? [] as $import) {
+                if ($import->targetDomain !== $domain) {
+                    $imported[$import->canonicalName] = true;
+                    $declared = $this->claimedNames[$domain][$import->canonicalName] ?? null;
+                    if (null !== $declared) {
+                        throw new RuntimeException(\sprintf('TypeScript naming collision in domain "%s": a discovered emitter imports "%s" from "%s", which the module declares as %s.', $domain, $import->canonicalName, $import->targetDomain, $declared));
+                    }
+                }
+            }
+            $output[$domain] = $this->unshadowed($domain, $code, self::declaredIn($blocksByDomain[$domain]) + $imported);
         }
 
         return $output;
@@ -578,8 +590,8 @@ final class TypeScriptEmitter
      * uses — `Record<string, V>` beside an `interface Record` reads the module's, and fails. One it
      * imports is imported under another name ({@see self::computeForeignAliases()}).
      *
-     * @param array<string, true> $discovered what a discovered emitter's blocks declare in it, beside
-     *                                        the names emit() claimed
+     * @param array<string, true> $discovered what a discovered emitter's blocks declare or import in it,
+     *                                        beside the names emit() claimed
      */
     private function unshadowed(string $domain, string $code, array $discovered = []): string
     {
@@ -1211,7 +1223,10 @@ final class TypeScriptEmitter
      */
     private function computeForeignAliases(string $domain, array $imports): array
     {
-        $usedNames = array_map(static fn (): bool => true, $this->claimedNames[$domain] ?? []) + array_fill_keys($this->endpointConsts[$domain] ?? [], true) + array_fill_keys(self::TYPESCRIPT_GLOBALS, true);
+        // A name a project-wide alias's TypeScript uses means what it does everywhere — TypeScript's,
+        // a library's — so an import of one takes another name too.
+        $usedNames = array_map(static fn (): bool => true, $this->claimedNames[$domain] ?? []) + array_fill_keys($this->endpointConsts[$domain] ?? [], true) + array_fill_keys(self::TYPESCRIPT_GLOBALS, true)
+            + array_fill_keys(array_merge([], ...array_map(TypeScriptTypes::namesIn(...), array_values($this->typeAliases))), true);
         $aliases = [];
 
         $importDomains = array_keys($imports);

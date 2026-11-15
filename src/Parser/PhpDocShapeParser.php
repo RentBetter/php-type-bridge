@@ -417,12 +417,16 @@ final class PhpDocShapeParser
         // them null: `array` and `iterable` any array, as a property typed `array` is; `list` any
         // list; `object` any value its JSON may be. Bare: `iterable<…>` and the others with their
         // arguments are read above, and an object shape, `object{…}`, is not read at all.
-        foreach (['non-empty-array' => 'array<array-key, mixed>', 'array' => 'array<array-key, mixed>', 'non-empty-list' => 'list<mixed>', 'list' => 'list<mixed>', 'iterable' => 'array<array-key, mixed>', 'object' => null] as $keyword => $means) {
+        foreach (['non-empty-array' => 'map', 'array' => 'map', 'non-empty-list' => 'list', 'list' => 'list', 'iterable' => 'map', 'object' => 'object'] as $keyword => $means) {
             $after = $this->pos + \strlen($keyword);
             if ($this->lookAhead($keyword) && !$this->continuesName($after) && !\in_array(substr($this->input, $after, 1), ['<', '{'], true)) {
                 $this->pos += \strlen($keyword);
 
-                return null === $means ? new ScalarType('object') : (new self())->parse($means);
+                return match ($means) {
+                    'map' => new MapType(new ScalarType('array-key'), new ScalarType('mixed')),
+                    'list' => new ListType(new ScalarType('mixed')),
+                    default => new ScalarType('object'),
+                };
             }
         }
 

@@ -25,6 +25,8 @@ use PTGS\TypeBridge\Tests\Fixture\Discovered\AlphaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\BetaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitterContract;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Diary;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\DiaryEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Tally;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\TallyEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ShadowingEmitter\Ledger;
@@ -125,6 +127,23 @@ final class DiscoveredEmitterTest extends TestCase
         $this->expectExceptionMessage('TypeScript naming collision in domain "Tallies": "Record" is both TypeScript\'s global Record');
 
         $emitter->emitDiscovered([Tally::class]);
+    }
+
+    public function test_a_discovered_emitters_import_takes_no_name_its_module_declares(): void
+    {
+        // Notes, written by emit() too, declares `Date`; DiaryEmitter imports another into it.
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([DiaryEmitter::class]),
+            typeAliases: ['Stamp' => 'string'],
+        );
+        $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasShadowFixtures'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": a discovered emitter imports "Date" from "Shared", which the module declares as type');
+
+        $emitter->emitDiscovered([Diary::class]);
     }
 
     public function test_returns_empty_without_discovered_emitters(): void

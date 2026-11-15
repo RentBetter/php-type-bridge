@@ -558,24 +558,33 @@ final class McpManifestBuilder
             return $this->shapeSchema($field->contract, $json) ?? ['type' => 'object'];
         }
 
-        // Declared as literals of one type — written out, or a project-wide alias of them — it takes
-        // those values, as a shape's key does: where the form reads what is sent as it is.
-        $literals = $declared;
-        while ($literals instanceof NullableType) {
-            $literals = $literals->inner;
+        return $this->literalSchema($declared, $field->transformsValue) ?? ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
+    }
+
+    /**
+     * A value declared as literals of one JSON type — written out, or a project-wide alias of them —
+     * as those values, typed, as a shape's key takes them; null for any other, or for one the form
+     * reads through a transformer, whose result the literals describe.
+     *
+     * @return array{type: string, enum: list<mixed>}|null
+     */
+    private function literalSchema(?ParsedType $declared, bool $transformed): ?array
+    {
+        while ($declared instanceof NullableType) {
+            $declared = $declared->inner;
         }
-        $values = null === $literals || $field->transformsValue ? null : $this->typeSchema($literals)['enum'] ?? null;
-        $types = \is_array($values) ? array_unique(array_map(static fn (mixed $value): string => match (true) {
-            \is_string($value) => 'string',
-            \is_int($value) => 'integer',
-            \is_bool($value) => 'boolean',
-            default => 'number',
-        }, $values)) : [];
-        if (1 === \count($types)) {
-            return ['type' => reset($types), 'enum' => $values];
+        $values = null === $declared || $transformed ? null : $this->typeSchema($declared)['enum'] ?? null;
+        if (!\is_array($values)) {
+            return null;
+        }
+        $types = [];
+        foreach ($values as $value) {
+            // What typeSchema() lists: literals and an enum's values.
+            \assert(\is_scalar($value));
+            $types[TypeScriptTypes::jsonTypeOf($value)] = true;
         }
 
-        return ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
+        return 1 === \count($types) ? ['type' => (string) array_key_first($types), 'enum' => array_values($values)] : null;
     }
 
     /**
@@ -814,7 +823,7 @@ final class McpManifestBuilder
 
         if ([] === $field->entryChildren) {
             \assert(null !== $field->entryTypeClass);
-            $schema = ['type' => $this->declaredScalar($item) ?? $this->scalarTypeOf($field->entryTypeClass)];
+            $schema = $this->literalSchema($item, $field->transformsValue) ?? ['type' => $this->declaredScalar($item) ?? $this->scalarTypeOf($field->entryTypeClass)];
             // `""` sent for an entry is submitted as its blank: where that is refused, as a field's is,
             // at least one character.
             if ('string' === $schema['type'] && $this->refusesBlankValue($field->entryConstraints, $field->entryBlankValue)) {

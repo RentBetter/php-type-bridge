@@ -206,11 +206,7 @@ final class TypeScriptTypes
             }
         }
         // A literal of a type the union takes whole is one of it already.
-        $values = array_values(array_filter($values, static fn (string|int|float|bool $value): bool => !isset($types[match (true) {
-            \is_string($value) => 'string',
-            \is_bool($value) => 'boolean',
-            default => 'number',
-        }])));
+        $values = array_values(array_filter($values, static fn (string|int|float|bool $value): bool => !isset($types[self::jsonTypeOf($value)]) && !(\is_int($value) && isset($types['number']))));
         $schemas = [...array_map(static fn (string $json): array => ['type' => $json], array_keys($types)), ...([] === $values ? [] : [['enum' => $values]])];
 
         return match (\count($schemas)) {
@@ -244,16 +240,32 @@ final class TypeScriptTypes
 
     /**
      * The names a type uses — `Date`, `Brand`, `PropertyKey` in `Brand<Date> | PropertyKey` — but
-     * for what is quoted, an object's keys and a member read off another (`A.B`'s `B`).
+     * for what is quoted, a key — an object's, an index signature's, a function's params — and a
+     * member read off another (`A.B`'s `B`). A conditional's branches are names.
      *
      * @return list<string>
      */
     public static function namesIn(string $type): array
     {
         $unquoted = preg_replace('/([\'"`])(?:\\\\.|(?!\1).)*\1/s', "''", $type) ?? $type;
-        preg_match_all('/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$]|\s*\??\s*:)/', $unquoted, $names);
+        // A key opens an object, an index signature or a params list, or follows another's `,` or `;`.
+        $unkeyed = preg_replace('/([{\[(,;]\s*)(?:readonly\s+)?[A-Za-z_$][\w$]*\s*\??\s*:/', '$1', $unquoted) ?? $unquoted;
+        preg_match_all('/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])/', $unkeyed, $names);
 
         return array_values(array_unique($names[0]));
+    }
+
+    /**
+     * The JSON Schema type a literal's value is: `integer` for an int, which a `number` takes too.
+     */
+    public static function jsonTypeOf(string|int|float|bool $value): string
+    {
+        return match (true) {
+            \is_string($value) => 'string',
+            \is_bool($value) => 'boolean',
+            \is_int($value) => 'integer',
+            default => 'number',
+        };
     }
 
     /**

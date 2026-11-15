@@ -91,6 +91,7 @@ final class GenerateTypesCommand extends Command
                     files: $classFiles,
                     typeAliases: $config->typeAliases,
                     routingEnv: $config->routingEnv,
+                    emitters: $registry,
                 ))->collect($sourceDir, $responseCollector->collectIndex($sourceDir)),
             );
         }
