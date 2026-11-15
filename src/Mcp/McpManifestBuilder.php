@@ -570,9 +570,7 @@ final class McpManifestBuilder
      */
     private function literalSchema(?ParsedType $declared, bool $transformed): ?array
     {
-        while ($declared instanceof NullableType) {
-            $declared = $declared->inner;
-        }
+        $declared = self::unwrapped($declared);
         $values = null === $declared || $transformed ? null : $this->typeSchema($declared)['enum'] ?? null;
         if (!\is_array($values)) {
             return null;
@@ -596,9 +594,7 @@ final class McpManifestBuilder
     private function declaredScalars(?ParsedType $declared): array
     {
         // `?Alias` of an alias of `T|null` is a nullable of a nullable: its scalar is what both wrap.
-        while ($declared instanceof NullableType) {
-            $declared = $declared->inner;
-        }
+        $declared = self::unwrapped($declared);
         if (!$declared instanceof UnionType) {
             return [];
         }
@@ -780,9 +776,7 @@ final class McpManifestBuilder
      */
     private function declaredScalar(?ParsedType $declared): ?string
     {
-        while ($declared instanceof NullableType) {
-            $declared = $declared->inner;
-        }
+        $declared = self::unwrapped($declared);
         // A project-wide alias is the JSON type its TypeScript is, where it is one.
         if ($declared instanceof NameRefType && null === $declared->class) {
             $type = $this->configAliasSchema($declared->name)['type'] ?? null;
@@ -994,6 +988,19 @@ final class McpManifestBuilder
     }
 
     /**
+     * What a `?T` wraps, through any `?` around it — a nullable of a nullable, an alias of `T|null`
+     * written `?Alias`.
+     */
+    private static function unwrapped(?ParsedType $type): ?ParsedType
+    {
+        while ($type instanceof NullableType) {
+            $type = $type->inner;
+        }
+
+        return $type;
+    }
+
+    /**
      * The type itself if it is a `$kind`, or the one `$kind` among a nullable's or a union's
      * members — none when there are two to choose between.
      *
@@ -1005,9 +1012,7 @@ final class McpManifestBuilder
      */
     private static function soleMember(?ParsedType $type, string $kind): ?ParsedType
     {
-        while ($type instanceof NullableType) {
-            $type = $type->inner;
-        }
+        $type = self::unwrapped($type);
         if ($type instanceof UnionType) {
             $members = array_values(array_filter($type->types, static fn (ParsedType $member): bool => $member instanceof $kind));
             $type = 1 === \count($members) ? $members[0] : null;

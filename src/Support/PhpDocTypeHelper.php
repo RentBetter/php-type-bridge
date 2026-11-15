@@ -407,20 +407,19 @@ final class PhpDocTypeHelper
     }
 
     /**
-     * Whether the keyword at `$at` declares something: a name follows it.
+     * The first token from `$at` on, in the direction `$step` goes, that isn't whitespace or a comment.
      *
      * @param array<\PhpToken> $tokens
      */
-    private static function declaresAt(array $tokens, int $at): bool
+    private static function significantNext(array $tokens, int $at, int $step): ?\PhpToken
     {
-        $count = \count($tokens);
-        for ($i = $at + 1; $i < $count; ++$i) {
+        for ($i = $at + $step; isset($tokens[$i]); $i += $step) {
             if (!$tokens[$i]->isIgnorable()) {
-                return $tokens[$i]->is(\T_STRING);
+                return $tokens[$i];
             }
         }
 
-        return false;
+        return null;
     }
 
     /**
@@ -456,11 +455,12 @@ final class PhpDocTypeHelper
 
         for ($i = 0; $i < $count; $i++) {
             $token = $tokens[$i];
-            // A declaration ends them, its keyword followed by its name — not `Foo::class`.
-            if ($token->is([\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM]) && self::declaresAt($tokens, $i)) {
+            // A class-like keyword ends them — a declaration's, an anonymous class's — but `Foo::class`'s.
+            if ($token->is([\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM]) && !self::significantNext($tokens, $i, -1)?->is(\T_DOUBLE_COLON)) {
                 break;
             }
-            if (!$token->is(\T_USE)) {
+            // A closure's `use (…)` imports nothing.
+            if (!$token->is(\T_USE) || '(' === self::significantNext($tokens, $i, 1)?->text) {
                 continue;
             }
 

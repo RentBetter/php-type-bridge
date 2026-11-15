@@ -238,6 +238,24 @@ final class DiscoveredEmitterTest extends TestCase
         $emitter->emitDiscovered([Script::class]);
     }
 
+    public function test_a_discovered_emitters_declaration_takes_no_name_the_root_module_declares(): void
+    {
+        // With a root module, every project-wide alias a module names is declared there.
+        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['', ['export type Stamp = number;'], []];
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output', new OutputStructure(rootModule: 'genTypes.ts')),
+            registry: EmitterRegistry::fromAttributeScan([ScriptedEmitter::class]),
+            typeAliases: ['Stamp' => 'string'],
+        );
+        $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasShadowFixtures'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "": a discovered emitter declares "Stamp", which the module declares as config type alias Stamp.');
+
+        $emitter->emitDiscovered([Script::class]);
+    }
+
     public function test_returns_empty_without_discovered_emitters(): void
     {
         $emitter = new TypeScriptEmitter(new EnumResolver(), new DomainMapper('/tmp/type-bridge-output'));

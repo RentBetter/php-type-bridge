@@ -368,6 +368,9 @@ final class TypeScriptEmitter
             }
         }
 
+        // What the discovered emitters write, before emit()'s shared blocks join the root module's.
+        $discoveredBlocks = $blocksByDomain;
+
         // The root module is written by both passes: declare emit()'s shared blocks here too, or
         // this module would replace the one emit() returned and drop them.
         if ([] !== $this->rootBlocks) {
@@ -398,34 +401,8 @@ final class TypeScriptEmitter
                     $blocksByDomain[$domain],
                 );
             }
-            // What a discovered emitter declares or imports shadows no global the module uses, as
-            // emit()'s own don't; an import, which its code names as it is, can't be renamed, so it
-            // may take no name emit() wrote in the module either — one it declares, or imports from
-            // elsewhere. One it imports from the same module is the one import.
-            $declaredHere = null === $emitted ? [] : self::declaredIn($emitted['blocks']);
-            $importedHere = [];
-            foreach ($emitted['imports'] ?? [] as $from => $names) {
-                foreach ($names as $name) {
-                    $importedHere[$emitted['foreignAliases'][$from][$name] ?? $name] = (string) $from;
-                }
-            }
-            $imported = [];
-            foreach ($importsByDomain[$domain] ?? [] as $import) {
-                $name = $import->canonicalName;
-                if ($import->targetDomain === $domain || ($importedHere[$name] ?? null) === $import->targetDomain) {
-                    continue;
-                }
-                $imported[$name] = true;
-                $taken = match (true) {
-                    isset($importedHere[$name]) => \sprintf('imports from "%s"', $importedHere[$name]),
-                    isset($declaredHere[$name]) => 'declares as ' . ($this->claimedNames[$domain][$name] ?? $name),
-                    default => null,
-                };
-                if (null !== $taken) {
-                    throw new RuntimeException(\sprintf('TypeScript naming collision in domain "%s": a discovered emitter imports "%s" from "%s", which the module %s.', $domain, $name, $import->targetDomain, $taken));
-                }
-            }
-            $output[$domain] = $this->unshadowed($domain, $code, self::declaredIn($blocksByDomain[$domain]) + $imported);
+            $names = $this->discoveredNames($domain, $discoveredBlocks[$domain] ?? [], $importsByDomain[$domain] ?? [], $emitted);
+            $output[$domain] = $this->unshadowed($domain, $code, $names);
         }
 
         return $output;
@@ -581,6 +558,70 @@ final class TypeScriptEmitter
         $this->emittedModules[$domain] = ['imports' => $imports, 'foreignAliases' => $foreignAliases, 'blocks' => $blocks];
 
         return $this->unshadowed($domain, $this->assembler->assemble($this->renderImportLines($domain, $imports, $foreignAliases), $blocks));
+    }
+
+    /**
+     * The names discovered emitters write in a module, each held to what else is there. Their code
+     * names what it declares and imports as it is, so none can be given another name, as emit()'s
+     * one naming pass gives its own: one taken fails, naming both. A name either declares is taken
+     * where the module declares it or imports it under that name, or another discovered emitter's
+     * declaration or import has it; one imported, likewise — but the import the module has of it
+     * from the same module, under its own name, which is the one import.
+     *
+     * @param list<EmittedBlock> $blocks  what the discovered emitters declare in the module
+     * @param list<EmitImport>   $imports what they import into it
+     * @param array{imports: array<string, list<string>>, foreignAliases: array<string, array<string, string>>, blocks: list<EmittedBlock>}|null $emitted what emit() wrote in it
+     *
+     * @return array<string, true> the names they declare or import, which no global the module's code uses may be
+     */
+    private function discoveredNames(string $domain, array $blocks, array $imports, ?array $emitted): array
+    {
+        // What emit() wrote: each name it declares, and each it imports, by the name it is imported as.
+        $declared = self::declaredIn([...$emitted['blocks'] ?? [], ...('' === $domain ? array_values($this->rootBlocks) : [])]);
+        $taken = [];
+        foreach (array_keys($declared) as $name) {
+            $taken[$name] = 'the module declares as ' . ($this->claimedNames[$domain][$name] ?? $name);
+        }
+        $importedAs = [];
+        foreach ($emitted['imports'] ?? [] as $from => $names) {
+            foreach ($names as $name) {
+                $local = $emitted['foreignAliases'][$from][$name] ?? $name;
+                $importedAs[$from][$name] = $local;
+                $taken[$local] = \sprintf('the module imports from "%s"', $from);
+            }
+        }
+
+        $fail = static function (string $what, string $by) use ($domain): never {
+            throw new RuntimeException(\sprintf('TypeScript naming collision in domain "%s": a discovered emitter %s, which %s.', $domain, $what, $by));
+        };
+        $own = [];
+        foreach ($imports as $import) {
+            [$from, $name] = [$import->targetDomain, $import->canonicalName];
+            $local = $importedAs[$from][$name] ?? null;
+            if ($from === $domain || $local === $name || ($own[$name] ?? null) === $from) {
+                continue;
+            }
+            $what = \sprintf('imports "%s" from "%s"', $name, $from);
+            if (null !== $local) {
+                $fail($what, \sprintf('the module imports from there as "%s"', $local));
+            }
+            if (isset($taken[$name]) || isset($own[$name])) {
+                $fail($what, $taken[$name] ?? \sprintf('a discovered emitter imports from "%s"', $own[$name]));
+            }
+            $own[$name] = $from;
+        }
+        $names = array_fill_keys(array_keys($own), true);
+        foreach ($blocks as $block) {
+            foreach (array_keys(self::declaredIn([$block])) as $name) {
+                $by = $taken[$name] ?? (isset($own[$name]) ? \sprintf('a discovered emitter imports from "%s"', $own[$name]) : (isset($names[$name]) ? 'a discovered emitter declares too' : null));
+                if (null !== $by) {
+                    $fail(\sprintf('declares "%s"', $name), $by);
+                }
+                $names[$name] = true;
+            }
+        }
+
+        return $names;
     }
 
     /**

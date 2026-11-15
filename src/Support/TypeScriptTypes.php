@@ -247,10 +247,11 @@ final class TypeScriptTypes
      */
     public static function namesIn(string $type): array
     {
-        $unquoted = preg_replace('/([\'"`])(?:\\\\.|(?!\1).)*\1/s', "''", $type) ?? $type;
+        // A template literal's holes are types; the rest of it, and every other quoted thing, text.
+        $unquoted = preg_replace_callback('/([\'"`])(?:\\\\.|(?!\1).)*\1/s', static fn (array $quoted): string => '`' === $quoted[1] && preg_match_all('/\$\{([^}]*)\}/', $quoted[0], $holes) > 0 ? '(' . implode(') | (', $holes[1]) . ')' : "''", $type) ?? $type;
         // A key opens an object, an index signature or a params list, or follows another's `,`, `;`
-        // or line.
-        $unkeyed = preg_replace('/([{\[(,;\n]\s*)(?:readonly\s+)?[A-Za-z_$][\w$]*\s*\??\s*:/', '$1', $unquoted) ?? $unquoted;
+        // or line, its `:` on the same line.
+        $unkeyed = preg_replace('/([{\[(,;\n]\s*)(?:readonly\s+)?[A-Za-z_$][\w$]*[ \t]*\??[ \t]*:/', '$1', $unquoted) ?? $unquoted;
         preg_match_all('/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])/', $unkeyed, $names);
 
         return array_values(array_unique($names[0]));

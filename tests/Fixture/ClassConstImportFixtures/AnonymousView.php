@@ -6,13 +6,13 @@ namespace PTGS\TypeBridge\Tests\Fixture\ClassConstImportFixtures;
 
 use PTGS\TypeBridge\Tests\Fixture\EnumTypedFixtures\Notes\ErrorCode;
 
-// An anonymous class's trait, and a closure's variables: neither is an import of the file's.
-$helper = new class {
-    use \PTGS\TypeBridge\Tests\Fixture\ClassConstImportFixtures\Helper;
-};
+// A closure's variables, and an anonymous class's trait: neither is an import of the file's.
 $y = 1;
 $read = function () use ($y): int {
     return $y;
+};
+$helper = new class {
+    use \PTGS\TypeBridge\Tests\Fixture\ClassConstImportFixtures\Helper;
 };
 
 /** @phpstan-type Coded = array{code: ErrorCode} */
