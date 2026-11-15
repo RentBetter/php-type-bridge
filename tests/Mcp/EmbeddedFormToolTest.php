@@ -120,6 +120,19 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertCount(1, (new McpManifestGenerator())->generate($src, new TypeBridgeConfig())['tools']);
     }
 
+    public function test_a_read_made_of_one_cut_short_is_cut_short_where_that_one_was(): void
+    {
+        // X, read where Z is, takes the Y read there, cut short at Z: so X is too, and read where Z
+        // isn't — as `x` is — it reads on, its Y's Z read whole.
+        $src = __DIR__ . '/../Fixture/ReusedCutFixtures';
+        $input = (new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Loops'][0]->request?->body?->keys();
+        $x = $input?->fields[1]->type;
+
+        self::assertInstanceOf(ShapeType::class, $x);
+        self::assertInstanceOf(ShapeType::class, $x->fields[0]->type, 'Y');
+        self::assertInstanceOf(ShapeType::class, $x->fields[0]->type->fields[0]->type, 'Z, which nothing reading this X is reading');
+    }
+
     public function test_a_self_its_class_imports_is_its_shape(): void
     {
         // PostalData and RefData import their `_self` from Shapes: `postal`'s `street` may be left
@@ -275,9 +288,9 @@ final class EmbeddedFormToolTest extends TestCase
 
     public function test_whether_a_contract_is_read_within_the_bound_turns_on_it_alone(): void
     {
-        // B reads the wide shape A does and a clique: 1027 reads, past the bound, read alone. Read
-        // after A it is the same — not 326 reads, A's shape kept — or whether its tool is published
-        // would turn on which endpoint is read first.
+        // B reads the wide shape A does and a clique: about 1040 reads, past the bound, read alone.
+        // Read after A it is the same — not the clique's eighty, A's shape kept — or whether its
+        // tool is published would turn on which endpoint is read first.
         $src = __DIR__ . '/../Fixture/BoundOrderFixtures';
         $contracts = array_column((new EndpointContractCollector())->collect($src, (new ResponseClassCollector())->statusIndex($src))['Notes'], null, 'name');
 

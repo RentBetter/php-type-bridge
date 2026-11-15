@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Fixture\BoundOrderFixtures\Notes;
 
 /**
- * Seven hundred aliases, each read once: 701 reads.
+ * Nine hundred and sixty aliases, each read once: 961 reads, within the bound.
  *
  * @phpstan-type W1 = array{v?: int}
  * @phpstan-type W2 = array{v?: int}
@@ -707,6 +707,266 @@ namespace PTGS\TypeBridge\Tests\Fixture\BoundOrderFixtures\Notes;
  * @phpstan-type W698 = array{v?: int}
  * @phpstan-type W699 = array{v?: int}
  * @phpstan-type W700 = array{v?: int}
+ * @phpstan-type W701 = array{v?: int}
+ * @phpstan-type W702 = array{v?: int}
+ * @phpstan-type W703 = array{v?: int}
+ * @phpstan-type W704 = array{v?: int}
+ * @phpstan-type W705 = array{v?: int}
+ * @phpstan-type W706 = array{v?: int}
+ * @phpstan-type W707 = array{v?: int}
+ * @phpstan-type W708 = array{v?: int}
+ * @phpstan-type W709 = array{v?: int}
+ * @phpstan-type W710 = array{v?: int}
+ * @phpstan-type W711 = array{v?: int}
+ * @phpstan-type W712 = array{v?: int}
+ * @phpstan-type W713 = array{v?: int}
+ * @phpstan-type W714 = array{v?: int}
+ * @phpstan-type W715 = array{v?: int}
+ * @phpstan-type W716 = array{v?: int}
+ * @phpstan-type W717 = array{v?: int}
+ * @phpstan-type W718 = array{v?: int}
+ * @phpstan-type W719 = array{v?: int}
+ * @phpstan-type W720 = array{v?: int}
+ * @phpstan-type W721 = array{v?: int}
+ * @phpstan-type W722 = array{v?: int}
+ * @phpstan-type W723 = array{v?: int}
+ * @phpstan-type W724 = array{v?: int}
+ * @phpstan-type W725 = array{v?: int}
+ * @phpstan-type W726 = array{v?: int}
+ * @phpstan-type W727 = array{v?: int}
+ * @phpstan-type W728 = array{v?: int}
+ * @phpstan-type W729 = array{v?: int}
+ * @phpstan-type W730 = array{v?: int}
+ * @phpstan-type W731 = array{v?: int}
+ * @phpstan-type W732 = array{v?: int}
+ * @phpstan-type W733 = array{v?: int}
+ * @phpstan-type W734 = array{v?: int}
+ * @phpstan-type W735 = array{v?: int}
+ * @phpstan-type W736 = array{v?: int}
+ * @phpstan-type W737 = array{v?: int}
+ * @phpstan-type W738 = array{v?: int}
+ * @phpstan-type W739 = array{v?: int}
+ * @phpstan-type W740 = array{v?: int}
+ * @phpstan-type W741 = array{v?: int}
+ * @phpstan-type W742 = array{v?: int}
+ * @phpstan-type W743 = array{v?: int}
+ * @phpstan-type W744 = array{v?: int}
+ * @phpstan-type W745 = array{v?: int}
+ * @phpstan-type W746 = array{v?: int}
+ * @phpstan-type W747 = array{v?: int}
+ * @phpstan-type W748 = array{v?: int}
+ * @phpstan-type W749 = array{v?: int}
+ * @phpstan-type W750 = array{v?: int}
+ * @phpstan-type W751 = array{v?: int}
+ * @phpstan-type W752 = array{v?: int}
+ * @phpstan-type W753 = array{v?: int}
+ * @phpstan-type W754 = array{v?: int}
+ * @phpstan-type W755 = array{v?: int}
+ * @phpstan-type W756 = array{v?: int}
+ * @phpstan-type W757 = array{v?: int}
+ * @phpstan-type W758 = array{v?: int}
+ * @phpstan-type W759 = array{v?: int}
+ * @phpstan-type W760 = array{v?: int}
+ * @phpstan-type W761 = array{v?: int}
+ * @phpstan-type W762 = array{v?: int}
+ * @phpstan-type W763 = array{v?: int}
+ * @phpstan-type W764 = array{v?: int}
+ * @phpstan-type W765 = array{v?: int}
+ * @phpstan-type W766 = array{v?: int}
+ * @phpstan-type W767 = array{v?: int}
+ * @phpstan-type W768 = array{v?: int}
+ * @phpstan-type W769 = array{v?: int}
+ * @phpstan-type W770 = array{v?: int}
+ * @phpstan-type W771 = array{v?: int}
+ * @phpstan-type W772 = array{v?: int}
+ * @phpstan-type W773 = array{v?: int}
+ * @phpstan-type W774 = array{v?: int}
+ * @phpstan-type W775 = array{v?: int}
+ * @phpstan-type W776 = array{v?: int}
+ * @phpstan-type W777 = array{v?: int}
+ * @phpstan-type W778 = array{v?: int}
+ * @phpstan-type W779 = array{v?: int}
+ * @phpstan-type W780 = array{v?: int}
+ * @phpstan-type W781 = array{v?: int}
+ * @phpstan-type W782 = array{v?: int}
+ * @phpstan-type W783 = array{v?: int}
+ * @phpstan-type W784 = array{v?: int}
+ * @phpstan-type W785 = array{v?: int}
+ * @phpstan-type W786 = array{v?: int}
+ * @phpstan-type W787 = array{v?: int}
+ * @phpstan-type W788 = array{v?: int}
+ * @phpstan-type W789 = array{v?: int}
+ * @phpstan-type W790 = array{v?: int}
+ * @phpstan-type W791 = array{v?: int}
+ * @phpstan-type W792 = array{v?: int}
+ * @phpstan-type W793 = array{v?: int}
+ * @phpstan-type W794 = array{v?: int}
+ * @phpstan-type W795 = array{v?: int}
+ * @phpstan-type W796 = array{v?: int}
+ * @phpstan-type W797 = array{v?: int}
+ * @phpstan-type W798 = array{v?: int}
+ * @phpstan-type W799 = array{v?: int}
+ * @phpstan-type W800 = array{v?: int}
+ * @phpstan-type W801 = array{v?: int}
+ * @phpstan-type W802 = array{v?: int}
+ * @phpstan-type W803 = array{v?: int}
+ * @phpstan-type W804 = array{v?: int}
+ * @phpstan-type W805 = array{v?: int}
+ * @phpstan-type W806 = array{v?: int}
+ * @phpstan-type W807 = array{v?: int}
+ * @phpstan-type W808 = array{v?: int}
+ * @phpstan-type W809 = array{v?: int}
+ * @phpstan-type W810 = array{v?: int}
+ * @phpstan-type W811 = array{v?: int}
+ * @phpstan-type W812 = array{v?: int}
+ * @phpstan-type W813 = array{v?: int}
+ * @phpstan-type W814 = array{v?: int}
+ * @phpstan-type W815 = array{v?: int}
+ * @phpstan-type W816 = array{v?: int}
+ * @phpstan-type W817 = array{v?: int}
+ * @phpstan-type W818 = array{v?: int}
+ * @phpstan-type W819 = array{v?: int}
+ * @phpstan-type W820 = array{v?: int}
+ * @phpstan-type W821 = array{v?: int}
+ * @phpstan-type W822 = array{v?: int}
+ * @phpstan-type W823 = array{v?: int}
+ * @phpstan-type W824 = array{v?: int}
+ * @phpstan-type W825 = array{v?: int}
+ * @phpstan-type W826 = array{v?: int}
+ * @phpstan-type W827 = array{v?: int}
+ * @phpstan-type W828 = array{v?: int}
+ * @phpstan-type W829 = array{v?: int}
+ * @phpstan-type W830 = array{v?: int}
+ * @phpstan-type W831 = array{v?: int}
+ * @phpstan-type W832 = array{v?: int}
+ * @phpstan-type W833 = array{v?: int}
+ * @phpstan-type W834 = array{v?: int}
+ * @phpstan-type W835 = array{v?: int}
+ * @phpstan-type W836 = array{v?: int}
+ * @phpstan-type W837 = array{v?: int}
+ * @phpstan-type W838 = array{v?: int}
+ * @phpstan-type W839 = array{v?: int}
+ * @phpstan-type W840 = array{v?: int}
+ * @phpstan-type W841 = array{v?: int}
+ * @phpstan-type W842 = array{v?: int}
+ * @phpstan-type W843 = array{v?: int}
+ * @phpstan-type W844 = array{v?: int}
+ * @phpstan-type W845 = array{v?: int}
+ * @phpstan-type W846 = array{v?: int}
+ * @phpstan-type W847 = array{v?: int}
+ * @phpstan-type W848 = array{v?: int}
+ * @phpstan-type W849 = array{v?: int}
+ * @phpstan-type W850 = array{v?: int}
+ * @phpstan-type W851 = array{v?: int}
+ * @phpstan-type W852 = array{v?: int}
+ * @phpstan-type W853 = array{v?: int}
+ * @phpstan-type W854 = array{v?: int}
+ * @phpstan-type W855 = array{v?: int}
+ * @phpstan-type W856 = array{v?: int}
+ * @phpstan-type W857 = array{v?: int}
+ * @phpstan-type W858 = array{v?: int}
+ * @phpstan-type W859 = array{v?: int}
+ * @phpstan-type W860 = array{v?: int}
+ * @phpstan-type W861 = array{v?: int}
+ * @phpstan-type W862 = array{v?: int}
+ * @phpstan-type W863 = array{v?: int}
+ * @phpstan-type W864 = array{v?: int}
+ * @phpstan-type W865 = array{v?: int}
+ * @phpstan-type W866 = array{v?: int}
+ * @phpstan-type W867 = array{v?: int}
+ * @phpstan-type W868 = array{v?: int}
+ * @phpstan-type W869 = array{v?: int}
+ * @phpstan-type W870 = array{v?: int}
+ * @phpstan-type W871 = array{v?: int}
+ * @phpstan-type W872 = array{v?: int}
+ * @phpstan-type W873 = array{v?: int}
+ * @phpstan-type W874 = array{v?: int}
+ * @phpstan-type W875 = array{v?: int}
+ * @phpstan-type W876 = array{v?: int}
+ * @phpstan-type W877 = array{v?: int}
+ * @phpstan-type W878 = array{v?: int}
+ * @phpstan-type W879 = array{v?: int}
+ * @phpstan-type W880 = array{v?: int}
+ * @phpstan-type W881 = array{v?: int}
+ * @phpstan-type W882 = array{v?: int}
+ * @phpstan-type W883 = array{v?: int}
+ * @phpstan-type W884 = array{v?: int}
+ * @phpstan-type W885 = array{v?: int}
+ * @phpstan-type W886 = array{v?: int}
+ * @phpstan-type W887 = array{v?: int}
+ * @phpstan-type W888 = array{v?: int}
+ * @phpstan-type W889 = array{v?: int}
+ * @phpstan-type W890 = array{v?: int}
+ * @phpstan-type W891 = array{v?: int}
+ * @phpstan-type W892 = array{v?: int}
+ * @phpstan-type W893 = array{v?: int}
+ * @phpstan-type W894 = array{v?: int}
+ * @phpstan-type W895 = array{v?: int}
+ * @phpstan-type W896 = array{v?: int}
+ * @phpstan-type W897 = array{v?: int}
+ * @phpstan-type W898 = array{v?: int}
+ * @phpstan-type W899 = array{v?: int}
+ * @phpstan-type W900 = array{v?: int}
+ * @phpstan-type W901 = array{v?: int}
+ * @phpstan-type W902 = array{v?: int}
+ * @phpstan-type W903 = array{v?: int}
+ * @phpstan-type W904 = array{v?: int}
+ * @phpstan-type W905 = array{v?: int}
+ * @phpstan-type W906 = array{v?: int}
+ * @phpstan-type W907 = array{v?: int}
+ * @phpstan-type W908 = array{v?: int}
+ * @phpstan-type W909 = array{v?: int}
+ * @phpstan-type W910 = array{v?: int}
+ * @phpstan-type W911 = array{v?: int}
+ * @phpstan-type W912 = array{v?: int}
+ * @phpstan-type W913 = array{v?: int}
+ * @phpstan-type W914 = array{v?: int}
+ * @phpstan-type W915 = array{v?: int}
+ * @phpstan-type W916 = array{v?: int}
+ * @phpstan-type W917 = array{v?: int}
+ * @phpstan-type W918 = array{v?: int}
+ * @phpstan-type W919 = array{v?: int}
+ * @phpstan-type W920 = array{v?: int}
+ * @phpstan-type W921 = array{v?: int}
+ * @phpstan-type W922 = array{v?: int}
+ * @phpstan-type W923 = array{v?: int}
+ * @phpstan-type W924 = array{v?: int}
+ * @phpstan-type W925 = array{v?: int}
+ * @phpstan-type W926 = array{v?: int}
+ * @phpstan-type W927 = array{v?: int}
+ * @phpstan-type W928 = array{v?: int}
+ * @phpstan-type W929 = array{v?: int}
+ * @phpstan-type W930 = array{v?: int}
+ * @phpstan-type W931 = array{v?: int}
+ * @phpstan-type W932 = array{v?: int}
+ * @phpstan-type W933 = array{v?: int}
+ * @phpstan-type W934 = array{v?: int}
+ * @phpstan-type W935 = array{v?: int}
+ * @phpstan-type W936 = array{v?: int}
+ * @phpstan-type W937 = array{v?: int}
+ * @phpstan-type W938 = array{v?: int}
+ * @phpstan-type W939 = array{v?: int}
+ * @phpstan-type W940 = array{v?: int}
+ * @phpstan-type W941 = array{v?: int}
+ * @phpstan-type W942 = array{v?: int}
+ * @phpstan-type W943 = array{v?: int}
+ * @phpstan-type W944 = array{v?: int}
+ * @phpstan-type W945 = array{v?: int}
+ * @phpstan-type W946 = array{v?: int}
+ * @phpstan-type W947 = array{v?: int}
+ * @phpstan-type W948 = array{v?: int}
+ * @phpstan-type W949 = array{v?: int}
+ * @phpstan-type W950 = array{v?: int}
+ * @phpstan-type W951 = array{v?: int}
+ * @phpstan-type W952 = array{v?: int}
+ * @phpstan-type W953 = array{v?: int}
+ * @phpstan-type W954 = array{v?: int}
+ * @phpstan-type W955 = array{v?: int}
+ * @phpstan-type W956 = array{v?: int}
+ * @phpstan-type W957 = array{v?: int}
+ * @phpstan-type W958 = array{v?: int}
+ * @phpstan-type W959 = array{v?: int}
+ * @phpstan-type W960 = array{v?: int}
  * @phpstan-type Wide = array{
  *     w1?: W1,
  *     w2?: W2,
@@ -1408,6 +1668,266 @@ namespace PTGS\TypeBridge\Tests\Fixture\BoundOrderFixtures\Notes;
  *     w698?: W698,
  *     w699?: W699,
  *     w700?: W700,
+ *     w701?: W701,
+ *     w702?: W702,
+ *     w703?: W703,
+ *     w704?: W704,
+ *     w705?: W705,
+ *     w706?: W706,
+ *     w707?: W707,
+ *     w708?: W708,
+ *     w709?: W709,
+ *     w710?: W710,
+ *     w711?: W711,
+ *     w712?: W712,
+ *     w713?: W713,
+ *     w714?: W714,
+ *     w715?: W715,
+ *     w716?: W716,
+ *     w717?: W717,
+ *     w718?: W718,
+ *     w719?: W719,
+ *     w720?: W720,
+ *     w721?: W721,
+ *     w722?: W722,
+ *     w723?: W723,
+ *     w724?: W724,
+ *     w725?: W725,
+ *     w726?: W726,
+ *     w727?: W727,
+ *     w728?: W728,
+ *     w729?: W729,
+ *     w730?: W730,
+ *     w731?: W731,
+ *     w732?: W732,
+ *     w733?: W733,
+ *     w734?: W734,
+ *     w735?: W735,
+ *     w736?: W736,
+ *     w737?: W737,
+ *     w738?: W738,
+ *     w739?: W739,
+ *     w740?: W740,
+ *     w741?: W741,
+ *     w742?: W742,
+ *     w743?: W743,
+ *     w744?: W744,
+ *     w745?: W745,
+ *     w746?: W746,
+ *     w747?: W747,
+ *     w748?: W748,
+ *     w749?: W749,
+ *     w750?: W750,
+ *     w751?: W751,
+ *     w752?: W752,
+ *     w753?: W753,
+ *     w754?: W754,
+ *     w755?: W755,
+ *     w756?: W756,
+ *     w757?: W757,
+ *     w758?: W758,
+ *     w759?: W759,
+ *     w760?: W760,
+ *     w761?: W761,
+ *     w762?: W762,
+ *     w763?: W763,
+ *     w764?: W764,
+ *     w765?: W765,
+ *     w766?: W766,
+ *     w767?: W767,
+ *     w768?: W768,
+ *     w769?: W769,
+ *     w770?: W770,
+ *     w771?: W771,
+ *     w772?: W772,
+ *     w773?: W773,
+ *     w774?: W774,
+ *     w775?: W775,
+ *     w776?: W776,
+ *     w777?: W777,
+ *     w778?: W778,
+ *     w779?: W779,
+ *     w780?: W780,
+ *     w781?: W781,
+ *     w782?: W782,
+ *     w783?: W783,
+ *     w784?: W784,
+ *     w785?: W785,
+ *     w786?: W786,
+ *     w787?: W787,
+ *     w788?: W788,
+ *     w789?: W789,
+ *     w790?: W790,
+ *     w791?: W791,
+ *     w792?: W792,
+ *     w793?: W793,
+ *     w794?: W794,
+ *     w795?: W795,
+ *     w796?: W796,
+ *     w797?: W797,
+ *     w798?: W798,
+ *     w799?: W799,
+ *     w800?: W800,
+ *     w801?: W801,
+ *     w802?: W802,
+ *     w803?: W803,
+ *     w804?: W804,
+ *     w805?: W805,
+ *     w806?: W806,
+ *     w807?: W807,
+ *     w808?: W808,
+ *     w809?: W809,
+ *     w810?: W810,
+ *     w811?: W811,
+ *     w812?: W812,
+ *     w813?: W813,
+ *     w814?: W814,
+ *     w815?: W815,
+ *     w816?: W816,
+ *     w817?: W817,
+ *     w818?: W818,
+ *     w819?: W819,
+ *     w820?: W820,
+ *     w821?: W821,
+ *     w822?: W822,
+ *     w823?: W823,
+ *     w824?: W824,
+ *     w825?: W825,
+ *     w826?: W826,
+ *     w827?: W827,
+ *     w828?: W828,
+ *     w829?: W829,
+ *     w830?: W830,
+ *     w831?: W831,
+ *     w832?: W832,
+ *     w833?: W833,
+ *     w834?: W834,
+ *     w835?: W835,
+ *     w836?: W836,
+ *     w837?: W837,
+ *     w838?: W838,
+ *     w839?: W839,
+ *     w840?: W840,
+ *     w841?: W841,
+ *     w842?: W842,
+ *     w843?: W843,
+ *     w844?: W844,
+ *     w845?: W845,
+ *     w846?: W846,
+ *     w847?: W847,
+ *     w848?: W848,
+ *     w849?: W849,
+ *     w850?: W850,
+ *     w851?: W851,
+ *     w852?: W852,
+ *     w853?: W853,
+ *     w854?: W854,
+ *     w855?: W855,
+ *     w856?: W856,
+ *     w857?: W857,
+ *     w858?: W858,
+ *     w859?: W859,
+ *     w860?: W860,
+ *     w861?: W861,
+ *     w862?: W862,
+ *     w863?: W863,
+ *     w864?: W864,
+ *     w865?: W865,
+ *     w866?: W866,
+ *     w867?: W867,
+ *     w868?: W868,
+ *     w869?: W869,
+ *     w870?: W870,
+ *     w871?: W871,
+ *     w872?: W872,
+ *     w873?: W873,
+ *     w874?: W874,
+ *     w875?: W875,
+ *     w876?: W876,
+ *     w877?: W877,
+ *     w878?: W878,
+ *     w879?: W879,
+ *     w880?: W880,
+ *     w881?: W881,
+ *     w882?: W882,
+ *     w883?: W883,
+ *     w884?: W884,
+ *     w885?: W885,
+ *     w886?: W886,
+ *     w887?: W887,
+ *     w888?: W888,
+ *     w889?: W889,
+ *     w890?: W890,
+ *     w891?: W891,
+ *     w892?: W892,
+ *     w893?: W893,
+ *     w894?: W894,
+ *     w895?: W895,
+ *     w896?: W896,
+ *     w897?: W897,
+ *     w898?: W898,
+ *     w899?: W899,
+ *     w900?: W900,
+ *     w901?: W901,
+ *     w902?: W902,
+ *     w903?: W903,
+ *     w904?: W904,
+ *     w905?: W905,
+ *     w906?: W906,
+ *     w907?: W907,
+ *     w908?: W908,
+ *     w909?: W909,
+ *     w910?: W910,
+ *     w911?: W911,
+ *     w912?: W912,
+ *     w913?: W913,
+ *     w914?: W914,
+ *     w915?: W915,
+ *     w916?: W916,
+ *     w917?: W917,
+ *     w918?: W918,
+ *     w919?: W919,
+ *     w920?: W920,
+ *     w921?: W921,
+ *     w922?: W922,
+ *     w923?: W923,
+ *     w924?: W924,
+ *     w925?: W925,
+ *     w926?: W926,
+ *     w927?: W927,
+ *     w928?: W928,
+ *     w929?: W929,
+ *     w930?: W930,
+ *     w931?: W931,
+ *     w932?: W932,
+ *     w933?: W933,
+ *     w934?: W934,
+ *     w935?: W935,
+ *     w936?: W936,
+ *     w937?: W937,
+ *     w938?: W938,
+ *     w939?: W939,
+ *     w940?: W940,
+ *     w941?: W941,
+ *     w942?: W942,
+ *     w943?: W943,
+ *     w944?: W944,
+ *     w945?: W945,
+ *     w946?: W946,
+ *     w947?: W947,
+ *     w948?: W948,
+ *     w949?: W949,
+ *     w950?: W950,
+ *     w951?: W951,
+ *     w952?: W952,
+ *     w953?: W953,
+ *     w954?: W954,
+ *     w955?: W955,
+ *     w956?: W956,
+ *     w957?: W957,
+ *     w958?: W958,
+ *     w959?: W959,
+ *     w960?: W960,
  * }
  */
 final class WideShapes

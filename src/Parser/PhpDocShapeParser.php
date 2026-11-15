@@ -407,7 +407,7 @@ final class PhpDocShapeParser
         // Scalar types, under each spelling PHPStan reads, in any case: `integer`, `boolean` and
         // `double` too, and `NULL`.
         foreach (['string' => 'string', 'integer' => 'int', 'int' => 'int', 'float' => 'float', 'double' => 'float', 'boolean' => 'bool', 'bool' => 'bool', 'mixed' => 'mixed', 'numeric' => 'numeric', 'null' => 'null'] as $spelling => $scalar) {
-            if ($this->lookAheadKeyword($spelling) && !$this->isIdentChar($this->pos + \strlen($spelling))) {
+            if ($this->lookAhead($spelling) && !$this->continuesName($this->pos + \strlen($spelling))) {
                 $this->pos += \strlen($spelling);
 
                 return new ScalarType($scalar);
@@ -420,7 +420,7 @@ final class PhpDocShapeParser
         // arguments are read above, and an object shape, `object{…}`, is not read at all.
         foreach (['non-empty-array' => 'map', 'array' => 'map', 'non-empty-list' => 'list', 'list' => 'list', 'iterable' => 'map', 'object' => 'object'] as $keyword => $means) {
             $after = $this->pos + \strlen($keyword);
-            if ($this->lookAheadKeyword($keyword) && !$this->continuesName($after) && !\in_array(substr($this->input, $after, 1), ['<', '{'], true)) {
+            if ($this->lookAhead($keyword) && !$this->continuesName($after) && !\in_array(substr($this->input, $after, 1), ['<', '{'], true)) {
                 $this->pos += \strlen($keyword);
 
                 return match ($means) {
@@ -433,7 +433,7 @@ final class PhpDocShapeParser
 
         // Boolean literals
         foreach (['true' => true, 'false' => false] as $keyword => $value) {
-            if ($this->lookAhead($keyword) && !$this->isIdentChar($this->pos + \strlen($keyword))) {
+            if ($this->lookAhead($keyword) && !$this->continuesName($this->pos + \strlen($keyword))) {
                 $this->pos += \strlen($keyword);
 
                 return new LiteralType($value);
@@ -542,9 +542,13 @@ final class PhpDocShapeParser
      * Whether a keyword ending before $pos is really a longer name — `scalars`, or
      * `positive-int-ish` — rather than the keyword itself.
      */
+    /**
+     * Whether a name goes on at `$pos`: a character of one, a `-` of a keyword's, or a `\` of a
+     * namespace's — `Integer\Amount` is a class, its first segment no keyword.
+     */
     private function continuesName(int $pos): bool
     {
-        return $this->isIdentChar($pos) || ($pos < $this->len && '-' === $this->input[$pos]);
+        return $this->isIdentChar($pos) || ($pos < $this->len && \in_array($this->input[$pos], ['-', '\\'], true));
     }
 
     private function parseStringLiteral(): string
@@ -689,18 +693,13 @@ final class PhpDocShapeParser
         return ctype_alnum($ch) || '_' === $ch;
     }
 
+    /**
+     * Whether the text is next, a keyword's in any case: PHPStan reads `NULL`, `Boolean`,
+     * `Array<…>` and `FALSE` as it reads `null`, `boolean`, `array<…>` and `false`.
+     */
     private function lookAhead(string $str): bool
     {
-        return \substr($this->input, $this->pos, \strlen($str)) === $str;
-    }
-
-    /**
-     * Whether a keyword is next, in any case: PHPStan reads `NULL`, `Boolean` and `Array` as it
-     * reads `null`, `boolean` and `array`.
-     */
-    private function lookAheadKeyword(string $keyword): bool
-    {
-        return 0 === strncasecmp(substr($this->input, $this->pos, \strlen($keyword)), $keyword, \strlen($keyword));
+        return 0 === strncasecmp(substr($this->input, $this->pos, \strlen($str)), $str, \strlen($str));
     }
 
     private function expect(string $str): void

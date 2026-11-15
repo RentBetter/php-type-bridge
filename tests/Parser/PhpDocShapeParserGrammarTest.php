@@ -181,7 +181,7 @@ final class PhpDocShapeParserGrammarTest extends TestCase
     {
         $parser = new PhpDocShapeParser();
 
-        foreach (['Integer\\Amount', 'Object\\Dto', 'List\\Item', 'Numeric\\Money', 'string\\Format'] as $class) {
+        foreach (['Integer\\Amount', 'Object\\Dto', 'List\\Item', 'Numeric\\Money', 'string\\Format', 'False\\Flag'] as $class) {
             $type = $parser->parse($class);
             self::assertInstanceOf(NameRefType::class, $type, $class);
             self::assertSame($class, $type->class, $class);

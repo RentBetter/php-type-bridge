@@ -87,7 +87,7 @@ final class EndpointContractCollector
     /** The class whose contract is being read, which a read past the bound fails naming. */
     private string $readFor = '';
 
-    /** @var array<string, array{read: ParsedType, through: array<string, true>}> by source directory, where it is declared and how it is asked: an alias or a `_self` the contract being read has read, and the names it read through — kept for that contract alone, so whether one is read within the bound turns on it alone, not on what was read before it */
+    /** @var array<string, list<array{read: ParsedType, through: array<string, true>, cut: array<string, true>}>> by source directory, where it is declared and how it is asked: each read the contract being read has made of an alias or a `_self`, the names it read through and those it was cut short at — kept for that contract alone, so whether one is read within the bound turns on it alone, not on what was read before it */
     private array $readThrough = [];
 
     /** @var list<string> where each read under way was cut short: the name it named that was being read */
@@ -1044,14 +1044,14 @@ final class EndpointContractCollector
      * An alias or a class's `_self` read where it is declared, keyed by the name it is declared
      * under — which an import may give another: as written where it names one being read already,
      * itself at any remove included. What a read makes turns only on which of the names it reaches
-     * are being read, so it is kept, and read back wherever none it read through is: one that named
-     * only itself makes the same wherever it isn't being read, so a class naming itself is read once
-     * however many keys name it. One cut short where it named a read further out is not kept: read
-     * where that one isn't, it reads on.
+     * are being read: those it read through, and those further out it was cut short at. So it is
+     * kept, and read back wherever each it was cut short at is being read and none it read through
+     * is — a class naming itself read once however many keys name it, and classes naming one
+     * another once for each set of them being read where they are named, not once for every order
+     * of them.
      *
-     * Classes naming one another still unroll into every order of them, each cut short at a
-     * different one. Past a bound no real contract nears they fail the read: a name left unread
-     * would publish a tool saying less than its Endpoint — a key its alias lets be cleared, refused.
+     * Past a bound no real contract nears the read fails: a name left unread would publish a tool
+     * saying less than its Endpoint — a key its alias lets be cleared, refused.
      *
      * @param array{definition: string, class: string, file: string, name: string} $declared
      * @param array<string, string> $classFiles
@@ -1066,11 +1066,14 @@ final class EndpointContractCollector
             return $written;
         }
         $kept = $srcDir . "\0" . $key . "\0" . ($inQuery ? 'query' : 'body') . "\0" . ($nullAsked ? 'asked' : 'not');
-        $read = $this->readThrough[$kept] ?? null;
-        if (null !== $read && [] === array_intersect_key($read['through'], $reading)) {
-            $this->through += $read['through'] + [$key => true];
+        foreach ($this->readThrough[$kept] ?? [] as $read) {
+            if ([] === array_intersect_key($read['through'], $reading) && [] === array_diff_key($read['cut'], $reading)) {
+                $this->through += $read['through'] + [$key => true];
+                // Cut short where it was, the reads it is in are too.
+                array_push($this->cutAt, ...array_keys($read['cut']));
 
-            return $read['read'];
+                return $read['read'];
+            }
         }
         if (--$this->readsLeft < 0) {
             throw new UnreadableContract(\sprintf(
@@ -1095,9 +1098,7 @@ final class EndpointContractCollector
         // further out, that read is cut short too.
         $further = array_values(array_filter(\array_slice($this->cutAt, $cutAt), static fn (string $at): bool => $at !== $key));
         array_splice($this->cutAt, $cutAt, null, $further);
-        if ([] === $further) {
-            $this->readThrough[$kept] ??= ['read' => $read, 'through' => $this->through];
-        }
+        $this->readThrough[$kept][] = ['read' => $read, 'through' => $this->through, 'cut' => array_fill_keys($further, true)];
         $this->through = $outer + $this->through + [$key => true];
 
         return $read;

@@ -439,7 +439,7 @@ final class EndpointQueryTest extends TestCase
         // asked that first would map it into an object of every string method.
         $reports = $this->emit()['Reports'];
 
-        self::assertStringContainsString('export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | null | undefined', $reports);
+        self::assertStringContainsString('export type AsQuery<T> = T extends string | number | boolean | bigint | symbol | Date | null | undefined', $reports);
     }
 
     public function test_a_body_extending_a_shape_takes_the_keys_it_inherits_as_that_shape_declares_them(): void
