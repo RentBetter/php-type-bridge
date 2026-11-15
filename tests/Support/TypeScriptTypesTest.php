@@ -123,6 +123,10 @@ final class TypeScriptTypesTest extends TestCase
     public function test_the_names_a_type_uses_are_none_quoted_keyed_or_read_off_another(): void
     {
         self::assertSame(['Brand', 'Date', 'string', 'A'], TypeScriptTypes::namesIn("Brand<Date, \"Id\"> | { id: string; at?: Date } | A.B | 'x y'"));
+        // A conditional's branches are names; an index signature's key and a param's are not.
+        self::assertSame(['string', 'extends', 'Date', 'number'], TypeScriptTypes::namesIn('string extends string ? Date : number'));
+        self::assertSame(['string', 'Date'], TypeScriptTypes::namesIn('{ [key: string]: Date }'));
+        self::assertSame(['Date', 'void'], TypeScriptTypes::namesIn('(at: Date, readonly by?: Date) => void'));
     }
 
     public function test_a_types_json_schema_is_what_json_can_say_of_it(): void

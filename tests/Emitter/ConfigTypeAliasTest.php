@@ -86,6 +86,18 @@ final class ConfigTypeAliasTest extends TestCase
         self::assertStringContainsString('export type Date = string;', $output['Notes']);
     }
 
+    public function test_a_name_a_config_aliass_typescript_names_is_imported_under_another(): void
+    {
+        // Notes declares `Stamp = Date`, TypeScript's Date: Calendar's `Date`, imported, takes
+        // another name, as it would beside a type of Notes' own of that name.
+        $notes = (new TypeScriptEmitter(enumResolver: new EnumResolver(), domainMapper: new DomainMapper('/tmp/type-bridge-output'), typeAliases: ['Stamp' => 'Date']))
+            ->emit((new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasImportFixtures'))['Notes'];
+
+        self::assertStringContainsString("import type { Date as CalendarDate } from '../Calendar/genTypes';", $notes);
+        self::assertStringContainsString('export type Stamp = Date;', $notes);
+        self::assertStringContainsString('on: CalendarDate;', $notes);
+    }
+
     public function test_config_rejects_an_alias_that_is_not_an_identifier(): void
     {
         $this->expectException(RuntimeException::class);

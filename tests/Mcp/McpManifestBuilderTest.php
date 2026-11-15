@@ -911,6 +911,11 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame(['type' => 'string', 'enum' => ['en', 'fr']], $properties['locale'] ?? null);
         self::assertSame(['type' => 'string', 'enum' => ['a', 'b']], $properties['code'] ?? null);
         self::assertSame(['type' => 'integer', 'enum' => [1, 2]], $properties['level'] ?? null);
+        // A list of them, each.
+        $locales = new CollectedFormField(name: 'locales', formTypeClass: 'Symfony\\Component\\Form\\Extension\\Core\\Type\\CollectionType', required: false, mapped: true, compound: true, dataClass: null, entryTypeClass: TextType::class);
+        $listed = $this->toolWithBody('PUT', [$locales], $this->shape("array{locales: list<'en'|'fr'>}"))['inputSchema']['properties'];
+        self::assertSame(['type' => 'string', 'enum' => ['en', 'fr']], $listed['locales']['items'] ?? null);
+
         // Of two types, or read through a transformer, which the literals describe the result of:
         // the form's own guess.
         self::assertArrayNotHasKey('enum', $properties['mixed'] ?? []);

@@ -25,6 +25,8 @@ use PTGS\TypeBridge\Tests\Fixture\Discovered\AlphaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\BetaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitterContract;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Tally;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\TallyEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ShadowingEmitter\Ledger;
 use PTGS\TypeBridge\Tests\Fixture\ShadowingEmitter\RecordEmitter;
 
@@ -107,6 +109,22 @@ final class DiscoveredEmitterTest extends TestCase
         $this->expectExceptionMessage('TypeScript naming collision in domain "Ledgers": "Record" is both TypeScript\'s global Record');
 
         $emitter->emitDiscovered([Ledger::class]);
+    }
+
+    public function test_a_discovered_emitters_import_shadows_no_global_its_module_uses(): void
+    {
+        // TallyEmitter imports a Record into the module whose Totals uses `Record<…>`, which would be
+        // that import: it can't be renamed, the emitter's code naming it, so the module fails.
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([TallyEmitter::class]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Tallies": "Record" is both TypeScript\'s global Record');
+
+        $emitter->emitDiscovered([Tally::class]);
     }
 
     public function test_returns_empty_without_discovered_emitters(): void
