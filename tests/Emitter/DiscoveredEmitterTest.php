@@ -214,6 +214,7 @@ final class DiscoveredEmitterTest extends TestCase
         yield 'two imports of one name' => ['Shelves', ['export type Pair = [Book, Book];'], [['Library', 'Book'], ['Store', 'Book']], 'a discovered emitter imports "Book" from "Store", which a discovered emitter imports from "Library".'];
         yield 'a declaration of a name imported' => ['Shelves', ['export type Book = string;'], [['Library', 'Book']], 'a discovered emitter declares "Book", which a discovered emitter imports from "Library".'];
         yield 'a const enum the module has' => ['Journals', ['export const enum Entry { A }'], [], 'a discovered emitter declares "Entry", which the module declares as type'];
+        yield 'an unexported type the module has' => ['Journals', ["interface Draft {}\ntype Entry = Draft;"], [], 'a discovered emitter declares "Entry", which the module declares as type'];
     }
 
     /**

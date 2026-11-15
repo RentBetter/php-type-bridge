@@ -135,6 +135,8 @@ final class TypeScriptTypesTest extends TestCase
         self::assertSame(['Foo'], TypeScriptTypes::namesIn("{\n  key\n    : Foo }"), 'A key whose `:` is on the next line');
         self::assertSame(['Foo'], TypeScriptTypes::namesIn('{ get(): Foo }'), "A method's name");
         self::assertSame(['T', 'extends', 'X', 'Foo', 'Bar'], TypeScriptTypes::namesIn("{ a: T extends X ?\n  Foo :\n  Bar }"), 'A branch in an object');
+        self::assertSame(['X', 'Y', 'Z'], TypeScriptTypes::namesIn("{\n  f: (a: X) => Y\n  b: Z\n}"), "An arrow's `>` closes nothing");
+        self::assertSame(['X', 'Y'], TypeScriptTypes::namesIn('{ readonly a: X; readonly b?: Y }'), 'A readonly key');
     }
 
     public function test_a_types_json_schema_is_what_json_can_say_of_it(): void

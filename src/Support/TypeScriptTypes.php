@@ -249,12 +249,35 @@ final class TypeScriptTypes
     {
         // A template literal's holes are types; the rest of it, and every other quoted thing, text.
         $unquoted = preg_replace_callback('/([\'"`])(?:\\\\.|(?!\1).)*\1/s', static fn (array $quoted): string => '`' === $quoted[1] && preg_match_all('/\$\{([^}]*)\}/', $quoted[0], $holes) > 0 ? '(' . implode(') | (', $holes[1]) . ')' : "''", $type) ?? $type;
-        // A key opens an object, an index signature or a params list, or follows another's `,`, `;`
-        // or line, its `:` on the same line.
-        $unkeyed = preg_replace('/([{\[(,;\n]\s*)(?:readonly\s+)?[A-Za-z_$][\w$]*[ \t]*\??[ \t]*:/', '$1', $unquoted) ?? $unquoted;
-        preg_match_all('/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])/', $unkeyed, $names);
+        preg_match_all('/[A-Za-z_$][\w$]*|\S/', $unquoted, $tokens, \PREG_OFFSET_CAPTURE);
+        $tokens = $tokens[0];
+        $names = [];
+        $open = [];
+        $keyed = false;
+        foreach ($tokens as $at => [$token, $offset]) {
+            [$previous, $after] = isset($tokens[$at - 1]) ? [$tokens[$at - 1][0], $tokens[$at - 1][1] + \strlen($tokens[$at - 1][0])] : ['', 0];
+            if (\in_array($token, ['{', '(', '[', '<'], true)) {
+                $open[] = $token;
+            } elseif (\in_array($token, ['}', ')', ']'], true) || ('>' === $token && '=' !== $previous)) {
+                array_pop($open);
+            }
+            if (1 !== preg_match('/^[A-Za-z_$]/', $token) || '.' === $previous) {
+                continue;
+            }
+            // Where an object's key, an index signature's or a param stands: first in its brackets,
+            // or after a `,`, a `;` — or, in an object, a line ending its member — or a `readonly`.
+            $member = 1 === preg_match('/^[\w$\])}>\'"]/', $previous);
+            $keyed = ('readonly' === $previous && $keyed)
+                || \in_array($previous, ['{', '(', '[', ',', ';'], true)
+                || ('{' === end($open) && $member && str_contains(substr($unquoted, $after, $offset - $after), "\n"));
+            $next = $tokens[$at + 1][0] ?? '';
+            if ($keyed && ('readonly' === $token || ':' === $next || ('?' === $next && ':' === ($tokens[$at + 2][0] ?? '')) || ('{' === end($open) && \in_array($next, ['(', '<'], true)))) {
+                continue;
+            }
+            $names[] = $token;
+        }
 
-        return array_values(array_unique($names[0]));
+        return array_values(array_unique($names));
     }
 
     /**

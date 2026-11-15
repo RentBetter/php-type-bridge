@@ -468,7 +468,8 @@ final class PhpDocTypeHelper
             // and constant imports are skipped.
             $statement = '';
             for ($i++; $i < $count && ';' !== $tokens[$i]->text; $i++) {
-                $statement .= $tokens[$i]->text;
+                // A comment in it is no part of a name.
+                $statement .= $tokens[$i]->is([\T_COMMENT, \T_DOC_COMMENT]) ? ' ' : $tokens[$i]->text;
             }
             $statement = trim($statement);
             if (str_starts_with($statement, 'function ') || str_starts_with($statement, 'const ')) {
@@ -485,7 +486,8 @@ final class PhpDocTypeHelper
 
             foreach ($names as $name) {
                 $parts = preg_split('/\s+as\s+/i', trim($name));
-                if (false === $parts || '' === $parts[0]) {
+                // A function or a constant a group imports beside its classes is none.
+                if (false === $parts || '' === $parts[0] || 1 === preg_match('/^(?:function|const)\s/i', $parts[0])) {
                     continue;
                 }
                 $class = ltrim($prefix . trim($parts[0]), '\\');

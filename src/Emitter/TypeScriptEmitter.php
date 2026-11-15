@@ -576,11 +576,21 @@ final class TypeScriptEmitter
      */
     private function discoveredNames(string $domain, array $blocks, array $imports, ?array $emitted): array
     {
-        // What emit() wrote: each name it declares, and each it imports, by the name it is imported as.
-        $declared = self::declaredIn([...$emitted['blocks'] ?? [], ...('' === $domain ? array_values($this->rootBlocks) : [])]);
+        // What emit() wrote: each name it claims — a type, a response, an endpoint, a helper, declared
+        // or imported — but a project-wide alias it neither declares nor imports, as a module that
+        // never names one doesn't; and each it imports, by the name it is imported as. A block
+        // declaring an alias is keyed by its name.
+        $aliasesHere = [];
+        foreach ([...$emitted['blocks'] ?? [], ...('' === $domain ? array_values($this->rootBlocks) : [])] as $block) {
+            if (null !== $block->sortKey && isset($this->typeAliases[$block->sortKey])) {
+                $aliasesHere[$block->sortKey] = true;
+            }
+        }
         $taken = [];
-        foreach (array_keys($declared) as $name) {
-            $taken[$name] = 'the module declares as ' . ($this->claimedNames[$domain][$name] ?? $name);
+        foreach ($this->claimedNames[$domain] ?? [] as $name => $what) {
+            if (!isset($this->typeAliases[$name]) || isset($aliasesHere[$name])) {
+                $taken[$name] = 'the module declares as ' . $what;
+            }
         }
         $importedAs = [];
         foreach ($emitted['imports'] ?? [] as $from => $names) {
@@ -646,7 +656,9 @@ final class TypeScriptEmitter
     {
         $declared = [];
         foreach ($blocks as $block) {
-            preg_match_all('/\bexport\s+(?:declare\s+)?(?:interface|type|class|enum|const|function)\s+([A-Za-z_$][\w$]*)/', $block->code, $names);
+            // A statement's start, its modifiers, its keyword and the name it declares — exported or
+            // not, `export const enum X` and `export abstract class X` among them.
+            preg_match_all('/(?:^|[;{}])\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:const\s+enum|interface|type|class|enum|const|let|var|function\*?|namespace|module)\s+([A-Za-z_$][\w$]*)/m', $block->code, $names);
             $declared += array_fill_keys($names[1], true);
         }
 
