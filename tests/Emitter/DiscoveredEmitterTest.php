@@ -27,8 +27,10 @@ use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitterContract;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Diary;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\DiaryEmitter;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\StampEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Tally;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\TallyEmitter;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Ticket;
 use PTGS\TypeBridge\Tests\Fixture\ShadowingEmitter\Ledger;
 use PTGS\TypeBridge\Tests\Fixture\ShadowingEmitter\RecordEmitter;
 
@@ -142,6 +144,39 @@ final class DiscoveredEmitterTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": a discovered emitter imports "Date" from "Shared", which the module declares as type');
+
+        $emitter->emitDiscovered([Diary::class]);
+    }
+
+    public function test_a_discovered_emitters_import_the_module_has_already_is_no_collision(): void
+    {
+        // With a root module, Notes imports `Stamp` from it; so does StampEmitter: one import.
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output', new OutputStructure(rootModule: 'genTypes.ts')),
+            registry: EmitterRegistry::fromAttributeScan([StampEmitter::class]),
+            typeAliases: ['Stamp' => 'string'],
+        );
+        $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasShadowFixtures'));
+
+        $notes = $emitter->emitDiscovered([Ticket::class])['Notes'];
+        self::assertStringContainsString('export interface Stamped { at: Stamp; }', $notes);
+        self::assertSame(1, substr_count($notes, 'Stamp }') + substr_count($notes, 'Stamp, '));
+    }
+
+    public function test_a_discovered_emitters_import_takes_no_name_its_module_imports_from_another(): void
+    {
+        // Notes imports Calendar's `Date`; DiaryEmitter imports Shared's into it: two of one name.
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([DiaryEmitter::class]),
+            typeAliases: ['Stamp' => 'string'],
+        );
+        $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasImportFixtures'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": a discovered emitter imports "Date" from "Shared", which the module imports from "Calendar".');
 
         $emitter->emitDiscovered([Diary::class]);
     }

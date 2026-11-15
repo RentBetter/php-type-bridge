@@ -92,6 +92,15 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame(['type' => 'object'], $schema['properties']['meta'] ?? null);
     }
 
+    public function test_a_collections_entries_declared_as_literals_take_those_values(): void
+    {
+        // A CollectionType resizes on submit, which rewrites no entry: a TextType entry takes what
+        // is sent as it is, so `list<'en'|'fr'>` is a list of those.
+        $schema = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/LocaleListFixtures', new TypeBridgeConfig())['tools'][0]['inputSchema'];
+
+        self::assertSame(['type' => 'string', 'enum' => ['en', 'fr']], $schema['properties']['locales']['items'] ?? null);
+    }
+
     public function test_a_self_its_class_imports_is_its_shape(): void
     {
         // PostalData and RefData import their `_self` from Shapes: `postal`'s `street` may be left

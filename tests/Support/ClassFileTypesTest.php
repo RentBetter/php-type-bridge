@@ -23,6 +23,14 @@ final class ClassFileTypesTest extends TestCase
 {
     private const string SRC = __DIR__ . '/../Fixture/PhpStanOnlyImportedFixtures';
 
+    public function test_a_use_after_a_class_constant_is_still_an_import(): void
+    {
+        // `\stdClass::class` ahead of it names a class; it declares none.
+        $imports = (new ClassFileTypes())->classImports(__DIR__ . '/../Fixture/ClassConstImportFixtures/CodedView.php');
+
+        self::assertSame('PTGS\\TypeBridge\\Tests\\Fixture\\EnumTypedFixtures\\Notes\\ErrorCode', $imports['ErrorCode'] ?? null);
+    }
+
     public function test_an_import_of_an_alias_kept_for_php_stan_is_set_aside_with_why(): void
     {
         $classFiles = (new PhpFileClassLocator())->classesIn(self::SRC);
