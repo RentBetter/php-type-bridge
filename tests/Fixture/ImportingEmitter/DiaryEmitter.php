@@ -26,7 +26,7 @@ final class DiaryEmitter implements TypeEmitter
     {
         return new EmittedType(
             domain: 'Notes',
-            blocks: [new EmittedBlock(10, null, 'export interface Entry { on: Date; }', 'Entry')],
+            blocks: [new EmittedBlock(10, null, 'export interface Entry { on: Date; }', 'Entry', ['Entry'])],
             imports: [new EmitImport('Shared', 'Date')],
         );
     }

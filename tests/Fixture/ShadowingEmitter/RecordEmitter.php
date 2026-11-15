@@ -26,8 +26,8 @@ final class RecordEmitter implements TypeEmitter
         return new EmittedType(
             domain: 'Ledgers',
             blocks: [
-                new EmittedBlock(10, null, 'export interface Record { id: string; }', 'Record'),
-                new EmittedBlock(10, null, 'export type Totals = Record<string, number>;', 'Totals'),
+                new EmittedBlock(10, null, '/** A row. */ export interface Record { id: string; }', 'Record', ['Record']),
+                new EmittedBlock(10, null, 'export type Totals = Record<string, number>;', 'Totals', ['Totals']),
             ],
         );
     }

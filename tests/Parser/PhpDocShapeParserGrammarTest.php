@@ -13,6 +13,7 @@ use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
+use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
@@ -149,6 +150,21 @@ final class PhpDocShapeParserGrammarTest extends TestCase
             self::assertSame($scalar, $type->type, $spelling);
         }
         self::assertInstanceOf(NameRefType::class, $parser->parse('integers'));
+    }
+
+    public function test_a_keyword_is_one_in_any_case_as_phpstan_reads_it(): void
+    {
+        $parser = new PhpDocShapeParser();
+
+        foreach (['NULL' => 'null', 'Boolean' => 'bool', 'INTEGER' => 'int', 'String' => 'string', 'Double' => 'float'] as $spelling => $scalar) {
+            $type = $parser->parse($spelling);
+            self::assertInstanceOf(ScalarType::class, $type, $spelling);
+            self::assertSame($scalar, $type->type, $spelling);
+        }
+        self::assertInstanceOf(MapType::class, $parser->parse('Array'));
+        self::assertInstanceOf(ListType::class, $parser->parse('List'));
+        $union = $parser->parse('string|NULL');
+        self::assertTrue(ShapeField::admitsNull($union));
     }
 
     public function test_a_longer_name_that_starts_with_a_keyword_is_still_a_name(): void

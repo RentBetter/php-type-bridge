@@ -26,7 +26,7 @@ final class JournalEmitter implements TypeEmitter
     {
         return new EmittedType(
             domain: 'Journals',
-            blocks: [new EmittedBlock(10, null, 'export interface Page { on: Date; }', 'Page')],
+            blocks: [new EmittedBlock(10, null, 'export interface Page { on: Date; }', 'Page', ['Page'])],
             imports: [new EmitImport('Shared', 'Date')],
         );
     }

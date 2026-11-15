@@ -19,7 +19,7 @@ final class ScriptedEmitter implements TypeEmitter
 {
     public static string $domain = '';
 
-    /** @var list<string> */
+    /** @var array<string, list<string>> each block's code, and the names it states it declares */
     public static array $code = [];
 
     /** @var list<array{string, string}> each import's module and name */
@@ -34,7 +34,7 @@ final class ScriptedEmitter implements TypeEmitter
     {
         return new EmittedType(
             domain: self::$domain,
-            blocks: array_map(static fn (string $code): EmittedBlock => new EmittedBlock(10, null, $code, $code), self::$code),
+            blocks: array_map(static fn (string $code, array $declares): EmittedBlock => new EmittedBlock(10, null, $code, $code, $declares), array_keys(self::$code), self::$code),
             imports: array_map(static fn (array $import): EmitImport => new EmitImport($import[0], $import[1]), self::$imports),
         );
     }

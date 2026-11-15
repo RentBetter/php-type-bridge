@@ -26,7 +26,7 @@ final class TallyEmitter implements TypeEmitter
     {
         return new EmittedType(
             domain: 'Tallies',
-            blocks: [new EmittedBlock(10, null, 'export type Totals = Record<string, number>;', 'Totals')],
+            blocks: [new EmittedBlock(10, null, 'export type Totals = Record<string, number>;', 'Totals', ['Totals'])],
             imports: [new EmitImport('Shared', 'Record')],
         );
     }

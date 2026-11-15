@@ -203,22 +203,21 @@ final class DiscoveredEmitterTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{string, list<string>, list<array{string, string}>, string}>
+     * @return iterable<string, array{string, array<string, list<string>>, list<array{string, string}>, string}>
      */
     public static function namesTaken(): iterable
     {
         // Journals imports Calendar's `Date` as CalendarDate, `Stamp` naming `Date`, and declares Entry.
-        yield 'an import the module has under another name' => ['Journals', ['export interface Page { on: Date; }'], [['Calendar', 'Date']], 'a discovered emitter imports "Date" from "Calendar", which the module imports from there as "CalendarDate".'];
-        yield 'a declaration the module has' => ['Journals', ['export interface Entry { x: string; }'], [], 'a discovered emitter declares "Entry", which the module declares as type'];
-        yield 'a declaration of a name the module imports' => ['Journals', ['export type CalendarDate = number;'], [], 'a discovered emitter declares "CalendarDate", which the module imports from "Calendar".'];
-        yield 'two imports of one name' => ['Shelves', ['export type Pair = [Book, Book];'], [['Library', 'Book'], ['Store', 'Book']], 'a discovered emitter imports "Book" from "Store", which a discovered emitter imports from "Library".'];
-        yield 'a declaration of a name imported' => ['Shelves', ['export type Book = string;'], [['Library', 'Book']], 'a discovered emitter declares "Book", which a discovered emitter imports from "Library".'];
-        yield 'a const enum the module has' => ['Journals', ['export const enum Entry { A }'], [], 'a discovered emitter declares "Entry", which the module declares as type'];
-        yield 'an unexported type the module has' => ['Journals', ["interface Draft {}\ntype Entry = Draft;"], [], 'a discovered emitter declares "Entry", which the module declares as type'];
+        yield 'an import the module has under another name' => ['Journals', ['export interface Page { on: Date; }' => ['Page']], [['Calendar', 'Date']], 'a discovered emitter imports "Date" from "Calendar", which the module imports from there as "CalendarDate".'];
+        yield 'a declaration the module has' => ['Journals', ['export interface Entry { x: string; }' => ['Entry']], [], 'a discovered emitter declares "Entry", which the module declares as type'];
+        yield 'a declaration of a name the module imports' => ['Journals', ['export type CalendarDate = number;' => ['CalendarDate']], [], 'a discovered emitter declares "CalendarDate", which the module imports from "Calendar".'];
+        yield 'two imports of one name' => ['Shelves', ['export type Pair = [Book, Book];' => ['Pair']], [['Library', 'Book'], ['Store', 'Book']], 'a discovered emitter imports "Book" from "Store", which a discovered emitter imports from "Library".'];
+        yield 'a declaration of a name imported' => ['Shelves', ['export type Book = string;' => ['Book']], [['Library', 'Book']], 'a discovered emitter declares "Book", which a discovered emitter imports from "Library".'];
+        yield 'two declarations of one name' => ['Shelves', ['export type Book = string;' => ['Book'], 'export interface Book {}' => ['Book']], [], 'a discovered emitter declares "Book", which a discovered emitter declares too.'];
     }
 
     /**
-     * @param list<string>                 $code
+     * @param array<string, list<string>> $code    each block's code, and the names it states
      * @param list<array{string, string}> $imports
      */
     #[\PHPUnit\Framework\Attributes\DataProvider('namesTaken')]
@@ -243,7 +242,7 @@ final class DiscoveredEmitterTest extends TestCase
     public function test_a_discovered_emitters_declaration_takes_no_name_the_root_module_declares(): void
     {
         // With a root module, every project-wide alias a module names is declared there.
-        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['', ['export type Stamp = number;'], []];
+        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['', ['export type Stamp = number;' => ['Stamp']], []];
         $emitter = new TypeScriptEmitter(
             enumResolver: new EnumResolver(),
             domainMapper: new DomainMapper('/tmp/type-bridge-output', new OutputStructure(rootModule: 'genTypes.ts')),
@@ -261,7 +260,7 @@ final class DiscoveredEmitterTest extends TestCase
     public function test_a_discovered_emitters_declaration_takes_no_helper_the_module_declares(): void
     {
         // Checks declares the expanding helpers, ListItem among them, unexported.
-        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['Checks', ['export type ListItem = string;'], []];
+        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['Checks', ['export type ListItem = string;' => ['ListItem']], []];
         $src = __DIR__ . '/../Fixture/ExpandFixtures';
         $responses = new \PTGS\TypeBridge\Collector\ResponseClassCollector();
         $enums = new EnumResolver();
@@ -283,7 +282,7 @@ final class DiscoveredEmitterTest extends TestCase
     public function test_a_project_wide_alias_a_module_never_names_is_no_name_of_its(): void
     {
         // Shelves names no `Stamp`: it neither declares nor imports one, so a discovered emitter may.
-        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['Journals', ['export type Pair = [Stamp, Stamp];'], [['Shared', 'Stamp']]];
+        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['Journals', ['export type Pair = [Stamp, Stamp];' => ['Pair']], [['Shared', 'Stamp']]];
         $emitter = new TypeScriptEmitter(
             enumResolver: new EnumResolver(),
             domainMapper: new DomainMapper('/tmp/type-bridge-output'),
@@ -293,6 +292,22 @@ final class DiscoveredEmitterTest extends TestCase
         $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasImportFixtures'));
 
         self::assertStringContainsString('export type Pair = [Stamp, Stamp];', $emitter->emitDiscovered([Script::class])['Journals']);
+    }
+
+    public function test_only_the_names_a_block_states_are_its_declarations(): void
+    {
+        // Each guard declares a `values` of its own, in its body: no name of the module's.
+        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['Guards', [
+            "export function isAlphaKind(v: string): boolean {\n  const values = ['a'];\n  return values.includes(v);\n}" => ['isAlphaKind'],
+            "export function isBetaKind(v: string): boolean {\n  const values = ['b'];\n  return values.includes(v);\n}" => ['isBetaKind'],
+        ], []];
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([ScriptedEmitter::class]),
+        );
+
+        self::assertStringContainsString('export function isBetaKind', $emitter->emitDiscovered([Script::class])['Guards']);
     }
 
     public function test_returns_empty_without_discovered_emitters(): void

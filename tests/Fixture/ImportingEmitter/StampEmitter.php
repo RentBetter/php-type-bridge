@@ -26,7 +26,7 @@ final class StampEmitter implements TypeEmitter
     {
         return new EmittedType(
             domain: 'Notes',
-            blocks: [new EmittedBlock(10, null, 'export interface Stamped { at: Stamp; }', 'Stamped')],
+            blocks: [new EmittedBlock(10, null, 'export interface Stamped { at: Stamp; }', 'Stamped', ['Stamped'])],
             imports: [new EmitImport('', 'Stamp')],
         );
     }
