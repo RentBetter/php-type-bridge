@@ -8,6 +8,7 @@ use LogicException;
 use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\McpTool;
+use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedEndpointContract;
 use PTGS\TypeBridge\Model\CollectedEndpointRequest;
@@ -16,6 +17,7 @@ use PTGS\TypeBridge\Model\CollectedInputReference;
 use PTGS\TypeBridge\Model\CollectedMcpTool;
 use PTGS\TypeBridge\Model\CollectedPathParam;
 use PTGS\TypeBridge\Model\ImportedType;
+use PTGS\TypeBridge\Parser\ClassConstantType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\MapType;
@@ -119,6 +121,8 @@ final class EndpointContractCollector
      *        typed with one that admits null takes null, as one its file declares does
      * @param string $routingEnv the env the application is deployed in, where no route resolver says:
      *        a tool whose #[Route]s are confined to another is served nowhere it is deployed
+     * @param EmitterRegistry|null $emitters the project's emitters: an enum one publishes a type for
+     *        is that type, as its TypeScript reads it, not its values
      */
     public function __construct(
         ?PhpFileClassLocator $classLocator = null,
@@ -135,6 +139,7 @@ final class EndpointContractCollector
         ?ClassFileTypes $files = null,
         private readonly array $typeAliases = [],
         string $routingEnv = 'prod',
+        private readonly ?EmitterRegistry $emitters = null,
     ) {
         $this->files = ClassFileTypes::sharedBy($files, $docHelper, $domainGuesser, $classLocator);
         $this->domainGuesser = $this->files->domainGuesser;
@@ -926,6 +931,8 @@ final class EndpointContractCollector
             $type instanceof IntersectionType => self::intersection($type, $read($type->base), $read($type->extra)),
             // The enum the file names, spelt in full, so a reader elsewhere can ask for its values.
             $type instanceof ValueOfType => new ValueOfType($this->docHelper->resolveClassName($type->enumClass, $class, $this->files->classImports($file)) ?? $type->enumClass),
+            // A class's constants, as the TypeScript reads them: their values.
+            $type instanceof ClassConstantType => $this->docHelper->classConstantValues($type, $class, $this->files->classImports($file)),
             default => $type,
         };
     }
@@ -958,8 +965,9 @@ final class EndpointContractCollector
     /**
      * A key typed with a class, as the class is sent and its TypeScript names it: its `_self`, read
      * where it is declared, as an alias is — an enum's too, which declaring one sends it as that
-     * shape; else an enum's values, whatever its value union is named (#[ValueOfName]). As written
-     * where the class declares none, or names itself at any remove.
+     * shape; else an enum's values, whatever its value union is named (#[ValueOfName]), but for one
+     * a project's emitter publishes a type for. As written where the class declares none, or one an
+     * emitter publishes, or names itself at any remove.
      *
      * @param array<string, string> $classFiles
      * @param array<string, true>   $reading
@@ -967,11 +975,19 @@ final class EndpointContractCollector
     private function readClass(NameRefType $type, string $class, string $srcDir, array $classFiles, array $reading, bool $inQuery, bool $nullAsked): ParsedType
     {
         $declared = $this->selfOf($class, $srcDir, $classFiles);
-        if (null === $declared && PhpFileClassLocator::loadsEnum($class)) {
+        if (null === $declared && PhpFileClassLocator::loadsEnum($class) && !$this->emitterPublishes($class)) {
             return new ValueOfType($class);
         }
 
         return null === $declared ? $type : $this->readDeclared($type, $declared, $srcDir, $classFiles, $reading, $inQuery, $nullAsked);
+    }
+
+    /**
+     * Whether a project's emitter publishes a type for the class, which its TypeScript reads it as.
+     */
+    private function emitterPublishes(string $class): bool
+    {
+        return null !== $this->emitters && class_exists($class) && null !== $this->emitters->typeSymbolEmitterFor(new ReflectionClass($class));
     }
 
     /**

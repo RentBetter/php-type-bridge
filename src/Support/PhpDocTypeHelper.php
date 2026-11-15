@@ -544,6 +544,17 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * The literal values of the constants a `Class::PATTERN` written in the owner class's file names
+     * ({@see self::resolveClassConstant()}): how a tool reads one, as the TypeScript does.
+     *
+     * @param array<string, string> $classImports the file's `use` statements, alias => class
+     */
+    public function classConstantValues(ClassConstantType $type, string $ownerClass, array $classImports): ParsedType
+    {
+        return $this->resolveClassConstant($type, $ownerClass, $classImports, $ownerClass);
+    }
+
+    /**
      * The literal values of the constants a `Class::PATTERN` names, as one literal or a union of
      * them, read as PHPStan reads them. `value-of<…>` takes what PHPStan's own value-of takes of
      * them all together: the backing values when every one is an enum case, otherwise the

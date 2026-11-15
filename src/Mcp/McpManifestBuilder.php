@@ -657,6 +657,8 @@ final class McpManifestBuilder
         }
 
         return match (true) {
+            // A null is a value JSON carries; a query string carries none.
+            ScalarType::isNull($type) => $json ? ['type' => 'null'] : null,
             $type instanceof ShapeType => $this->shapeSchema($type, $json),
             $type instanceof UnionType => $this->unionSchema($type, $json),
             $type instanceof LiteralType => ['enum' => [$type->value]],
@@ -733,13 +735,17 @@ final class McpManifestBuilder
             }
         }
 
-        if ([] !== $members && array_all($union->types, static fn (ParsedType $member): bool => $member instanceof LiteralType || ScalarType::isNull($member))) {
+        // Nothing but nulls is a null, as one alone is.
+        if ([] === $members) {
+            return $this->typeSchema(new ScalarType('null'), $json);
+        }
+        if (array_all($union->types, static fn (ParsedType $member): bool => $member instanceof LiteralType || ScalarType::isNull($member))) {
             $schema = ['enum' => $values];
         } else {
             $schema = 1 === \count($members) ? $members[0] : ['anyOf' => $members];
         }
 
-        return $json && $null && [] !== $members ? self::withNull($schema) : $schema;
+        return $json && $null ? self::withNull($schema) : $schema;
     }
 
     /**

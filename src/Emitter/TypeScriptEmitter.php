@@ -384,18 +384,18 @@ final class TypeScriptEmitter
                         $imports[$import->targetDomain][] = $import->canonicalName;
                     }
                 }
-                $output[$domain] = $this->assembler->assemble(
+                $code = $this->assembler->assemble(
                     $this->renderImportLines($domain, $imports, $emitted['foreignAliases']),
                     [...$emitted['blocks'], ...$blocksByDomain[$domain]],
                 );
-
-                continue;
+            } else {
+                $code = $this->assembler->assemble(
+                    $this->renderEmitterImports($domain, $importsByDomain[$domain] ?? []),
+                    $blocksByDomain[$domain],
+                );
             }
-
-            $output[$domain] = $this->assembler->assemble(
-                $this->renderEmitterImports($domain, $importsByDomain[$domain] ?? []),
-                $blocksByDomain[$domain],
-            );
+            // What a discovered emitter declares shadows no global the module uses, as emit()'s own don't.
+            $output[$domain] = $this->unshadowed($domain, $code, self::declaredIn($blocksByDomain[$domain]));
         }
 
         return $output;
@@ -554,14 +554,36 @@ final class TypeScriptEmitter
     }
 
     /**
+     * The names blocks declare: each `export interface`, `type`, `class`, `enum`, `const` or
+     * `function` — what a discovered emitter writes, which no symbol map holds.
+     *
+     * @param list<EmittedBlock> $blocks
+     *
+     * @return array<string, true>
+     */
+    private static function declaredIn(array $blocks): array
+    {
+        $declared = [];
+        foreach ($blocks as $block) {
+            preg_match_all('/\bexport\s+(?:declare\s+)?(?:interface|type|class|enum|const|function)\s+([A-Za-z_$][\w$]*)/', $block->code, $names);
+            $declared += array_fill_keys($names[1], true);
+        }
+
+        return $declared;
+    }
+
+    /**
      * The module's code, where no type it declares shadows a global type of TypeScript's its code
      * uses — `Record<string, V>` beside an `interface Record` reads the module's, and fails. One it
      * imports is imported under another name ({@see self::computeForeignAliases()}).
+     *
+     * @param array<string, true> $discovered what a discovered emitter's blocks declare in it, beside
+     *                                        the names emit() claimed
      */
-    private function unshadowed(string $domain, string $code): string
+    private function unshadowed(string $domain, string $code, array $discovered = []): string
     {
         foreach (self::TYPESCRIPT_GLOBALS as $global) {
-            $declared = $this->claimedNames[$domain][$global] ?? null;
+            $declared = $this->claimedNames[$domain][$global] ?? (isset($discovered[$global]) ? 'a discovered emitter\'s ' . $global : null);
             if (null !== $declared && 1 === preg_match('/\\b' . $global . '</', $code)) {
                 throw new RuntimeException(\sprintf(
                     'TypeScript naming collision in domain "%s": "%s" is both TypeScript\'s global %s, which the module\'s code uses, and %s.',

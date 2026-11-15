@@ -911,6 +911,9 @@ final class McpManifestBuilderTest extends TestCase
         $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'] ?? [];
         self::assertSame(['type' => 'null'], $properties['cleared'] ?? null);
         self::assertSame(['type' => 'null'], $properties['twice'] ?? null);
+
+        // A query string carries no null: a key that is only one can't be said there.
+        self::assertSame(['type' => 'object'], $this->toolTaking([$spec], new ShapeType([]))['inputSchema']['properties']['spec'] ?? null);
     }
 
     public function testANullableMapTakesNullBesideEither(): void

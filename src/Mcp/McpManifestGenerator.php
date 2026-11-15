@@ -7,6 +7,7 @@ namespace PTGS\TypeBridge\Mcp;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
+use PTGS\TypeBridge\Emitter\EmitterRegistry;
 use PTGS\TypeBridge\Support\ClassFileTypes;
 
 /**
@@ -37,6 +38,8 @@ final class McpManifestGenerator
             files: $files,
             typeAliases: $config->typeAliases,
             routingEnv: $config->routingEnv,
+            // The project's emitters, as `typebridge:generate` finds them: what an enum is sent as.
+            emitters: EmitterRegistry::fromAttributeScan(array_keys($files->classesIn($sourceDir))),
         );
         // A tool reads of a response only what it answers with, never what it sends.
         $contracts = $collector->collect($sourceDir, (new ResponseClassCollector(files: $files, typeAliases: $config->typeAliases))->statusIndex($sourceDir));
