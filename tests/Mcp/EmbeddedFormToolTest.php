@@ -82,6 +82,16 @@ final class EmbeddedFormToolTest extends TestCase
         self::assertSame(['lid'], $schema['properties']['bags']['items']['required'] ?? null);
     }
 
+    public function test_an_enum_its_projects_emitter_publishes_a_type_for_is_no_values_of_its(): void
+    {
+        // TaskStatus is backed, but its project's emitter publishes `{ id: string }` for it, which
+        // the Endpoint types `status` as: the tool can't say that, so `meta` is an object, not one
+        // whose `status` takes the enum's values.
+        $schema = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/EmitterEnumToolFixtures', new TypeBridgeConfig())['tools'][0]['inputSchema'];
+
+        self::assertSame(['type' => 'object'], $schema['properties']['meta'] ?? null);
+    }
+
     public function test_a_self_its_class_imports_is_its_shape(): void
     {
         // PostalData and RefData import their `_self` from Shapes: `postal`'s `street` may be left
@@ -198,6 +208,10 @@ final class EmbeddedFormToolTest extends TestCase
                 // Project-wide aliases as their TypeScript says: a nullable string, two literals.
                 'owner' => ['type' => ['string', 'null']],
                 'lang' => ['enum' => ['en', 'fr']],
+                // A class's constants, as PHPStan reads them: their values, which key a map as
+                // literals do.
+                'locale' => ['enum' => ['en', 'fr']],
+                'translations' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
             ],
             'required' => ['status', 'id'],
         ], $this->schema()['properties']['ref'] ?? null);

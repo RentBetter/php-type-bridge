@@ -901,6 +901,18 @@ final class McpManifestBuilderTest extends TestCase
         self::assertSame($either, $unreadProperties['byKind'] ?? null);
     }
 
+    public function testANullAndAUnionOfNullsAreNull(): void
+    {
+        $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: new ShapeType([
+            new ShapeField('cleared', new ScalarType('null'), optional: true),
+            new ShapeField('twice', new UnionType([new ScalarType('null'), new ScalarType('null')]), optional: true),
+        ]));
+
+        $properties = $this->toolWithBody('PUT', [$spec], new ShapeType([]))['inputSchema']['properties']['spec']['properties'] ?? [];
+        self::assertSame(['type' => 'null'], $properties['cleared'] ?? null);
+        self::assertSame(['type' => 'null'], $properties['twice'] ?? null);
+    }
+
     public function testANullableMapTakesNullBesideEither(): void
     {
         $spec = new CollectedFormField(name: 'spec', formTypeClass: 'App\\SpecType', required: false, mapped: true, compound: true, dataClass: 'App\\Spec', contract: $this->shape('array{tags: array<array-key, string>|null}'));

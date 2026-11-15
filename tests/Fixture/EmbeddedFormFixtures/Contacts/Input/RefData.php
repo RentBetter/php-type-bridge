@@ -20,10 +20,15 @@ use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactTier
  *     tier?: ContactTier,
  *     owner?: MaybeUuid,
  *     lang?: Lang,
+ *     locale?: self::LOCALE_*,
+ *     translations?: array<self::LOCALE_*, string>,
  * }
  */
 final class RefData
 {
+    public const LOCALE_EN = 'en';
+    public const LOCALE_FR = 'fr';
+
     public ?string $status = null;
 
     public ?string $id = null;

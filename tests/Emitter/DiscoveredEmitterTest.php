@@ -25,6 +25,8 @@ use PTGS\TypeBridge\Tests\Fixture\Discovered\AlphaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\BetaStatus;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitterContract;
+use PTGS\TypeBridge\Tests\Fixture\ShadowingEmitter\Ledger;
+use PTGS\TypeBridge\Tests\Fixture\ShadowingEmitter\RecordEmitter;
 
 final class DiscoveredEmitterTest extends TestCase
 {
@@ -89,6 +91,22 @@ final class DiscoveredEmitterTest extends TestCase
         $ids = new EnumIdSymbolResolver(new EnumResolver(), $registry, $rootSources);
         self::assertEquals(new EmitImport('', 'AlphaStatusId'), $ids->resolve(AlphaStatus::class));
         self::assertEquals(new EmitImport('Marked', 'BetaStatusId'), $ids->resolve(BetaStatus::class));
+    }
+
+    public function test_a_discovered_emitters_declaration_shadows_no_global_its_module_uses(): void
+    {
+        // RecordEmitter declares an interface Record in the module whose Totals uses `Record<…>`,
+        // which would be that interface: the module fails, as one of emit()'s own would.
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([RecordEmitter::class]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Ledgers": "Record" is both TypeScript\'s global Record');
+
+        $emitter->emitDiscovered([Ledger::class]);
     }
 
     public function test_returns_empty_without_discovered_emitters(): void
