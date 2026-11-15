@@ -144,7 +144,8 @@ final class AliasedMapKeys
             // A key no name is in was keyed as it was built; one a name is in, as what it stands for:
             // any key where that is one no array has, or every one an array has.
             $keyedAs = MapType::keyOf($this->asKeys($this->standsFor($keyed[0], $imports, $domain, [])));
-            if ($keyedAs instanceof ScalarType && 'array-key' === $keyedAs->type) {
+            $anyKey = static fn (ParsedType $key): bool => $key instanceof ScalarType && 'array-key' === $key->type;
+            if ($anyKey($keyedAs) && !$anyKey($keyed[0])) {
                 $keyed[0] = new ScalarType('array-key');
             }
         }

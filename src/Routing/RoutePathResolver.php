@@ -87,13 +87,14 @@ final class RoutePathResolver
      */
     public static function routeIn(array $routes, string $className, string $methodName): ?Route
     {
-        // Symfony keys an invokable controller's route by the bare class name, so that key
-        // answers for __invoke and nothing else — a constructor or helper on the same class
-        // has no route, and must not inherit one.
+        // Symfony keys an invokable controller's #[Route] by the bare class name, so that key
+        // answers for __invoke and nothing else — a constructor or helper on the same class has no
+        // route, and must not inherit one. Routing config may key one `Class::__invoke` beside it:
+        // both serve it.
         $served = '__invoke' === $methodName
-            ? $routes[$className . '::__invoke'] ?? $routes[$className] ?? null
-            : $routes[$className . '::' . $methodName] ?? null;
-        if (null === $served) {
+            ? [...$routes[$className . '::__invoke'] ?? [], ...$routes[$className] ?? []]
+            : $routes[$className . '::' . $methodName] ?? [];
+        if ([] === $served) {
             return null;
         }
 

@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Emitter;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
+use PTGS\TypeBridge\Config\OutputStructure;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
@@ -72,6 +73,17 @@ final class ConfigTypeAliasTest extends TestCase
 
         (new TypeScriptEmitter(enumResolver: new EnumResolver(), domainMapper: new DomainMapper('/tmp/type-bridge-output'), typeAliases: ['Stamp' => 'Date']))
             ->emit((new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasShadowFixtures'));
+    }
+
+    public function test_a_config_alias_declared_in_the_root_module_means_its_names_there(): void
+    {
+        // Notes imports `Stamp` from the root module, where it is declared: its `Date` is
+        // TypeScript's there, whatever Notes declares.
+        $output = (new TypeScriptEmitter(enumResolver: new EnumResolver(), domainMapper: new DomainMapper('/tmp/type-bridge-output', new OutputStructure(rootModule: 'genTypes.ts')), typeAliases: ['Stamp' => 'Date']))
+            ->emit((new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasShadowFixtures'));
+
+        self::assertStringContainsString('export type Stamp = Date;', $output['']);
+        self::assertStringContainsString('export type Date = string;', $output['Notes']);
     }
 
     public function test_config_rejects_an_alias_that_is_not_an_identifier(): void

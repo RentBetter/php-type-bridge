@@ -98,6 +98,9 @@ final class EndpointContractCollector
     /** @var array<string, array{definition: string, class: string, file: string, name: string}|null> by source directory and class: where its `_self` is declared */
     private array $selves = [];
 
+    /** @var array<string, bool> by class: whether a project's emitter publishes a type for it ({@see self::emitterPublishes()}) */
+    private array $published = [];
+
     /**
      * @param array<string, string> $requirementTypes project requirement-regex => TS type,
      *        merged over {@see RequirementType::defaults()}
@@ -987,7 +990,7 @@ final class EndpointContractCollector
      */
     private function emitterPublishes(string $class): bool
     {
-        return null !== $this->emitters && class_exists($class) && null !== $this->emitters->typeSymbolEmitterFor(new ReflectionClass($class));
+        return $this->published[$class] ??= null !== $this->emitters && class_exists($class) && null !== $this->emitters->typeSymbolEmitterFor(new ReflectionClass($class));
     }
 
     /**

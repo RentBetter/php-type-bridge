@@ -23,6 +23,7 @@ use PTGS\TypeBridge\Parser\ValueOfType;
 use PTGS\TypeBridge\Resolver\EnumResolver;
 use PTGS\TypeBridge\Sorting\AlphabeticalOrder;
 use PTGS\TypeBridge\Sorting\SortStrategy;
+use PTGS\TypeBridge\Support\TypeScriptTypes;
 use PTGS\TypeBridge\Support\DomainMapper;
 use PTGS\TypeBridge\Support\PhpFileClassLocator;
 use PTGS\TypeBridge\Support\RootSources;
@@ -592,6 +593,26 @@ final class TypeScriptEmitter
                     $global,
                     $declared,
                 ));
+            }
+        }
+
+        // A project-wide alias's TypeScript means the same in every module: a name it uses that isn't
+        // another of them — TypeScript's own, a library's — no module that declares it may declare.
+        foreach ($this->typeAliases as $alias => $tsType) {
+            if (!str_contains($code, 'export type ' . $alias . ' = ')) {
+                continue;
+            }
+            foreach (TypeScriptTypes::namesIn($tsType) as $name) {
+                $declared = isset($this->typeAliases[$name]) ? null : $this->claimedNames[$domain][$name] ?? (isset($discovered[$name]) ? 'a discovered emitter\'s ' . $name : null);
+                if (null !== $declared) {
+                    throw new RuntimeException(\sprintf(
+                        'TypeScript naming collision in domain "%s": the project-wide alias %s names "%s", which the module declares as %s.',
+                        $domain,
+                        $alias,
+                        $name,
+                        $declared,
+                    ));
+                }
             }
         }
 

@@ -904,12 +904,17 @@ final class McpManifestBuilderTest extends TestCase
 
     public function testAFieldDeclaredAsLiteralsTakesThoseValuesAsAKeyOfAShapeDoes(): void
     {
-        $text = static fn (string $name): CollectedFormField => new CollectedFormField(name: $name, formTypeClass: TextType::class, required: false, mapped: true, compound: false, dataClass: null);
-        $contract = $this->shape("array{locale: Locale, code: 'a'|'b'}");
+        $text = static fn (string $name, bool $transforms = false): CollectedFormField => new CollectedFormField(name: $name, formTypeClass: TextType::class, required: false, mapped: true, compound: false, dataClass: null, transformsValue: $transforms);
+        $contract = $this->shape("array{locale: Locale, code: 'a'|'b', level: 1|2, mixed: 'a'|1, stamp: 'x'|'y'}");
 
-        $properties = $this->toolWithBody('PUT', [$text('locale'), $text('code')], $contract, typeAliases: ['Locale' => "'en' | 'fr'"])['inputSchema']['properties'];
-        self::assertSame(['en', 'fr'], $properties['locale']['enum'] ?? null);
-        self::assertSame(['a', 'b'], $properties['code']['enum'] ?? null);
+        $properties = $this->toolWithBody('PUT', [$text('locale'), $text('code'), $text('level'), $text('mixed'), $text('stamp', transforms: true)], $contract, typeAliases: ['Locale' => "'en' | 'fr'"])['inputSchema']['properties'];
+        self::assertSame(['type' => 'string', 'enum' => ['en', 'fr']], $properties['locale'] ?? null);
+        self::assertSame(['type' => 'string', 'enum' => ['a', 'b']], $properties['code'] ?? null);
+        self::assertSame(['type' => 'integer', 'enum' => [1, 2]], $properties['level'] ?? null);
+        // Of two types, or read through a transformer, which the literals describe the result of:
+        // the form's own guess.
+        self::assertArrayNotHasKey('enum', $properties['mixed'] ?? []);
+        self::assertArrayNotHasKey('enum', $properties['stamp'] ?? []);
     }
 
     public function testANullAndAUnionOfNullsAreNull(): void

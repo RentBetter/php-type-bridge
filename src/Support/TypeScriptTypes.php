@@ -243,6 +243,20 @@ final class TypeScriptTypes
     }
 
     /**
+     * The names a type uses — `Date`, `Brand`, `PropertyKey` in `Brand<Date> | PropertyKey` — but
+     * for what is quoted, an object's keys and a member read off another (`A.B`'s `B`).
+     *
+     * @return list<string>
+     */
+    public static function namesIn(string $type): array
+    {
+        $unquoted = preg_replace('/([\'"`])(?:\\\\.|(?!\1).)*\1/s', "''", $type) ?? $type;
+        preg_match_all('/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$]|\s*\??\s*:)/', $unquoted, $names);
+
+        return array_values(array_unique($names[0]));
+    }
+
+    /**
      * The value a literal is — `'en'`, `"en"`, `1`, `-1.5`, `true` — in a list of one; null for one
      * this can't read, a quoted one with an escape in it among them.
      *

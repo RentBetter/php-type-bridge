@@ -404,10 +404,10 @@ final class PhpDocShapeParser
             return new ScalarType('int');
         }
 
-        // Scalar types
-        foreach (['string', 'int', 'float', 'bool', 'mixed', 'numeric', 'null'] as $scalar) {
-            if ($this->lookAhead($scalar) && !$this->isIdentChar($this->pos + \strlen($scalar))) {
-                $this->pos += \strlen($scalar);
+        // Scalar types, under each spelling PHPStan reads: `integer`, `boolean` and `double` too.
+        foreach (['string' => 'string', 'integer' => 'int', 'int' => 'int', 'float' => 'float', 'double' => 'float', 'boolean' => 'bool', 'bool' => 'bool', 'mixed' => 'mixed', 'numeric' => 'numeric', 'null' => 'null'] as $spelling => $scalar) {
+            if ($this->lookAhead($spelling) && !$this->isIdentChar($this->pos + \strlen($spelling))) {
+                $this->pos += \strlen($spelling);
 
                 return new ScalarType($scalar);
             }

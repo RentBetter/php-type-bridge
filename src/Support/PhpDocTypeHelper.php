@@ -284,9 +284,13 @@ final class PhpDocTypeHelper
                 return $leaf;
             }
 
-            $class = $this->resolveClassName($leaf->name, $ownerClass, $classImports);
+            $class = $this->resolveClassName($leaf->name, $ownerClass, $classImports, $selfClass);
+            if (null === $class) {
+                return $leaf;
+            }
 
-            return null === $class ? $leaf : new NameRefType($leaf->name, $class);
+            // `self`, `static` and `parent` are a class by syntax, as a name written in full is.
+            return self::isClassKeyword($leaf->name) ? new NameRefType($class, $class) : new NameRefType($leaf->name, $class);
         });
     }
 
@@ -684,15 +688,40 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * Whether a name is one PHP and PHPStan read as a class wherever it is written: `self`,
+     * `static`, `parent`.
+     */
+    private static function isClassKeyword(string $name): bool
+    {
+        return \in_array(strtolower($name), ['self', 'static', 'parent'], true);
+    }
+
+    /**
      * The class a name means where it was written, as PHP resolves it: fully qualified, through
      * the file's `use` statements, in the owner's namespace, or global — or null when it is no
-     * class at all (an alias).
+     * class at all (an alias). `self` and `static` are the class the type is read for, `parent` its
+     * parent, as PHPStan reads them in a docblock.
      *
      * @param array<string, string> $classImports
+     * @param ?string               $selfClass    the class `self` means, where it isn't `$ownerClass`: in a
+     *                                            trait, the class using it
      * @return ?class-string
      */
-    public function resolveClassName(string $name, ?string $ownerClass, array $classImports): ?string
+    public function resolveClassName(string $name, ?string $ownerClass, array $classImports, ?string $selfClass = null): ?string
     {
+        if (self::isClassKeyword($name)) {
+            $class = $selfClass ?? $ownerClass;
+            if (null === $class || !PhpFileClassLocator::loads($class)) {
+                return null;
+            }
+            if ('parent' !== strtolower($name)) {
+                return $class;
+            }
+            $parent = get_parent_class($class);
+
+            return false === $parent ? null : $parent;
+        }
+
         // As PHP resolves it — and, leniently, one it would not, unqualified, as the global class.
         $candidates = [ClassNames::resolve($name, $classImports, null === $ownerClass ? null : ClassNames::namespaceOf($ownerClass))];
         if (!str_starts_with($name, '\\') && !ClassNames::imported($name, $classImports)) {

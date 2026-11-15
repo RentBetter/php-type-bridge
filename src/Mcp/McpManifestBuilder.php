@@ -558,6 +558,23 @@ final class McpManifestBuilder
             return $this->shapeSchema($field->contract, $json) ?? ['type' => 'object'];
         }
 
+        // Declared as literals of one type — written out, or a project-wide alias of them — it takes
+        // those values, as a shape's key does: where the form reads what is sent as it is.
+        $literals = $declared;
+        while ($literals instanceof NullableType) {
+            $literals = $literals->inner;
+        }
+        $values = null === $literals || $field->transformsValue ? null : $this->typeSchema($literals)['enum'] ?? null;
+        $types = \is_array($values) ? array_unique(array_map(static fn (mixed $value): string => match (true) {
+            \is_string($value) => 'string',
+            \is_int($value) => 'integer',
+            \is_bool($value) => 'boolean',
+            default => 'number',
+        }, $values)) : [];
+        if (1 === \count($types)) {
+            return ['type' => reset($types), 'enum' => $values];
+        }
+
         return ['type' => $this->declaredScalar($declared) ?? $this->scalarType($field)];
     }
 
