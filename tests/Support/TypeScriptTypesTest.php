@@ -130,6 +130,11 @@ final class TypeScriptTypesTest extends TestCase
         self::assertSame(['string', 'Foo'], TypeScriptTypes::namesIn("{\n  a: string\n  b: Foo\n}"), 'A key on a line of its own');
         self::assertSame(['T', 'extends', 'U', 'X', 'Y'], TypeScriptTypes::namesIn("T extends U ?\n  X\n  : Y"), 'A branch on a line of its own');
         self::assertSame(['Region', 'Locale'], TypeScriptTypes::namesIn('`${Region}-${Locale}`'), "A template literal's holes");
+        // A key is one where an object's, an index signature's or a params list's is, alone.
+        self::assertSame(['T', 'extends', 'X', 'Foo', 'Bar'], TypeScriptTypes::namesIn("T extends X ?\n  Foo :\n  Bar"), "A branch ending its line");
+        self::assertSame(['Foo'], TypeScriptTypes::namesIn("{\n  key\n    : Foo }"), 'A key whose `:` is on the next line');
+        self::assertSame(['Foo'], TypeScriptTypes::namesIn('{ get(): Foo }'), "A method's name");
+        self::assertSame(['T', 'extends', 'X', 'Foo', 'Bar'], TypeScriptTypes::namesIn("{ a: T extends X ?\n  Foo :\n  Bar }"), 'A branch in an object');
     }
 
     public function test_a_types_json_schema_is_what_json_can_say_of_it(): void

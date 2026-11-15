@@ -38,6 +38,16 @@ final class ClassFileTypesTest extends TestCase
         self::assertSame(['ErrorCode' => 'PTGS\\TypeBridge\\Tests\\Fixture\\EnumTypedFixtures\\Notes\\ErrorCode'], $imports);
     }
 
+    public function test_a_comment_in_a_use_and_a_function_in_its_group_are_no_part_of_an_import(): void
+    {
+        $imports = (new ClassFileTypes())->classImports(__DIR__ . '/../Fixture/ClassConstImportFixtures/CommentedView.php');
+
+        self::assertSame([
+            'ErrorCode' => 'PTGS\\TypeBridge\\Tests\\Fixture\\EnumTypedFixtures\\Notes\\ErrorCode',
+            'ConflictResponse' => 'PTGS\\TypeBridge\\Tests\\Fixture\\EnumTypedFixtures\\Notes\\ConflictResponse',
+        ], $imports);
+    }
+
     public function test_an_import_of_an_alias_kept_for_php_stan_is_set_aside_with_why(): void
     {
         $classFiles = (new PhpFileClassLocator())->classesIn(self::SRC);

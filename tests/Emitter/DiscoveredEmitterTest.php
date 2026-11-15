@@ -213,6 +213,7 @@ final class DiscoveredEmitterTest extends TestCase
         yield 'a declaration of a name the module imports' => ['Journals', ['export type CalendarDate = number;'], [], 'a discovered emitter declares "CalendarDate", which the module imports from "Calendar".'];
         yield 'two imports of one name' => ['Shelves', ['export type Pair = [Book, Book];'], [['Library', 'Book'], ['Store', 'Book']], 'a discovered emitter imports "Book" from "Store", which a discovered emitter imports from "Library".'];
         yield 'a declaration of a name imported' => ['Shelves', ['export type Book = string;'], [['Library', 'Book']], 'a discovered emitter declares "Book", which a discovered emitter imports from "Library".'];
+        yield 'a const enum the module has' => ['Journals', ['export const enum Entry { A }'], [], 'a discovered emitter declares "Entry", which the module declares as type'];
     }
 
     /**
@@ -254,6 +255,43 @@ final class DiscoveredEmitterTest extends TestCase
         $this->expectExceptionMessage('TypeScript naming collision in domain "": a discovered emitter declares "Stamp", which the module declares as config type alias Stamp.');
 
         $emitter->emitDiscovered([Script::class]);
+    }
+
+    public function test_a_discovered_emitters_declaration_takes_no_helper_the_module_declares(): void
+    {
+        // Checks declares the expanding helpers, ListItem among them, unexported.
+        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['Checks', ['export type ListItem = string;'], []];
+        $src = __DIR__ . '/../Fixture/ExpandFixtures';
+        $responses = new \PTGS\TypeBridge\Collector\ResponseClassCollector();
+        $enums = new EnumResolver();
+        $enums->scanDirectory($src);
+        $emitter = new TypeScriptEmitter(
+            enumResolver: $enums,
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([ScriptedEmitter::class]),
+            includes: new \PTGS\TypeBridge\Config\IncludeConvention(refTypes: ['ref'], enumTypes: ['enum']),
+        );
+        $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect($src), $responses->collect($src), (new \PTGS\TypeBridge\Collector\EndpointContractCollector())->collect($src, $responses->collectIndex($src)));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Checks": a discovered emitter declares "ListItem", which the module declares as');
+
+        $emitter->emitDiscovered([Script::class]);
+    }
+
+    public function test_a_project_wide_alias_a_module_never_names_is_no_name_of_its(): void
+    {
+        // Shelves names no `Stamp`: it neither declares nor imports one, so a discovered emitter may.
+        [ScriptedEmitter::$domain, ScriptedEmitter::$code, ScriptedEmitter::$imports] = ['Journals', ['export type Pair = [Stamp, Stamp];'], [['Shared', 'Stamp']]];
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([ScriptedEmitter::class]),
+            typeAliases: ['Stamp' => 'Date'],
+        );
+        $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasImportFixtures'));
+
+        self::assertStringContainsString('export type Pair = [Stamp, Stamp];', $emitter->emitDiscovered([Script::class])['Journals']);
     }
 
     public function test_returns_empty_without_discovered_emitters(): void
