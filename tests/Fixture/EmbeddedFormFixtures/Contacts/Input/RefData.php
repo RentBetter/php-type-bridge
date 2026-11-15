@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Input;
 
 use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactKind;
 use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactStatus;
+use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactTier;
 
 /**
  * Read whole by its form: what it takes is only what this says — an enum's values, a project-wide
@@ -16,6 +17,7 @@ use PTGS\TypeBridge\Tests\Fixture\EmbeddedFormFixtures\Contacts\Enum\ContactStat
  *     id: UuidStr,
  *     kind?: ContactStatus,
  *     sort?: ContactKind,
+ *     tier?: ContactTier,
  * }
  */
 final class RefData

@@ -53,7 +53,8 @@ final class EmbeddedFormToolTest extends TestCase
         // says: `leg` left out is null, which its Valid passes, not a new LegData whose `note` is
         // refused. Sent, a leg's `stop` left out is null too — refused by its NotNull — and so is
         // each of `legs`'. A tag sent blank is the null its `empty_data` makes where it isn't
-        // required, which its NotNull refuses.
+        // required, which its NotNull refuses. `ref`, a key TripData doesn't declare, is held to its
+        // form's `required` as Symfony reads it: false, in a form not required.
         $schema = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/NonRequiredRootFixtures', TypeBridgeConfig::fromArray(['clearMissing' => true]))['tools'][0]['inputSchema'];
 
         self::assertArrayNotHasKey('required', $schema);
@@ -188,9 +189,11 @@ final class EmbeddedFormToolTest extends TestCase
                 'status' => ['enum' => ['active', 'archived']],
                 'id' => ['type' => 'string'],
                 // Keyed by the enum's class: its values, as its TypeScript names them — or, where it
-                // names its value union otherwise, its `_self`.
+                // declares one, its `_self`; its values again where it names its union otherwise and
+                // declares none.
                 'kind' => ['enum' => ['active', 'archived']],
                 'sort' => ['type' => 'object', 'properties' => ['code' => ['type' => 'string']], 'required' => ['code']],
+                'tier' => ['enum' => ['gold', 'silver']],
             ],
             'required' => ['status', 'id'],
         ], $this->schema()['properties']['ref'] ?? null);

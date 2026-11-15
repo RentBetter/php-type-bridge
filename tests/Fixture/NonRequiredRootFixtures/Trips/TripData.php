@@ -25,4 +25,6 @@ final class TripData
 
     /** @var list<string> */
     public array $tags = [];
+
+    public ?string $ref = null;
 }

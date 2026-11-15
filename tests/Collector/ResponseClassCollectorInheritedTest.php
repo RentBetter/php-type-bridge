@@ -227,6 +227,28 @@ final class ResponseClassCollectorInheritedTest extends TestCase
         self::assertStringContainsString("export interface NoteError {\n  code: ErrorCode;\n}", $notes);
     }
 
+    public function test_an_int_backed_enum_is_its_int_values_and_one_with_a_shape_that_shape(): void
+    {
+        // A base's native `Priority $priority`, Priority int-backed: json_encode writes the int.
+        // Level declares a `_self`, which it is sent as: it has no values of its own to declare.
+        $notes = self::emit(self::fixtures('IntEnumTypedFixtures'))['Notes'];
+
+        self::assertStringContainsString('export type Priority = 1 | 2;', $notes);
+        self::assertStringContainsString("export interface TaskResponse {\n  priority: Priority;\n}", $notes);
+        self::assertStringContainsString("export interface TaskRow {\n  level: LevelData;\n}", $notes);
+        self::assertStringNotContainsString('export type Level =', $notes);
+    }
+
+    public function test_an_enum_sent_as_its_shape_declares_no_values_to_clash_with_its_modules_alias(): void
+    {
+        // Billing's `status: Status` is Notes' enum, which a `_self` sends as StatusData: its values
+        // are named by nothing, so Notes' own alias `Status` is the only one.
+        $emitted = self::emit(self::fixtures('EnumSelfAliasFixtures'));
+
+        self::assertStringContainsString("export interface InvoiceRow {\n  status: StatusData;\n}", $emitted['Billing']);
+        self::assertSame(1, substr_count($emitted['Notes'], 'export type Status ='));
+    }
+
     public function test_a_config_alias_on_a_library_property_is_the_emitting_modules_own(): void
     {
         // PHPStan reads a project-wide alias in any file, a library's included.
