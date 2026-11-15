@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Collector;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Parser\NameRefType;
+use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use PTGS\TypeBridge\Collector\EndpointContractCollector;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
 use PTGS\TypeBridge\Collector\ResponseClassCollector;
@@ -257,6 +259,26 @@ final class ResponseClassCollectorInheritedTest extends TestCase
 
         self::assertStringContainsString("export interface Note {\n  state: Status;\n}", $notes);
         self::assertStringNotContainsString("'open'", $notes);
+    }
+
+    public function test_an_inherited_property_spelt_as_phpstan_also_spells_it_is_that_scalar(): void
+    {
+        $notes = self::emit(self::fixtures('SpellingFixtures'))['Notes'];
+
+        self::assertStringContainsString("export interface NoteResponse {\n  count: number;\n  open: boolean;\n  ratio: number;\n}", $notes);
+    }
+
+    public function test_self_static_and_parent_in_a_docblock_are_the_class_and_its_parent(): void
+    {
+        $helper = new PhpDocTypeHelper();
+        $child = \PTGS\TypeBridge\Tests\Fixture\EnumTypedFixtures\Notes\ConflictResponse::class;
+        $base = \PTGS\TypeBridge\Tests\Fixture\EnumTypedFixtures\Notes\BaseErrorResponse::class;
+
+        foreach (['self' => $child, 'static' => $child, 'parent' => $base] as $keyword => $class) {
+            self::assertEquals(new NameRefType($class, $class), $helper->resolveImportedNames(new NameRefType($keyword), [], $child), $keyword);
+        }
+        // In a trait, the class using it.
+        self::assertEquals(new NameRefType($base, $base), $helper->resolveImportedNames(new NameRefType('self'), [], $child, selfClass: $base));
     }
 
     public function test_a_config_alias_on_a_library_property_is_the_emitting_modules_own(): void

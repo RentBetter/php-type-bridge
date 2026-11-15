@@ -64,6 +64,16 @@ final class ConfigTypeAliasTest extends TestCase
         $this->emit(['WidgetView' => 'string']);
     }
 
+    public function test_a_modules_type_may_not_take_a_name_a_config_aliass_typescript_names(): void
+    {
+        // `Stamp: 'Date'` means TypeScript's Date in every module: Notes' own `Date` would take it.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": the project-wide alias Stamp names "Date", which the module declares as type');
+
+        (new TypeScriptEmitter(enumResolver: new EnumResolver(), domainMapper: new DomainMapper('/tmp/type-bridge-output'), typeAliases: ['Stamp' => 'Date']))
+            ->emit((new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasShadowFixtures'));
+    }
+
     public function test_config_rejects_an_alias_that_is_not_an_identifier(): void
     {
         $this->expectException(RuntimeException::class);

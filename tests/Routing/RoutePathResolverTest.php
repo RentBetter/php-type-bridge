@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Tests\Routing;
 
 use PHPUnit\Framework\TestCase;
+use PTGS\TypeBridge\Routing\ControllerAttributeClassLoader;
 use PTGS\TypeBridge\Routing\RoutePathResolver;
 use PTGS\TypeBridge\Tests\Fixture\RequirementRoutedMcpFixtures\Codes\Controller\CodeController;
 use PTGS\TypeBridge\Tests\Fixture\RoutingApp\Health\HealthController;
 use PTGS\TypeBridge\Tests\Fixture\RoutingApp\Projects\Controller\ProjectController;
 use PTGS\TypeBridge\Tests\Fixture\TwiceRoutedApp\Notes\NoteController as TwiceRoutedNoteController;
+use Symfony\Component\Routing\Route;
 
 final class RoutePathResolverTest extends TestCase
 {
@@ -74,6 +76,17 @@ final class RoutePathResolverTest extends TestCase
         // The bare-class key is how Symfony records an invokable controller. Letting every
         // method fall back to it made a constructor look like a routed API method.
         self::assertNull($this->resolver()->pathFor(HealthController::class, '__construct'));
+    }
+
+    public function testAnInvokablesAttributeRouteIsFoundBesideOneRoutingConfigKeysByItsMethod(): void
+    {
+        // Symfony keys an invokable's #[Route] by the bare class, and routing config may key another
+        // route `Class::__invoke`: both serve it, and the attribute's is the one it declares.
+        $attribute = new Route('/notes/{id}', options: [ControllerAttributeClassLoader::ATTRIBUTE => 0]);
+        $legacy = new Route('/legacy/notes/{id}');
+
+        self::assertSame($attribute, RoutePathResolver::routeIn(['App\\NoteController::__invoke' => [$legacy], 'App\\NoteController' => [$attribute]], 'App\\NoteController', '__invoke'));
+        self::assertSame($legacy, RoutePathResolver::routeIn(['App\\NoteController::__invoke' => [$legacy]], 'App\\NoteController', '__invoke'));
     }
 
     public function testResolutionIsDisabledWithoutARoutingFile(): void

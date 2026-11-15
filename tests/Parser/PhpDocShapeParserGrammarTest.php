@@ -139,6 +139,18 @@ final class PhpDocShapeParserGrammarTest extends TestCase
         self::assertSame($base, $type->base());
     }
 
+    public function test_phpstans_other_spellings_of_a_scalar_are_that_scalar(): void
+    {
+        $parser = new PhpDocShapeParser();
+
+        foreach (['integer' => 'int', 'boolean' => 'bool', 'double' => 'float'] as $spelling => $scalar) {
+            $type = $parser->parse($spelling);
+            self::assertInstanceOf(ScalarType::class, $type, $spelling);
+            self::assertSame($scalar, $type->type, $spelling);
+        }
+        self::assertInstanceOf(NameRefType::class, $parser->parse('integers'));
+    }
+
     public function test_a_longer_name_that_starts_with_a_keyword_is_still_a_name(): void
     {
         $type = (new PhpDocShapeParser())->parse('scalars');

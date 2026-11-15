@@ -81,6 +81,16 @@ final class MapKeyTest extends TestCase
         self::assertStringContainsString("export interface Mixed {\n  byTextOrInt: Record<string, string> | string[];\n  byNested: Record<string, string> | string[];\n  byGrouped: Record<string, string> | string[];\n  byTextOrCode: Record<Text | Code, string>;\n  byNumOrString: Record<string, string> | string[];\n}", $rows);
     }
 
+    public function test_a_module_whose_maps_are_keyed_as_they_were_is_the_same_module(): void
+    {
+        // `array<string>` is keyed by any key already: nothing is rebuilt to say so again.
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasKeyFixtures');
+        $domains['Rows']->types = array_filter($domains['Rows']->types, static fn ($type): bool => 'Keyed' !== $type->name);
+        $domains['Rows']->types['Tags'] = new \PTGS\TypeBridge\Model\CollectedType('Tags', 'array{tags: array<string>}', (new \PTGS\TypeBridge\Parser\PhpDocShapeParser())->parse('array{tags: array<string>}'), '', 'Rows', 'App\\Rows\\TagView');
+
+        self::assertSame($domains, (new \PTGS\TypeBridge\Emitter\AliasedMapKeys($domains))->inDomains($domains));
+    }
+
     /**
      * @param array<string, string> $typeAliases
      *

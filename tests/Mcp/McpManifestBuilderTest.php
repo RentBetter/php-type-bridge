@@ -41,6 +41,7 @@ use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Common\Security\Aut
 use PTGS\TypeBridge\Tests\Fixture\MultiPropertyScopeFixtures\Ping\Response\PingResponse;
 use PTGS\TypeBridge\Tests\Fixture\ConstraintFixtures\NoteCode;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType as BlankNoteType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\Constraints\AtLeastOneOf;
 use Symfony\Component\Validator\Constraints\Choice;
@@ -899,6 +900,16 @@ final class McpManifestBuilderTest extends TestCase
         $either = ['anyOf' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'array', 'items' => ['type' => 'string']]]];
         self::assertSame($either, $unreadProperties['byCode'] ?? null);
         self::assertSame($either, $unreadProperties['byKind'] ?? null);
+    }
+
+    public function testAFieldDeclaredAsLiteralsTakesThoseValuesAsAKeyOfAShapeDoes(): void
+    {
+        $text = static fn (string $name): CollectedFormField => new CollectedFormField(name: $name, formTypeClass: TextType::class, required: false, mapped: true, compound: false, dataClass: null);
+        $contract = $this->shape("array{locale: Locale, code: 'a'|'b'}");
+
+        $properties = $this->toolWithBody('PUT', [$text('locale'), $text('code')], $contract, typeAliases: ['Locale' => "'en' | 'fr'"])['inputSchema']['properties'];
+        self::assertSame(['en', 'fr'], $properties['locale']['enum'] ?? null);
+        self::assertSame(['a', 'b'], $properties['code']['enum'] ?? null);
     }
 
     public function testANullAndAUnionOfNullsAreNull(): void
