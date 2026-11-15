@@ -27,6 +27,8 @@ use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitter;
 use PTGS\TypeBridge\Tests\Fixture\Discovered\MarkedEmitterContract;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Diary;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\DiaryEmitter;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Journal;
+use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\JournalEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\StampEmitter;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\Tally;
 use PTGS\TypeBridge\Tests\Fixture\ImportingEmitter\TallyEmitter;
@@ -179,6 +181,23 @@ final class DiscoveredEmitterTest extends TestCase
         $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": a discovered emitter imports "Date" from "Shared", which the module imports from "Calendar".');
 
         $emitter->emitDiscovered([Diary::class]);
+    }
+
+    public function test_a_discovered_emitters_import_is_free_of_a_name_the_module_imports_under_another(): void
+    {
+        // Journals imports Calendar's `Date` as CalendarDate, `Date` being one `Stamp` names: Shared's
+        // `Date`, which JournalEmitter imports, takes no name of the module's.
+        $emitter = new TypeScriptEmitter(
+            enumResolver: new EnumResolver(),
+            domainMapper: new DomainMapper('/tmp/type-bridge-output'),
+            registry: EmitterRegistry::fromAttributeScan([JournalEmitter::class]),
+            typeAliases: ['Stamp' => 'Date'],
+        );
+        $emitter->emit((new \PTGS\TypeBridge\Collector\PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasImportFixtures'));
+
+        $journals = $emitter->emitDiscovered([Journal::class])['Journals'];
+        self::assertStringContainsString('Date as CalendarDate', $journals);
+        self::assertStringContainsString('export interface Page { on: Date; }', $journals);
     }
 
     public function test_returns_empty_without_discovered_emitters(): void

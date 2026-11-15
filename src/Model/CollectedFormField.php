@@ -63,6 +63,10 @@ final readonly class CollectedFormField
      * @param bool                     $entryCompound  whether a collection's entry type is a form of fields, so
      *                                                 one with a data class and none of its own reads an object
      *                                                 whole; not a file input or a scalar type with a data class
+     * @param bool                     $entryTransformsValue whether a collection's entry is transformed before it
+     *                                                 is validated, as `$transformsValue` says of a field: its
+     *                                                 type's transformers, or a listener above it rewriting it
+     *                                                 — not the collection's resize, which rewrites no entry
      * @param bool                     $refusedMissing whether its own `constraints` option holds a NotBlank or a
      *                                                 NotNull at its top, in any group: all a processor submitting
      *                                                 with `clearMissing` off asks of a field left out, which
@@ -99,6 +103,7 @@ final readonly class CollectedFormField
         public mixed $initialValue = null,
         public bool $refusedMissing = false,
         public bool $entryCompound = false,
+        public bool $entryTransformsValue = false,
     ) {}
 
     /**
@@ -141,6 +146,7 @@ final readonly class CollectedFormField
             initialValue: $this->initialValue,
             refusedMissing: $this->refusedMissing,
             entryCompound: $this->entryCompound,
+            entryTransformsValue: $this->entryTransformsValue,
         );
     }
 }

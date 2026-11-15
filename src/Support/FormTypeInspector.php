@@ -215,6 +215,7 @@ final class FormTypeInspector
                 initialValue: self::initialValue($property),
                 refusedMissing: self::refusedMissing($own),
                 entryCompound: null !== $entry && $entry->getCompound(),
+                entryTransformsValue: null !== $entry && ($rewritten || self::rewritesChildren($config) || self::transformsValue($entry->getFormConfig())),
             );
         }
 

@@ -248,8 +248,9 @@ final class TypeScriptTypes
     public static function namesIn(string $type): array
     {
         $unquoted = preg_replace('/([\'"`])(?:\\\\.|(?!\1).)*\1/s', "''", $type) ?? $type;
-        // A key opens an object, an index signature or a params list, or follows another's `,` or `;`.
-        $unkeyed = preg_replace('/([{\[(,;]\s*)(?:readonly\s+)?[A-Za-z_$][\w$]*\s*\??\s*:/', '$1', $unquoted) ?? $unquoted;
+        // A key opens an object, an index signature or a params list, or follows another's `,`, `;`
+        // or line.
+        $unkeyed = preg_replace('/([{\[(,;\n]\s*)(?:readonly\s+)?[A-Za-z_$][\w$]*\s*\??\s*:/', '$1', $unquoted) ?? $unquoted;
         preg_match_all('/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])/', $unkeyed, $names);
 
         return array_values(array_unique($names[0]));

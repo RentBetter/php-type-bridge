@@ -198,6 +198,9 @@ final class TypeScriptEmitter
     /** @var array<string, array<string, string>> by module, the include and expand helpers its own types use: what each is for, and its code */
     private array $includeHelpers = [];
 
+    /** @var array<string, list<string>> by project-wide alias: the names its TypeScript uses ({@see self::namesInAlias()}) */
+    private array $aliasNames = [];
+
     /** A pattern matching the name of any config type alias, made the first time one is asked for ({@see self::configAliasesNamedIn()}). */
     private ?string $configAliasPattern = null;
 
@@ -397,15 +400,29 @@ final class TypeScriptEmitter
             }
             // What a discovered emitter declares or imports shadows no global the module uses, as
             // emit()'s own don't; an import, which its code names as it is, can't be renamed, so it
-            // may not take a name the module declares either.
+            // may take no name emit() wrote in the module either — one it declares, or imports from
+            // elsewhere. One it imports from the same module is the one import.
+            $declaredHere = null === $emitted ? [] : self::declaredIn($emitted['blocks']);
+            $importedHere = [];
+            foreach ($emitted['imports'] ?? [] as $from => $names) {
+                foreach ($names as $name) {
+                    $importedHere[$emitted['foreignAliases'][$from][$name] ?? $name] = (string) $from;
+                }
+            }
             $imported = [];
             foreach ($importsByDomain[$domain] ?? [] as $import) {
-                if ($import->targetDomain !== $domain) {
-                    $imported[$import->canonicalName] = true;
-                    $declared = $this->claimedNames[$domain][$import->canonicalName] ?? null;
-                    if (null !== $declared) {
-                        throw new RuntimeException(\sprintf('TypeScript naming collision in domain "%s": a discovered emitter imports "%s" from "%s", which the module declares as %s.', $domain, $import->canonicalName, $import->targetDomain, $declared));
-                    }
+                $name = $import->canonicalName;
+                if ($import->targetDomain === $domain || ($importedHere[$name] ?? null) === $import->targetDomain) {
+                    continue;
+                }
+                $imported[$name] = true;
+                $taken = match (true) {
+                    isset($importedHere[$name]) => \sprintf('imports from "%s"', $importedHere[$name]),
+                    isset($declaredHere[$name]) => 'declares as ' . ($this->claimedNames[$domain][$name] ?? $name),
+                    default => null,
+                };
+                if (null !== $taken) {
+                    throw new RuntimeException(\sprintf('TypeScript naming collision in domain "%s": a discovered emitter imports "%s" from "%s", which the module %s.', $domain, $name, $import->targetDomain, $taken));
                 }
             }
             $output[$domain] = $this->unshadowed($domain, $code, self::declaredIn($blocksByDomain[$domain]) + $imported);
@@ -567,6 +584,16 @@ final class TypeScriptEmitter
     }
 
     /**
+     * The names a project-wide alias's TypeScript uses ({@see TypeScriptTypes::namesIn()}), read once.
+     *
+     * @return list<string>
+     */
+    private function namesInAlias(string $alias): array
+    {
+        return $this->aliasNames[$alias] ??= TypeScriptTypes::namesIn($this->typeAliases[$alias] ?? '');
+    }
+
+    /**
      * The names blocks declare: each `export interface`, `type`, `class`, `enum`, `const` or
      * `function` — what a discovered emitter writes, which no symbol map holds.
      *
@@ -610,11 +637,11 @@ final class TypeScriptEmitter
 
         // A project-wide alias's TypeScript means the same in every module: a name it uses that isn't
         // another of them — TypeScript's own, a library's — no module that declares it may declare.
-        foreach ($this->typeAliases as $alias => $tsType) {
+        foreach (array_keys($this->typeAliases) as $alias) {
             if (!str_contains($code, 'export type ' . $alias . ' = ')) {
                 continue;
             }
-            foreach (TypeScriptTypes::namesIn($tsType) as $name) {
+            foreach ($this->namesInAlias($alias) as $name) {
                 $declared = isset($this->typeAliases[$name]) ? null : $this->claimedNames[$domain][$name] ?? (isset($discovered[$name]) ? 'a discovered emitter\'s ' . $name : null);
                 if (null !== $declared) {
                     throw new RuntimeException(\sprintf(
@@ -1226,7 +1253,7 @@ final class TypeScriptEmitter
         // A name a project-wide alias's TypeScript uses means what it does everywhere — TypeScript's,
         // a library's — so an import of one takes another name too.
         $usedNames = array_map(static fn (): bool => true, $this->claimedNames[$domain] ?? []) + array_fill_keys($this->endpointConsts[$domain] ?? [], true) + array_fill_keys(self::TYPESCRIPT_GLOBALS, true)
-            + array_fill_keys(array_merge([], ...array_map(TypeScriptTypes::namesIn(...), array_values($this->typeAliases))), true);
+            + array_fill_keys(array_merge([], ...array_map($this->namesInAlias(...), array_keys($this->typeAliases))), true);
         $aliases = [];
 
         $importDomains = array_keys($imports);

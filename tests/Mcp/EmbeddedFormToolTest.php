@@ -99,6 +99,12 @@ final class EmbeddedFormToolTest extends TestCase
         $schema = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/LocaleListFixtures', new TypeBridgeConfig())['tools'][0]['inputSchema'];
 
         self::assertSame(['type' => 'string', 'enum' => ['en', 'fr']], $schema['properties']['locales']['items'] ?? null);
+        // Read through its type's transformer, or a listener's of the collection or a form holding
+        // it: what is sent isn't what the literals describe.
+        self::assertArrayNotHasKey('enum', $schema['properties']['codes']['items'] ?? []);
+        self::assertArrayNotHasKey('enum', $schema['properties']['tags']['items'] ?? []);
+        self::assertArrayNotHasKey('enum', $schema['properties']['inner']['properties']['labels']['items'] ?? []);
+        self::assertSame('string', $schema['properties']['inner']['properties']['labels']['items']['type'] ?? null);
     }
 
     public function test_a_self_its_class_imports_is_its_shape(): void

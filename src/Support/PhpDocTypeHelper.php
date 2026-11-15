@@ -407,6 +407,23 @@ final class PhpDocTypeHelper
     }
 
     /**
+     * Whether the keyword at `$at` declares something: a name follows it.
+     *
+     * @param array<\PhpToken> $tokens
+     */
+    private static function declaresAt(array $tokens, int $at): bool
+    {
+        $count = \count($tokens);
+        for ($i = $at + 1; $i < $count; ++$i) {
+            if (!$tokens[$i]->isIgnorable()) {
+                return $tokens[$i]->is(\T_STRING);
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * The namespace a file declares, '' for none.
      *
      * @param array<\PhpToken> $tokens
@@ -439,7 +456,8 @@ final class PhpDocTypeHelper
 
         for ($i = 0; $i < $count; $i++) {
             $token = $tokens[$i];
-            if ($token->is([\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM])) {
+            // A declaration ends them, its keyword followed by its name — not `Foo::class`.
+            if ($token->is([\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM]) && self::declaresAt($tokens, $i)) {
                 break;
             }
             if (!$token->is(\T_USE)) {
