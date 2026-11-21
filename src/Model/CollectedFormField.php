@@ -71,6 +71,9 @@ final readonly class CollectedFormField
      *                                                 NotNull at its top, in any group: all a processor submitting
      *                                                 with `clearMissing` off asks of a field left out, which
      *                                                 Symfony validates nothing of
+     * @param bool                     $entryRecurses  whether a collection's entry is a form already being read above
+     *                                                 it — a step's steps: its fields are that form's, so
+     *                                                 `$entryChildren` is left empty rather than read forever
      */
     public function __construct(
         public string $name,
@@ -104,6 +107,7 @@ final readonly class CollectedFormField
         public bool $refusedMissing = false,
         public bool $entryCompound = false,
         public bool $entryTransformsValue = false,
+        public bool $entryRecurses = false,
     ) {}
 
     /**
@@ -147,6 +151,7 @@ final readonly class CollectedFormField
             refusedMissing: $this->refusedMissing,
             entryCompound: $this->entryCompound,
             entryTransformsValue: $this->entryTransformsValue,
+            entryRecurses: $this->entryRecurses,
         );
     }
 }

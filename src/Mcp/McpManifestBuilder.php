@@ -109,6 +109,17 @@ final class McpManifestBuilder
     private ?WeakMap $blankRefused = null;
 
     /**
+     * The tool being built's forms that nest themselves (a step's steps), by form type: the name each
+     * is defined under in its `$defs`, which every place it nests refers to.
+     *
+     * @var array<string, string>
+     */
+    private array $defNames = [];
+
+    /** @var array<string, array<string, mixed>> the tool being built's `$defs`, by name */
+    private array $defs = [];
+
+    /**
      * @param IncludeConvention  $includes          whose `query` parameters every tool with a response body takes
      * @param AttributeText|null $paramDescriptions the project's parameter-documentation attribute, read off
      *                                              the data-class property each argument binds
@@ -205,6 +216,8 @@ final class McpManifestBuilder
      */
     private function arguments(CollectedEndpointContract $contract, string $httpMethod): array
     {
+        $this->defNames = [];
+        $this->defs = [];
         $properties = [];
         $required = [];
         $includes = $this->includeQuery($contract);
@@ -239,7 +252,10 @@ final class McpManifestBuilder
             // refused. With it off it isn't submitted, and is held to what its new object holds:
             // a query's filter object is new on every request, a body's only on a POST.
             $this->addFields($request->query, $query, $queryRequired, $queryRefused, makes: true);
-            $this->addFields($request->body, $body, $bodyRequired, $bodyRefused, makes: $this->clearMissing || 'POST' === strtoupper($httpMethod), json: true);
+            $this->defineRoot($request->query, json: false, makes: true);
+            $bodyMakes = $this->clearMissing || 'POST' === strtoupper($httpMethod);
+            $this->addFields($request->body, $body, $bodyRequired, $bodyRefused, makes: $bodyMakes, json: true);
+            $this->defineRoot($request->body, json: true, makes: $bodyMakes);
             $inQuery = self::place($contract, 'query', $query, $queryRequired, $queryRefused, $properties, $required, $taken);
             foreach ([...$inQuery, ...array_keys($includes)] as $name) {
                 $taken[$name] ??= 'the query parameter ' . $name;
@@ -260,6 +276,9 @@ final class McpManifestBuilder
         if ([] !== $required) {
             // Each name once, as the meta-schema holds `required` to: each argument goes to one place.
             $schema['required'] = $required;
+        }
+        if ([] !== $this->defs) {
+            $schema['$defs'] = $this->defs;
         }
 
         // A name a path param takes is the path's.
@@ -548,7 +567,14 @@ final class McpManifestBuilder
         // Its fields held to the keys its key's type declares: its data class's own, where it names
         // the class, read where the contract is.
         if ($field->compound && [] !== $field->children) {
-            return $this->objectSchema($field->children, self::shapeKeys($declared), $json, $makes);
+            $schema = $this->objectSchema($field->children, self::shapeKeys($declared), $json, $makes);
+            // One a collection under it nests is defined as written here, for that collection's
+            // entries to refer to; it stays written out here, where its key may take null.
+            if (isset($this->defNames[$field->formTypeClass])) {
+                $this->defs[$this->defNames[$field->formTypeClass]] ??= $schema;
+            }
+
+            return $schema;
         }
 
         // A compound field with no children reads what is sent whole, so its form says nothing of
@@ -807,6 +833,13 @@ final class McpManifestBuilder
      */
     private function entrySchema(CollectedFormField $field, ?ParsedType $item = null, bool $json = false, bool $makes = false): array
     {
+        // An entry that is a form being read above it — a step's steps — is that form, defined once.
+        if ($field->entryRecurses) {
+            \assert(null !== $field->entryTypeClass);
+
+            return $this->reference($field->entryTypeClass, $field->entryDataClass);
+        }
+
         // An entry its type reads whole is the shape the list declares of it — an object, where its
         // class's shape can't be said here, and its type is a form of fields. One that isn't — a file
         // input, a scalar type with a data class — is the value it reads.
@@ -832,7 +865,61 @@ final class McpManifestBuilder
                 : $schema;
         }
 
-        return $this->objectSchema($field->entryChildren, self::shapeKeys($item), $json, $makes);
+        $schema = $this->objectSchema($field->entryChildren, self::shapeKeys($item), $json, $makes);
+
+        return null === $field->entryTypeClass ? $schema : $this->defined($field->entryTypeClass, $schema);
+    }
+
+    /**
+     * Where a form that nests itself is defined: its name in the tool's `$defs`, given it the first
+     * time anything refers to it — its data class's short name, which its TypeScript is named for,
+     * else its own.
+     *
+     * @return array{'$ref': string}
+     */
+    private function reference(string $formTypeClass, ?string $dataClass): array
+    {
+        if (!isset($this->defNames[$formTypeClass])) {
+            $short = substr(strrchr('\\' . ($dataClass ?? $formTypeClass), '\\') ?: '', 1);
+            $name = $short;
+            for ($n = 2; \in_array($name, $this->defNames, true); ++$n) {
+                $name = $short . $n;
+            }
+            $this->defNames[$formTypeClass] = $name;
+        }
+
+        return ['$ref' => '#/$defs/' . $this->defNames[$formTypeClass]];
+    }
+
+    /**
+     * A compound entry's schema, or, where it nests itself and so is referred to, a reference to its
+     * definition — the first schema read of it.
+     *
+     * @param array<string, mixed> $schema
+     *
+     * @return array<string, mixed>
+     */
+    private function defined(string $formTypeClass, array $schema): array
+    {
+        if (!isset($this->defNames[$formTypeClass])) {
+            return $schema;
+        }
+        $this->defs[$this->defNames[$formTypeClass]] ??= $schema;
+
+        return ['$ref' => '#/$defs/' . $this->defNames[$formTypeClass]];
+    }
+
+    /**
+     * A query or body form that nests its own type (a tree whose children are trees) is defined too:
+     * its fields as an object, as a nested entry of it is read, for each place it nests to refer to.
+     */
+    private function defineRoot(?CollectedInputReference $input, bool $json, bool $makes): void
+    {
+        if (null === $input?->formClass || !isset($this->defNames[$input->formClass]) || isset($this->defs[$this->defNames[$input->formClass]])) {
+            return;
+        }
+
+        $this->defs[$this->defNames[$input->formClass]] = $this->objectSchema($input->fields, self::shapeKeys($input->keys()), $json, $makes);
     }
 
     /**

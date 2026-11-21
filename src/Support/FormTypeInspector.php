@@ -68,6 +68,14 @@ final class FormTypeInspector
     /** @var array<string, array{dataClass: ?class-string, fields: list<CollectedFormField>}> by form class, and whether its blanks are asked: each built and read once, however many endpoints take it */
     private array $inspected = [];
 
+    /**
+     * The form types being read, from the one inspected down to the field being read: a collection
+     * whose entries are one of them nests it, and is marked so rather than read again.
+     *
+     * @var array<string, true>
+     */
+    private array $reading = [];
+
     public function __construct(?FormFactoryInterface $formFactory = null)
     {
         // The validator extension makes form-level validation options (constraints,
@@ -128,10 +136,14 @@ final class FormTypeInspector
         /** @var class-string|null $dataClass */
         $dataClass = $builder->getOption('data_class');
 
-        return [
-            'dataClass' => $dataClass,
-            'fields' => $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig()), validated: true, blanks: $blanks, required: $builder->getFormConfig()->getRequired()),
-        ];
+        $this->reading = [$builder->getFormConfig()->getType()->getInnerType()::class => true];
+        try {
+            $fields = $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig()), validated: true, blanks: $blanks, required: $builder->getFormConfig()->getRequired());
+        } finally {
+            $this->reading = [];
+        }
+
+        return ['dataClass' => $dataClass, 'fields' => $fields];
     }
 
     /**
@@ -175,6 +187,11 @@ final class FormTypeInspector
             $entry = $this->entryBuilder($config);
             $entryOwn = null === $entry ? [] : $this->collectConstraints($this->ownConstraints($entry->getFormConfig()), null);
             $fieldRequired = $required && $config->getRequired();
+            // A collection of a form being read above it nests that form: a step's steps. Symfony builds
+            // such a collection's entries only as deep as what is sent goes; read, its fields would be
+            // read forever. They are the form's being read already.
+            $entryType = null === $entry ? null : $entry->getFormConfig()->getType()->getInnerType()::class;
+            $entryRecurses = null !== $entryType && isset($this->reading[$entryType]);
 
             $fields[] = new CollectedFormField(
                 name: $name,
@@ -194,14 +211,14 @@ final class FormTypeInspector
                 // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
                 // what is sent itself, and none of them is a field a request sends — as a field, or
                 // as each entry of a collection.
-                children: self::isOfType($config, ChoiceType::class) ? [] : $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks, $fieldRequired),
-                entryChildren: null !== $entry && $entry->getCompound() && !self::isOfType($entry->getFormConfig(), ChoiceType::class) ? $this->collectFields(
+                children: self::isOfType($config, ChoiceType::class) ? [] : $this->reading($formTypeClass, fn (): array => $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks, $fieldRequired)),
+                entryChildren: null !== $entry && null !== $entryType && !$entryRecurses && $entry->getCompound() && !self::isOfType($entry->getFormConfig(), ChoiceType::class) ? $this->reading($entryType, fn (): array => $this->collectFields(
                     $entry,
                     $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()),
                     $cascades || self::holdsValid($entryOwn),
                     $blanks,
                     $fieldRequired && $entry->getFormConfig()->getRequired(),
-                ) : [],
+                )) : [],
                 choiceValues: $this->resolveChoiceValues($config, $constraints),
                 constraints: $constraints,
                 ownerClass: $property?->getDeclaringClass()->getName(),
@@ -216,10 +233,31 @@ final class FormTypeInspector
                 refusedMissing: self::refusedMissing($own),
                 entryCompound: null !== $entry && $entry->getCompound(),
                 entryTransformsValue: null !== $entry && ($rewritten || self::rewritesChildren($config) || self::transformsValue($entry->getFormConfig())),
+                entryRecurses: $entryRecurses,
             );
         }
 
         return $fields;
+    }
+
+    /**
+     * What `$read` reads of a form of the type, with the type among those being read while it does.
+     *
+     * @template T
+     *
+     * @param \Closure(): T $read
+     *
+     * @return T
+     */
+    private function reading(string $formTypeClass, \Closure $read): mixed
+    {
+        $outer = $this->reading;
+        $this->reading[$formTypeClass] = true;
+        try {
+            return $read();
+        } finally {
+            $this->reading = $outer;
+        }
     }
 
     /**

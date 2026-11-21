@@ -14,6 +14,8 @@ use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\TagListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\YearlyTotalsType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\UppercasedCodeType;
+use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\OutlineType;
+use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\SectionType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\CreateProjectRequestType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\ProjectNoteType;
@@ -273,5 +275,23 @@ final class FormTypeInspectorTest extends TestCase
 
         self::assertTrue($fields['product']->trim, 'Symfony trims by default');
         self::assertFalse($fields['period']->trim);
+    }
+
+    public function test_a_collection_of_a_form_being_read_above_it_is_not_read_again(): void
+    {
+        // A section's sections are sections: each level is read once, and where the form being read
+        // nests again, its entry is marked as that form rather than read forever.
+        $fields = array_column((new FormTypeInspector())->inspect(SectionType::class)['fields'], null, 'name');
+
+        self::assertTrue($fields['sections']->entryRecurses);
+        self::assertSame([], $fields['sections']->entryChildren);
+        self::assertSame(SectionType::class, $fields['sections']->entryTypeClass);
+        self::assertFalse($fields['heading']->entryRecurses);
+
+        $outline = array_column((new FormTypeInspector())->inspect(OutlineType::class)['fields'], null, 'name');
+        self::assertFalse($outline['sections']->entryRecurses);
+        $entry = array_column($outline['sections']->entryChildren, null, 'name');
+        self::assertSame(['heading', 'sections'], array_keys($entry));
+        self::assertTrue($entry['sections']->entryRecurses);
     }
 }
