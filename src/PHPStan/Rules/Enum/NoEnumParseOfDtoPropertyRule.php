@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PTGS\TypeBridge\PHPStan\Rules\Enum;
 
+use PTGS\TypeBridge\Support\ClassNames;
 use PhpParser\Node;
 use PhpParser\Node\Expr\StaticCall;
 use PHPStan\Analyser\Scope;
@@ -81,10 +82,10 @@ final class NoEnumParseOfDtoPropertyRule implements Rule
                 '%s::%s() parses an enum in a method taking the DTO %s. Type the DTO property as %s and use '
                 . 'EnumType in the form (multiple: true for a list), so an invalid value is a 422 instead of a '
                 . 'silently dropped filter.',
-                $this->shortName($enumName),
+                ClassNames::short($enumName),
                 $method,
-                $this->shortName($dtoClass),
-                $this->shortName($enumName),
+                ClassNames::short($dtoClass),
+                ClassNames::short($enumName),
             ))
                 ->identifier('typeBridge.noEnumParseOfDtoProperty')
                 ->line($node->getStartLine())
@@ -137,12 +138,5 @@ final class NoEnumParseOfDtoPropertyRule implements Rule
         }
 
         return null;
-    }
-
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-
-        return false === $position ? $className : substr($className, $position + 1);
     }
 }

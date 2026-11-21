@@ -13,6 +13,7 @@ use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\NameRefType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
+use PTGS\TypeBridge\Parser\ShapeField;
 use PTGS\TypeBridge\Parser\ShapeType;
 use PTGS\TypeBridge\Parser\TupleType;
 use PTGS\TypeBridge\Parser\UnionType;
@@ -24,6 +25,97 @@ use PTGS\TypeBridge\Parser\UnionType;
  */
 final class PhpDocShapeParserGrammarTest extends TestCase
 {
+    public function test_a_keyword_with_arguments_is_no_bare_keyword(): void
+    {
+        // `iterable` alone is any array; `iterable<string>` is an array of strings, as PHPStan reads
+        // it — keyed by anything, `iterable<mixed, string>` — and a shape holding one still parses.
+        $shape = (new PhpDocShapeParser())->parse('array{tags?: iterable<string>, name: string}');
+
+        self::assertInstanceOf(ShapeType::class, $shape);
+        self::assertInstanceOf(MapType::class, $shape->fields[0]->type);
+        self::assertInstanceOf(ScalarType::class, $shape->fields[0]->type->key);
+        self::assertSame('array-key', $shape->fields[0]->type->key->type);
+        self::assertInstanceOf(ScalarType::class, $shape->fields[0]->type->value);
+        self::assertSame('string', $shape->fields[0]->type->value->type);
+        self::assertInstanceOf(MapType::class, (new PhpDocShapeParser())->parse('iterable'));
+    }
+
+    public function test_an_iterable_with_its_key_is_an_array_of_that_key(): void
+    {
+        $map = (new PhpDocShapeParser())->parse('iterable<int, list<string>>');
+
+        self::assertInstanceOf(MapType::class, $map);
+        self::assertInstanceOf(ScalarType::class, $map->key);
+        self::assertSame('int', $map->key->type);
+        self::assertInstanceOf(ListType::class, $map->value);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function keysNoArrayHas(): iterable
+    {
+        yield 'an iterable of mixed keys' => ['iterable<mixed, string>'];
+        yield 'an iterable of object keys' => ['iterable<object, string>'];
+        yield 'an iterable of shape keys' => ['iterable<array{id: int}, string>'];
+        yield 'an array of mixed keys' => ['array<mixed, string>'];
+        yield 'an array of scalar keys' => ['array<scalar, string>'];
+        yield 'an array of bool keys' => ['array<bool, string>'];
+        yield 'an array of nullable keys' => ['array<int|null, string>'];
+        yield 'an array of int or bool keys' => ['array<int|bool, string>'];
+    }
+
+    #[DataProvider('keysNoArrayHas')]
+    public function test_a_key_no_array_is_keyed_by_is_the_key_the_array_has(string $input): void
+    {
+        // PHP keys an array by ints and strings alone, and TypeScript a Record by what it can
+        // spell of them: what else a map names is any key, as `iterable<V>` is.
+        $map = (new PhpDocShapeParser())->parse($input);
+
+        self::assertInstanceOf(MapType::class, $map);
+        self::assertInstanceOf(ScalarType::class, $map->key);
+        self::assertSame('array-key', $map->key->type);
+    }
+
+    public function test_a_key_of_every_kind_an_array_has_is_any_key(): void
+    {
+        // An int — a float is keyed as the int it truncates to, a numeric string as the int it
+        // spells, where it spells one — and a string both: PHP's own `array-key`, which a JSON
+        // list is sent as too. `numeric` is a numeric string as well as an int.
+        foreach (['array<int|string, string>', 'iterable<string|int, string>', 'array<int|non-empty-string, string>', 'array<float|string, string>', 'array<numeric-string, string>', 'array<numeric, string>'] as $input) {
+            $map = (new PhpDocShapeParser())->parse($input);
+            self::assertInstanceOf(MapType::class, $map);
+            self::assertInstanceOf(ScalarType::class, $map->key, $input);
+            self::assertSame('array-key', $map->key->type, $input);
+        }
+    }
+
+    public function test_a_map_built_with_a_key_no_array_has_is_keyed_by_any_key(): void
+    {
+        // As a template param bound to one puts it in a base's `array<TKey, V>`.
+        self::assertSame('array-key', self::scalarKey(new MapType(new ScalarType('mixed'), new ScalarType('string'))));
+        self::assertSame('array-key', self::scalarKey(new MapType(new UnionType([new ScalarType('int'), new ScalarType('null')]), new ScalarType('string'))));
+        self::assertSame('array-key', self::scalarKey(new MapType(new UnionType([new ScalarType('int'), new ScalarType('string')]), new ScalarType('string'))));
+        self::assertSame('int', self::scalarKey(new MapType(new ScalarType('int'), new ScalarType('string'))));
+    }
+
+    public function test_a_key_an_array_is_keyed_by_is_kept(): void
+    {
+        $parser = new PhpDocShapeParser();
+
+        foreach (['array<positive-int, string>' => 'positive-int', 'iterable<class-string, string>' => 'class-string', 'array<float, string>' => 'float'] as $input => $key) {
+            $map = $parser->parse($input);
+            self::assertInstanceOf(MapType::class, $map);
+            self::assertInstanceOf(ScalarType::class, $map->key);
+            self::assertSame($key, $map->key->type);
+        }
+        foreach (["array<'a' | 'b', int>", 'array<value-of<Status>, int>', 'array<Code, int>'] as $input) {
+            $map = $parser->parse($input);
+            self::assertInstanceOf(MapType::class, $map);
+            self::assertNotInstanceOf(ScalarType::class, $map->key, $input);
+        }
+    }
+
     /**
      * @return iterable<string, array{string, string, string}>
      */
@@ -46,6 +138,54 @@ final class PhpDocShapeParserGrammarTest extends TestCase
         self::assertInstanceOf(ScalarType::class, $type);
         self::assertSame($spelling, $type->type);
         self::assertSame($base, $type->base());
+    }
+
+    public function test_phpstans_other_spellings_of_a_scalar_are_that_scalar(): void
+    {
+        $parser = new PhpDocShapeParser();
+
+        foreach (['integer' => 'int', 'boolean' => 'bool', 'double' => 'float'] as $spelling => $scalar) {
+            $type = $parser->parse($spelling);
+            self::assertInstanceOf(ScalarType::class, $type, $spelling);
+            self::assertSame($scalar, $type->type, $spelling);
+        }
+        self::assertInstanceOf(NameRefType::class, $parser->parse('integers'));
+    }
+
+    public function test_a_keyword_is_one_in_any_case_as_phpstan_reads_it(): void
+    {
+        $parser = new PhpDocShapeParser();
+
+        foreach (['NULL' => 'null', 'Boolean' => 'bool', 'INTEGER' => 'int', 'String' => 'string', 'Double' => 'float'] as $spelling => $scalar) {
+            $type = $parser->parse($spelling);
+            self::assertInstanceOf(ScalarType::class, $type, $spelling);
+            self::assertSame($scalar, $type->type, $spelling);
+        }
+        self::assertInstanceOf(MapType::class, $parser->parse('Array'));
+        self::assertInstanceOf(ListType::class, $parser->parse('List'));
+        $union = $parser->parse('string|NULL');
+        self::assertTrue(ShapeField::admitsNull($union));
+        // Every keyword the parser reads: a literal, a generic, a shape, a refinement.
+        self::assertEquals(new UnionType([new ScalarType('string'), new \PTGS\TypeBridge\Parser\LiteralType(false)]), $parser->parse('string|FALSE'));
+        self::assertInstanceOf(MapType::class, $parser->parse('Array<string, int>'));
+        self::assertInstanceOf(ListType::class, $parser->parse('List<int>'));
+        self::assertInstanceOf(ShapeType::class, $parser->parse('ARRAY{a: int}'));
+        foreach (['Array-Key' => 'array-key', 'Non-Empty-String' => 'non-empty-string'] as $spelling => $refinement) {
+            $type = $parser->parse($spelling);
+            self::assertInstanceOf(ScalarType::class, $type, $spelling);
+            self::assertSame($refinement, $type->type, $spelling);
+        }
+    }
+
+    public function test_a_keyword_a_namespace_starts_with_is_a_class(): void
+    {
+        $parser = new PhpDocShapeParser();
+
+        foreach (['Integer\\Amount', 'Object\\Dto', 'List\\Item', 'Numeric\\Money', 'string\\Format', 'False\\Flag'] as $class) {
+            $type = $parser->parse($class);
+            self::assertInstanceOf(NameRefType::class, $type, $class);
+            self::assertSame($class, $type->class, $class);
+        }
     }
 
     public function test_a_longer_name_that_starts_with_a_keyword_is_still_a_name(): void
@@ -164,5 +304,12 @@ final class PhpDocShapeParserGrammarTest extends TestCase
         self::assertInstanceOf(ClassConstantType::class, $type);
         self::assertSame('\\Acme\\Review\\Result', $type->class);
         self::assertSame('APPROVED', $type->pattern);
+    }
+
+    private static function scalarKey(MapType $map): string
+    {
+        self::assertInstanceOf(ScalarType::class, $map->key);
+
+        return $map->key->type;
     }
 }

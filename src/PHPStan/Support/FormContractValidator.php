@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\PHPStan\Support;
 
 use PTGS\TypeBridge\Model\CollectedFormField;
+use PTGS\TypeBridge\Support\ClassNames;
 use PTGS\TypeBridge\Support\FormTypeInspector;
 use PTGS\TypeBridge\Support\PhpDocTypeHelper;
 use ReflectionClass;
@@ -256,7 +257,7 @@ final class FormContractValidator
             CheckboxType::class => 'bool',
             EnumType::class => $field->enumClass,
             DateType::class, DateTimeType::class => $this->expectedDateType($field->input),
-            default => match ($this->shortName($formTypeClass)) {
+            default => match (ClassNames::short($formTypeClass)) {
                 'BooleanType' => 'bool',
                 'JsonType' => 'array',
                 default => null,
@@ -436,11 +437,7 @@ final class FormContractValidator
         // would fail every idiomatic docblock in the codebase. Matching the short name can
         // in principle accept a same-named class from another namespace; that is a far
         // smaller cost than rejecting the spelling everyone actually writes.
-        $names = [$expectedType];
-        $position = strrpos($expectedType, '\\');
-        if (false !== $position) {
-            $names[] = substr($expectedType, $position + 1);
-        }
+        $names = array_unique([$expectedType, ClassNames::short($expectedType)]);
 
         foreach ($names as $name) {
             $pattern = preg_quote($name, '/');
@@ -498,15 +495,5 @@ final class FormContractValidator
         }
 
         return str_contains($docComment, '@phpstan-type _self');
-    }
-
-    private function shortName(string $className): string
-    {
-        $position = strrpos($className, '\\');
-        if (false === $position) {
-            return $className;
-        }
-
-        return substr($className, $position + 1);
     }
 }

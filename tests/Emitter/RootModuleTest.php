@@ -137,7 +137,11 @@ final class RootModuleTest extends TestCase
         self::assertStringContainsString("export interface IncludeQuery {\n  /** Opt-in parts. */\n  include?: string;\n  /** Records *\\/ in place. */\n  expand?: string;\n}", $output['']);
 
         $projects = $output['Projects'];
-        self::assertMatchesRegularExpression('/export type ListProjectsQuery = \\w+ & IncludeQuery;/', $projects);
+        self::assertStringContainsString('export type ListProjectsQuery = AsQuery<ProjectFiltersData> & IncludeQuery;', $projects);
+        // Declared once, in the root module, like the other helpers.
+        self::assertStringContainsString('export type AsQuery<T> = ', $output['']);
+        self::assertStringNotContainsString('export type AsQuery<T> = ', $projects);
+        self::assertMatchesRegularExpression("/import type \\{[^}]*\\bAsQuery\\b[^}]*\\} from '\\.\\.\\/genTypes';/", $projects);
         self::assertStringContainsString('export type ShowProjectQuery = IncludeQuery;', $projects);
         self::assertStringContainsString('query?: ShowProjectQuery', $projects);
         self::assertStringNotContainsString('DeleteProjectQuery', $projects);

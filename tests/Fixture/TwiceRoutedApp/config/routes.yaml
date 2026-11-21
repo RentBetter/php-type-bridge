@@ -1,0 +1,6 @@
+notes_controllers:
+    resource:
+        path: ../Notes/
+        namespace: PTGS\TypeBridge\Tests\Fixture\TwiceRoutedApp\Notes
+    type: attribute
+    prefix: '/api'

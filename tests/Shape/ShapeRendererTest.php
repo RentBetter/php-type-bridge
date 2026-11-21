@@ -16,6 +16,17 @@ use PTGS\TypeBridge\Shape\ShapeRenderer;
 
 final class ShapeRendererTest extends TestCase
 {
+    public function testAnIntersectionOfAUnionKeepsItWhole(): void
+    {
+        // `&` binds tighter than `|`: a union base unbracketed would extend its last member alone.
+        $type = new \PTGS\TypeBridge\Parser\IntersectionType(
+            new \PTGS\TypeBridge\Parser\UnionType([new \PTGS\TypeBridge\Parser\NameRefType('A'), new \PTGS\TypeBridge\Parser\NameRefType('B')]),
+            new ShapeType([new ShapeField('id', new ScalarType('string'), optional: false)]),
+        );
+
+        self::assertSame('(A|B) & array{id: string}', (new ShapeRenderer())->render($type));
+    }
+
     public function testRendersASelfDocBlock(): void
     {
         $shape = new ShapeType([

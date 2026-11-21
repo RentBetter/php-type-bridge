@@ -1,0 +1,11 @@
+# The import's `requirements` override what a route says itself (RouteCollection::addRequirements),
+# so the router serves `{code}` as the import says — a numeric code as well as a lettered one — and
+# `{page}` as a number, not the word the method asks for.
+codes_controllers:
+    resource:
+        path: ../Codes/Controller/
+        namespace: PTGS\TypeBridge\Tests\Fixture\RequirementRoutedMcpFixtures\Codes\Controller
+    type: attribute
+    requirements:
+        code: '[A-Z]{2,5}-[0-9]+|[0-9]+'
+        page: '[0-9]+'

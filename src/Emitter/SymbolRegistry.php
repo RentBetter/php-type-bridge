@@ -17,12 +17,23 @@ final readonly class SymbolRegistry
 {
     /**
      * @param array<string, array<string, string>> $maps domain => (logicalName => emittedName)
+     * @param list<string> $shared the names every module declares for itself where it uses them —
+     *        the config's type aliases — so a name of these is the emitting module's own wherever
+     *        it is written
      */
-    public function __construct(private array $maps) {}
+    public function __construct(
+        private array $maps,
+        private array $shared = [],
+    ) {}
 
     public function has(string $domain, string $logicalName): bool
     {
         return isset($this->maps[$domain][$logicalName]);
+    }
+
+    public function isShared(string $logicalName): bool
+    {
+        return \in_array($logicalName, $this->shared, true);
     }
 
     public function resolve(string $domain, string $logicalName): string

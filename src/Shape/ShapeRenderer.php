@@ -63,7 +63,8 @@ final class ShapeRenderer
             $type instanceof LiteralType => $this->renderLiteral($type),
             $type instanceof NullableType => $this->renderNullable($type),
             $type instanceof UnionType => $this->renderUnion($type),
-            $type instanceof IntersectionType => $this->render($type->base) . ' & ' . $this->render($type->extra),
+            // `&` binds tighter than `|`: a union base is bracketed, or it would extend its last member alone.
+            $type instanceof IntersectionType => ($type->base instanceof UnionType || $type->base instanceof NullableType ? '(' . $this->render($type->base) . ')' : $this->render($type->base)) . ' & ' . $this->render($type->extra),
             $type instanceof TupleType => 'array{' . implode(', ', [...array_map($this->render(...), $type->elements), ...($type->unsealed ? ['...'] : [])]) . '}',
             $type instanceof GenericType => $type->name . '<' . implode(', ', array_map($this->render(...), $type->arguments)) . '>',
             $type instanceof ClassConstantType => $type->valueOf

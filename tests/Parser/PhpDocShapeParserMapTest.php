@@ -10,7 +10,6 @@ use PTGS\TypeBridge\Parser\MapType;
 use PTGS\TypeBridge\Parser\PhpDocShapeParser;
 use PTGS\TypeBridge\Parser\ScalarType;
 use PTGS\TypeBridge\Parser\ShapeType;
-use RuntimeException;
 
 /**
  * `array<K, V>` — maps with an open key set.
@@ -90,14 +89,16 @@ final class PhpDocShapeParserMapTest extends TestCase
         self::assertInstanceOf(ShapeType::class, $type);
     }
 
-    public function test_it_rejects_the_single_argument_form(): void
+    public function test_the_single_argument_form_is_keyed_by_any_key(): void
     {
-        // PHPStan reads `array<V>` as an INTEGER-keyed list. Emitting
-        // Record<string, V> for it would produce a type that lies about the
-        // data, so this fails loudly and points at list<V>.
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/write list<V> instead|key and a value type/');
+        // PHPStan reads `array<V>` as `array<array-key, V>`, as it reads `iterable<V>`.
+        $type = (new PhpDocShapeParser())->parse('array<string>');
 
-        (new PhpDocShapeParser())->parse('array<string>');
+        self::assertInstanceOf(MapType::class, $type);
+        self::assertInstanceOf(ScalarType::class, $type->key);
+        self::assertSame('array-key', $type->key->type);
+        self::assertInstanceOf(ScalarType::class, $type->value);
+        self::assertSame('string', $type->value->type);
+        self::assertInstanceOf(MapType::class, (new PhpDocShapeParser())->parse('non-empty-array<string>'));
     }
 }

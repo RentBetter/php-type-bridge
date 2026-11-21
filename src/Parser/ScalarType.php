@@ -33,8 +33,16 @@ final readonly class ScalarType extends ParsedType
     ];
 
     public function __construct(
-        public string $type, // 'string', 'int', 'float', 'bool', 'mixed', 'numeric', 'null', or a refinement
+        public string $type, // 'string', 'int', 'float', 'bool', 'mixed', 'numeric', 'null', 'object' (anything but null), or a refinement
     ) {}
+
+    /**
+     * Whether the type is `null`: a union's null member, which the parser keeps beside the others.
+     */
+    public static function isNull(ParsedType $type): bool
+    {
+        return $type instanceof self && 'null' === $type->base();
+    }
 
     /**
      * The scalar this type is, refinements reduced to what they refine: `positive-int` is `int`.

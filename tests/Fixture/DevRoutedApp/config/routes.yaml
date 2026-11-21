@@ -1,0 +1,6 @@
+notes_controllers:
+    resource:
+        path: ../Notes/
+        namespace: PTGS\TypeBridge\Tests\Fixture\DevRoutedApp\Notes
+    type: attribute
+    prefix: '/api'

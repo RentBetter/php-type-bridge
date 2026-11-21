@@ -6,6 +6,7 @@ namespace PTGS\TypeBridge\Tests\Emitter;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
+use PTGS\TypeBridge\Config\OutputStructure;
 use PTGS\TypeBridge\Config\TypeBridgeConfig;
 use PTGS\TypeBridge\Emitter\TypeScriptEmitter;
 use PTGS\TypeBridge\Resolver\EnumResolver;
@@ -62,6 +63,39 @@ final class ConfigTypeAliasTest extends TestCase
         $this->expectExceptionMessage('TypeScript naming collision');
 
         $this->emit(['WidgetView' => 'string']);
+    }
+
+    public function test_a_modules_type_may_not_take_a_name_a_config_aliass_typescript_names(): void
+    {
+        // `Stamp: 'Date'` means TypeScript's Date in every module: Notes' own `Date` would take it.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('TypeScript naming collision in domain "Notes": the project-wide alias Stamp names "Date", which the module declares as type');
+
+        (new TypeScriptEmitter(enumResolver: new EnumResolver(), domainMapper: new DomainMapper('/tmp/type-bridge-output'), typeAliases: ['Stamp' => 'Date']))
+            ->emit((new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasShadowFixtures'));
+    }
+
+    public function test_a_config_alias_declared_in_the_root_module_means_its_names_there(): void
+    {
+        // Notes imports `Stamp` from the root module, where it is declared: its `Date` is
+        // TypeScript's there, whatever Notes declares.
+        $output = (new TypeScriptEmitter(enumResolver: new EnumResolver(), domainMapper: new DomainMapper('/tmp/type-bridge-output', new OutputStructure(rootModule: 'genTypes.ts')), typeAliases: ['Stamp' => 'Date']))
+            ->emit((new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasShadowFixtures'));
+
+        self::assertStringContainsString('export type Stamp = Date;', $output['']);
+        self::assertStringContainsString('export type Date = string;', $output['Notes']);
+    }
+
+    public function test_a_name_a_config_aliass_typescript_names_is_imported_under_another(): void
+    {
+        // Notes declares `Stamp = Date`, TypeScript's Date: Calendar's `Date`, imported, takes
+        // another name, as it would beside a type of Notes' own of that name.
+        $notes = (new TypeScriptEmitter(enumResolver: new EnumResolver(), domainMapper: new DomainMapper('/tmp/type-bridge-output'), typeAliases: ['Stamp' => 'Date']))
+            ->emit((new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/ConfigAliasImportFixtures'))['Notes'];
+
+        self::assertStringContainsString("import type { Date as CalendarDate } from '../Calendar/genTypes';", $notes);
+        self::assertStringContainsString('export type Stamp = Date;', $notes);
+        self::assertStringContainsString('on: CalendarDate;', $notes);
     }
 
     public function test_config_rejects_an_alias_that_is_not_an_identifier(): void

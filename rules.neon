@@ -19,6 +19,9 @@ parameters:
         # "is this under /api") falls back to the method attribute alone, which in an application
         # that prefixes in routing config means those rules match nothing.
         routing: null
+        # The env the application is deployed in: its router is the one that serves. A route
+        # confined to another, or a routing-config section for one (`when@dev:`), is served there alone.
+        routingEnv: prod
 
 parametersSchema:
     typeBridge: structure([
@@ -26,7 +29,8 @@ parametersSchema:
         shapeNaming: structure([
             allowIdSuffix: listOf(string())
         ]),
-        routing: schema(string(), nullable())
+        routing: schema(string(), nullable()),
+        routingEnv: string()
     ])
 
 services:
@@ -35,6 +39,7 @@ services:
         arguments:
             projectDirectory: %currentWorkingDirectory%
             routingFile: %typeBridge.routing%
+            env: %typeBridge.routingEnv%
 
     -
         class: PTGS\TypeBridge\PHPStan\Support\ApiMethodInspector

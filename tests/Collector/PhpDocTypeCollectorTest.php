@@ -6,6 +6,8 @@ namespace PTGS\TypeBridge\Tests\Collector;
 
 use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Collector\PhpDocTypeCollector;
+use PTGS\TypeBridge\Model\CollectedDomain;
+use PTGS\TypeBridge\Model\ImportedType;
 use PTGS\TypeBridge\Parser\IntersectionType;
 use PTGS\TypeBridge\Parser\ListType;
 use PTGS\TypeBridge\Parser\NameRefType;
@@ -27,7 +29,9 @@ final class PhpDocTypeCollectorTest extends TestCase
 
         $projectView = $domains['Projects']->types['ProjectView'];
         self::assertInstanceOf(IntersectionType::class, $projectView->parsed);
-        self::assertSame('TimestampedView', $projectView->parsed->base->name);
+        // The name it is imported as; the import says which type that is.
+        self::assertSame('TimestampedData', $projectView->parsed->base->name);
+        self::assertSame('TimestampedView', self::importedAs('TimestampedData', $projectView->imports)?->targetTypeName);
 
         $fields = [];
         foreach ($projectView->parsed->extra->fields as $field) {
@@ -35,7 +39,8 @@ final class PhpDocTypeCollectorTest extends TestCase
         }
 
         self::assertInstanceOf(NameRefType::class, $fields['client']->type);
-        self::assertSame('ClientView', $fields['client']->type->name);
+        self::assertSame('ClientData', $fields['client']->type->name);
+        self::assertSame('ClientView', self::importedAs('ClientData', $projectView->imports)?->targetTypeName);
         self::assertInstanceOf(ValueOfType::class, $fields['status']->type);
         self::assertSame('ProjectStatus', $fields['status']->type->enumClass);
         self::assertTrue($fields['nickname']->optional);
@@ -52,7 +57,8 @@ final class PhpDocTypeCollectorTest extends TestCase
 
         $ownerView = $domains['Projects']->types['ProjectOwnerView'];
         self::assertInstanceOf(IntersectionType::class, $ownerView->parsed);
-        self::assertSame('ProjectBaseView', $ownerView->parsed->base->name);
+        self::assertSame('ProjectBaseData', $ownerView->parsed->base->name);
+        self::assertSame('ProjectBaseView', self::importedAs('ProjectBaseData', $ownerView->imports)?->targetTypeName);
 
         $ownerFields = [];
         foreach ($ownerView->parsed->extra->fields as $field) {
@@ -67,7 +73,8 @@ final class PhpDocTypeCollectorTest extends TestCase
 
         $adminView = $domains['Projects']->types['ProjectAdminView'];
         self::assertInstanceOf(IntersectionType::class, $adminView->parsed);
-        self::assertSame('ProjectBaseView', $adminView->parsed->base->name);
+        self::assertSame('ProjectBaseData', $adminView->parsed->base->name);
+        self::assertSame('ProjectBaseView', self::importedAs('ProjectBaseData', $adminView->imports)?->targetTypeName);
 
         $adminFields = [];
         foreach ($adminView->parsed->extra->fields as $field) {
@@ -88,5 +95,77 @@ final class PhpDocTypeCollectorTest extends TestCase
 
         self::assertInstanceOf(ValueOfType::class, $statusFields['value']->type);
         self::assertSame('ProjectStatus', $statusFields['value']->type->enumClass);
+    }
+
+    public function test_an_alias_typed_with_an_import_from_outside_the_tree_says_which(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/could not be resolved/');
+
+        (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnresolvedImportUsedFixtures');
+    }
+
+    public function test_an_unresolved_imports_name_spelt_as_a_key_or_a_literal_is_no_use_of_it(): void
+    {
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnresolvedImportSpelledFixtures');
+
+        self::assertSame(['LedgerView'], array_keys($domains['Common']->types));
+    }
+
+    public function test_an_import_from_outside_the_tree_that_no_alias_uses_is_no_matter(): void
+    {
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/InheritedAliasAndOutOfTreeImportFixtures');
+
+        self::assertSame(['Page'], array_keys($domains['Common']->types));
+    }
+
+    public function test_an_import_of_an_alias_kept_for_php_stan_is_none_of_what_is_emitted(): void
+    {
+        // LineView imports RowSource's Row for its own code, and emits a Line that never names it:
+        // the import is no symbol of any module, so it is none of Line's.
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/PhpStanOnlyUnusedImportFixtures');
+
+        self::assertSame([], $domains['Notes']->types['Line']->imports);
+    }
+
+    public function test_a_class_this_install_cannot_load_emits_nothing(): void
+    {
+        $domains = (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnloadableFixtures');
+
+        self::assertSame([], array_merge(...array_map(static fn(CollectedDomain $domain): array => array_keys($domain->types), array_values($domains))));
+    }
+
+    public function test_a_class_this_install_cannot_load_emits_nothing_and_a_type_naming_its_alias_says_why(): void
+    {
+        // DevOnlyCodes needs a require-dev package to load. NoteData's `_self` names its `Code`: an
+        // error that says so, not a crash at emit time over the class.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/DevOnlyCodes cannot be loaded.*_self on .*NoteData/s');
+
+        (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/UnloadableImportFixtures');
+    }
+
+    public function test_an_alias_typed_with_an_imported_php_stan_only_alias_says_so(): void
+    {
+        // RowSource keeps `Row` for PHPStan; RowView emits a `Row` of its own. LineView imports
+        // RowSource's, which is never emitted — it is not quietly RowView's instead.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/"Row" is #\\[PhpStanOnly\\] on .*RowSource.*Line on .*LineView/s');
+
+        (new PhpDocTypeCollector())->collect(__DIR__ . '/../Fixture/PhpStanOnlyImportedFixtures');
+    }
+
+    /**
+     * @param list<ImportedType> $imports
+     */
+    private static function importedAs(string $name, array $imports): ?ImportedType
+    {
+        foreach ($imports as $import) {
+            if ($name === $import->localAlias) {
+                return $import;
+            }
+        }
+
+        return null;
     }
 }
