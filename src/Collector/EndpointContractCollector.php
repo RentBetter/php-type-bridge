@@ -675,6 +675,7 @@ final class EndpointContractCollector
 
         return $this->resolveInputReference(
             formClass: $formClass,
+            formKey: $resolvedForm['key'],
             ownerClass: $resolvedForm['dataClass'],
             srcDir: $srcDir,
             classFiles: $classFiles,
@@ -785,7 +786,7 @@ final class EndpointContractCollector
      * @param class-string $ownerClass
      * @param list<\PTGS\TypeBridge\Model\CollectedFormField> $fields
      */
-    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = [], bool $inQuery = false, bool $nullAsked = true, bool $readThrough = true): CollectedInputReference
+    private function resolveInputReference(?string $formClass, string $ownerClass, string $srcDir, array $classFiles, array $fields = [], bool $inQuery = false, bool $nullAsked = true, bool $readThrough = true, ?string $formKey = null): CollectedInputReference
     {
         $file = $classFiles[$ownerClass] ?? null;
         if (null === $file) {
@@ -827,6 +828,7 @@ final class EndpointContractCollector
             fields: $fields,
             contract: $contract,
             inheritedContract: $inherited,
+            formKey: $formKey,
         );
     }
 

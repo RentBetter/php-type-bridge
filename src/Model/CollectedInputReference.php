@@ -19,6 +19,8 @@ final readonly class CollectedInputReference
      * @param ShapeType|null $inheritedContract for an intersection, the keys it takes from the shape
      *        it extends, read where that shape is declared — a query's and a body's alike; null when
      *        `_self` is not one, or its base can't be read as a shape
+     * @param string|null $formKey how the form is built — its type and resolved options — for a
+     *        collection under it built the same way to be known as it nesting
      */
     public function __construct(
         public ?string $formClass,
@@ -28,6 +30,7 @@ final readonly class CollectedInputReference
         public array $fields = [],
         public ?ShapeType $contract = null,
         public ?ShapeType $inheritedContract = null,
+        public ?string $formKey = null,
     ) {}
 
     /**

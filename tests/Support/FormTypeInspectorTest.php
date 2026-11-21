@@ -14,6 +14,7 @@ use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\NoteType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\TagListType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\YearlyTotalsType;
 use PTGS\TypeBridge\Tests\Fixture\BlankValueFixtures\Notes\Form\UppercasedCodeType;
+use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\CommentType;
 use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\OutlineType;
 use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\SectionType;
 use PTGS\TypeBridge\Tests\Fixture\Fixtures\Projects\Form\AddProjectNotesRequestType;
@@ -293,5 +294,11 @@ final class FormTypeInspectorTest extends TestCase
         $entry = array_column($outline['sections']->entryChildren, null, 'name');
         self::assertSame(['heading', 'sections'], array_keys($entry));
         self::assertTrue($entry['sections']->entryRecurses);
+
+        // A comment's replies are comments built with other options — no replies of their own — so
+        // they are read as built, not taken for the comment again.
+        $comment = array_column((new FormTypeInspector())->inspect(CommentType::class)['fields'], null, 'name');
+        self::assertFalse($comment['replies']->entryRecurses);
+        self::assertSame(['body'], array_column($comment['replies']->entryChildren, 'name'));
     }
 }

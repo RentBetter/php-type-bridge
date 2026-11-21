@@ -59,6 +59,16 @@ final class RecursiveFormToolTest extends TestCase
         self::assertSame(['name', 'children'], array_keys($schema['$defs']['TreeData']['properties'] ?? []));
     }
 
+    public function test_a_form_its_options_stop_nesting_is_read_as_built(): void
+    {
+        // A reply is a comment built with `with_replies: false`: no `replies` of its own. That is
+        // not the comment nesting, and the tool says what a reply takes — its body, nothing more.
+        $schema = $this->schema('CreateComment');
+
+        self::assertSame(['body'], array_keys($schema['properties']['replies']['items']['properties'] ?? []));
+        self::assertArrayNotHasKey('$defs', $schema);
+    }
+
     public function test_a_tool_nothing_nests_in_has_no_defs(): void
     {
         $schema = (new McpManifestGenerator())->generate(__DIR__ . '/../Fixture/EmbeddedFormFixtures', TypeBridgeConfig::fromArray([]))['tools'][0]['inputSchema'];

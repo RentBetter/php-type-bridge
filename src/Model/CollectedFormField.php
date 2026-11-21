@@ -71,9 +71,14 @@ final readonly class CollectedFormField
      *                                                 NotNull at its top, in any group: all a processor submitting
      *                                                 with `clearMissing` off asks of a field left out, which
      *                                                 Symfony validates nothing of
-     * @param bool                     $entryRecurses  whether a collection's entry is a form already being read above
-     *                                                 it — a step's steps: its fields are that form's, so
-     *                                                 `$entryChildren` is left empty rather than read forever
+     * @param bool                     $entryRecurses  whether a collection's entry is built as a form already being
+     *                                                 read above it — a step's steps: its fields are that form's,
+     *                                                 so `$entryChildren` is left empty rather than read forever
+     * @param string|null              $key            how a compound field's form is built — its type and its
+     *                                                 resolved options ({@see \PTGS\TypeBridge\Support\FormTypeInspector::key()}):
+     *                                                 two forms with one key take the same fields
+     * @param string|null              $entryKey       the same of a collection's entry; where it recurses, the
+     *                                                 key of the form above it the entry is built as
      */
     public function __construct(
         public string $name,
@@ -108,6 +113,8 @@ final readonly class CollectedFormField
         public bool $entryCompound = false,
         public bool $entryTransformsValue = false,
         public bool $entryRecurses = false,
+        public ?string $key = null,
+        public ?string $entryKey = null,
     ) {}
 
     /**
@@ -152,6 +159,8 @@ final readonly class CollectedFormField
             entryCompound: $this->entryCompound,
             entryTransformsValue: $this->entryTransformsValue,
             entryRecurses: $this->entryRecurses,
+            key: $this->key,
+            entryKey: $this->entryKey,
         );
     }
 }

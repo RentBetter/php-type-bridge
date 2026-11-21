@@ -11,7 +11,8 @@ use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
 /**
- * A book with one section embedded whole, not in a list — a section that holds sections of its own.
+ * A book with one section embedded whole, not in a list — a section that holds sections of its own,
+ * built as each of them is.
  *
  * @extends AbstractFormType<BookData>
  */
@@ -21,7 +22,7 @@ final class BookType extends AbstractFormType
     {
         $builder
             ->add('title', TextType::class)
-            ->add('appendix', SectionType::class, ['required' => false])
+            ->add('appendix', SectionType::class)
         ;
     }
 

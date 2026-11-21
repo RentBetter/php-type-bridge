@@ -564,7 +564,7 @@ A collection whose entries are a form already being read above it — a step's o
 $builder->add('steps', CollectionType::class, ['entry_type' => self::class, 'allow_add' => true, 'prototype' => false]);
 ```
 
-The tool's schema describes it to any depth: the form is defined once under the schema's `$defs`, named for its data class (`StepData`), and each collection of it is `{"type": "array", "items": {"$ref": "#/$defs/StepData"}}`. A form embedded whole rather than listed is still written out where it is, and defined beside it for the collections under it to refer to; a body or query form whose own type nests is defined as its fields. A schema with nothing nesting has no `$defs`. The definition is the form as read where it first nests, so a nested level whose collection's options make it differ — one not required where the first is — is described as the first.
+The tool's schema describes it to any depth: the form is defined once under the schema's `$defs`, named for its data class (`StepData`), and each collection of it is `{"type": "array", "items": {"$ref": "#/$defs/StepData"}}`. A form embedded whole rather than listed is still written out where it is, and defined beside it for the collections under it to refer to; a body or query form whose own type nests is defined as its fields. A schema with nothing nesting has no `$defs`. A collection nests a form only where its entries are built exactly as it is — its type, and its options as resolved: a comment whose replies are comments built with `with_replies: false` is read level by level as it is built, and its replies take no replies of their own.
 
 ## Testing
 

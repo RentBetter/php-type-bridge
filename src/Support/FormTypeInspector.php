@@ -65,12 +65,13 @@ final class FormTypeInspector
      */
     private ?Form $notRequired = null;
 
-    /** @var array<string, array{dataClass: ?class-string, fields: list<CollectedFormField>}> by form class, and whether its blanks are asked: each built and read once, however many endpoints take it */
+    /** @var array<string, array{dataClass: ?class-string, fields: list<CollectedFormField>, key: string}> by form class, and whether its blanks are asked: each built and read once, however many endpoints take it */
     private array $inspected = [];
 
     /**
-     * The form types being read, from the one inspected down to the field being read: a collection
-     * whose entries are one of them nests it, and is marked so rather than read again.
+     * The forms being read, by how each is built ({@see self::key()}), from the one inspected down to
+     * the field being read: a collection whose entries are built as one of them nests it, and is
+     * marked so rather than read again.
      *
      * @var array<string, true>
      */
@@ -94,7 +95,7 @@ final class FormTypeInspector
      * @param bool         $blanks    whether each field's blank is read ({@see CollectedFormField::$blankValue}):
      *                                its `empty_data`, application code, is run for it, which only an MCP
      *                                tool's schema needs — null otherwise
-     * @return array{dataClass: ?class-string, fields: list<CollectedFormField>}
+     * @return array{dataClass: ?class-string, fields: list<CollectedFormField>, key: string}
      */
     public function inspect(string $formClass, bool $blanks = false): array
     {
@@ -108,7 +109,7 @@ final class FormTypeInspector
 
     /**
      * @param class-string $formClass
-     * @return array{dataClass: ?class-string, fields: list<CollectedFormField>}
+     * @return array{dataClass: ?class-string, fields: list<CollectedFormField>, key: string}
      */
     private function inspectAnew(string $formClass, bool $blanks): array
     {
@@ -136,14 +137,15 @@ final class FormTypeInspector
         /** @var class-string|null $dataClass */
         $dataClass = $builder->getOption('data_class');
 
-        $this->reading = [$builder->getFormConfig()->getType()->getInnerType()::class => true];
+        $key = self::key($builder);
+        $this->reading = [$key => true];
         try {
             $fields = $this->collectFields($builder, self::rewritesChildren($builder->getFormConfig()), validated: true, blanks: $blanks, required: $builder->getFormConfig()->getRequired());
         } finally {
             $this->reading = [];
         }
 
-        return ['dataClass' => $dataClass, 'fields' => $fields];
+        return ['dataClass' => $dataClass, 'fields' => $fields, 'key' => $key];
     }
 
     /**
@@ -187,11 +189,14 @@ final class FormTypeInspector
             $entry = $this->entryBuilder($config);
             $entryOwn = null === $entry ? [] : $this->collectConstraints($this->ownConstraints($entry->getFormConfig()), null);
             $fieldRequired = $required && $config->getRequired();
-            // A collection of a form being read above it nests that form: a step's steps. Symfony builds
-            // such a collection's entries only as deep as what is sent goes; read, its fields would be
-            // read forever. They are the form's being read already.
-            $entryType = null === $entry ? null : $entry->getFormConfig()->getType()->getInnerType()::class;
-            $entryRecurses = null !== $entryType && isset($this->reading[$entryType]);
+            // A collection whose entries are built as a form being read above it — its type, with its
+            // options — nests that form: a step's steps. Symfony builds such a collection's entries
+            // only as deep as what is sent goes; read, its fields would be read forever. They are the
+            // form's being read already. One built with other options (a comment's replies, built
+            // with none of their own) is another form, read as it is built.
+            $key = $config->getCompound() ? self::key($child) : null;
+            $entryKey = null === $entry ? null : self::key($entry);
+            $entryRecurses = null !== $entryKey && isset($this->reading[$entryKey]);
 
             $fields[] = new CollectedFormField(
                 name: $name,
@@ -211,8 +216,8 @@ final class FormTypeInspector
                 // An expanded choice draws its choices as buttons, children named 0, 1, …: it reads
                 // what is sent itself, and none of them is a field a request sends — as a field, or
                 // as each entry of a collection.
-                children: self::isOfType($config, ChoiceType::class) ? [] : $this->reading($formTypeClass, fn (): array => $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks, $fieldRequired)),
-                entryChildren: null !== $entry && null !== $entryType && !$entryRecurses && $entry->getCompound() && !self::isOfType($entry->getFormConfig(), ChoiceType::class) ? $this->reading($entryType, fn (): array => $this->collectFields(
+                children: self::isOfType($config, ChoiceType::class) || null === $key ? [] : $this->reading($key, fn (): array => $this->collectFields($child, $rewritten || self::rewritesChildren($config), $cascades, $blanks, $fieldRequired)),
+                entryChildren: null !== $entry && null !== $entryKey && !$entryRecurses && $entry->getCompound() && !self::isOfType($entry->getFormConfig(), ChoiceType::class) ? $this->reading($entryKey, fn (): array => $this->collectFields(
                     $entry,
                     $rewritten || self::rewritesChildren($config) || self::rewritesChildren($entry->getFormConfig()),
                     $cascades || self::holdsValid($entryOwn),
@@ -234,6 +239,8 @@ final class FormTypeInspector
                 entryCompound: null !== $entry && $entry->getCompound(),
                 entryTransformsValue: null !== $entry && ($rewritten || self::rewritesChildren($config) || self::transformsValue($entry->getFormConfig())),
                 entryRecurses: $entryRecurses,
+                key: $key,
+                entryKey: $entryKey,
             );
         }
 
@@ -241,7 +248,41 @@ final class FormTypeInspector
     }
 
     /**
-     * What `$read` reads of a form of the type, with the type among those being read while it does.
+     * How a form is built: its type and its options as resolved — two forms with one key take the same
+     * fields. A closure among the options is where it is written, built afresh each time the form is;
+     * an object its class and what it holds, read a few levels down. `block_name`, which a collection
+     * sets on every entry, names the block a theme renders it with, and is left out.
+     *
+     * @param FormBuilderInterface<mixed> $builder
+     */
+    public static function key(FormBuilderInterface $builder): string
+    {
+        $config = $builder->getFormConfig();
+        $options = $config->getOptions();
+        unset($options['block_name']);
+
+        return $config->getType()->getInnerType()::class . "\0" . md5(serialize(self::fingerprint($options)));
+    }
+
+    private static function fingerprint(mixed $value, int $depth = 0): mixed
+    {
+        if ($value instanceof \Closure) {
+            $function = new \ReflectionFunction($value);
+
+            return 'closure ' . $function->getFileName() . ':' . $function->getStartLine();
+        }
+        if (\is_array($value)) {
+            return $depth > 4 ? 'array' : array_map(static fn (mixed $item): mixed => self::fingerprint($item, $depth + 1), $value);
+        }
+        if (\is_object($value)) {
+            return [$value::class => $depth > 4 ? null : self::fingerprint((array) $value, $depth + 1)];
+        }
+
+        return \is_resource($value) ? 'resource' : $value;
+    }
+
+    /**
+     * What `$read` reads of a form, with the form ({@see self::key()}) among those being read while it does.
      *
      * @template T
      *
@@ -249,10 +290,10 @@ final class FormTypeInspector
      *
      * @return T
      */
-    private function reading(string $formTypeClass, \Closure $read): mixed
+    private function reading(string $key, \Closure $read): mixed
     {
         $outer = $this->reading;
-        $this->reading[$formTypeClass] = true;
+        $this->reading[$key] = true;
         try {
             return $read();
         } finally {

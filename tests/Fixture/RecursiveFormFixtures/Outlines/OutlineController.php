@@ -8,6 +8,7 @@ use PTGS\TypeBridge\Attribute\ApiRequest;
 use PTGS\TypeBridge\Attribute\ApiResponses;
 use PTGS\TypeBridge\Attribute\McpTool;
 use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\BookType;
+use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\CommentType;
 use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\OutlineType;
 use PTGS\TypeBridge\Tests\Fixture\RecursiveFormFixtures\Outlines\Form\TreeType;
 use Symfony\Component\Routing\Attribute\Route;
@@ -37,6 +38,15 @@ final class OutlineController
     #[ApiResponses([OutlineResponse::class])]
     #[McpTool(description: 'Find a tree by its shape.')]
     public function findTreeAction(): OutlineResponse
+    {
+        throw new \LogicException('Fixture only.');
+    }
+
+    #[Route('/comments', methods: ['POST'])]
+    #[ApiRequest(body: CommentType::class)]
+    #[ApiResponses([OutlineResponse::class])]
+    #[McpTool(description: 'Add a comment and its replies.')]
+    public function createCommentAction(): OutlineResponse
     {
         throw new \LogicException('Fixture only.');
     }

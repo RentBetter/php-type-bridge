@@ -109,8 +109,9 @@ final class McpManifestBuilder
     private ?WeakMap $blankRefused = null;
 
     /**
-     * The tool being built's forms that nest themselves (a step's steps), by form type: the name each
-     * is defined under in its `$defs`, which every place it nests refers to.
+     * The tool being built's forms that nest themselves (a step's steps), by how each is built
+     * ({@see CollectedFormField::$key}): the name each is defined under in its `$defs`, which every
+     * place it nests refers to.
      *
      * @var array<string, string>
      */
@@ -570,8 +571,8 @@ final class McpManifestBuilder
             $schema = $this->objectSchema($field->children, self::shapeKeys($declared), $json, $makes);
             // One a collection under it nests is defined as written here, for that collection's
             // entries to refer to; it stays written out here, where its key may take null.
-            if (isset($this->defNames[$field->formTypeClass])) {
-                $this->defs[$this->defNames[$field->formTypeClass]] ??= $schema;
+            if (null !== $field->key && isset($this->defNames[$field->key])) {
+                $this->defs[$this->defNames[$field->key]] ??= $schema;
             }
 
             return $schema;
@@ -835,9 +836,9 @@ final class McpManifestBuilder
     {
         // An entry that is a form being read above it — a step's steps — is that form, defined once.
         if ($field->entryRecurses) {
-            \assert(null !== $field->entryTypeClass);
+            \assert(null !== $field->entryKey && null !== $field->entryTypeClass);
 
-            return $this->reference($field->entryTypeClass, $field->entryDataClass);
+            return $this->reference($field->entryKey, $field->entryDataClass ?? $field->entryTypeClass);
         }
 
         // An entry its type reads whole is the shape the list declares of it — an object, where its
@@ -867,28 +868,31 @@ final class McpManifestBuilder
 
         $schema = $this->objectSchema($field->entryChildren, self::shapeKeys($item), $json, $makes);
 
-        return null === $field->entryTypeClass ? $schema : $this->defined($field->entryTypeClass, $schema);
+        return null === $field->entryKey ? $schema : $this->defined($field->entryKey, $schema);
     }
 
     /**
      * Where a form that nests itself is defined: its name in the tool's `$defs`, given it the first
      * time anything refers to it — its data class's short name, which its TypeScript is named for,
-     * else its own.
+     * else its type's — then numbered, where another form has the name.
+     *
+     * @param string $key   how the form is built ({@see CollectedFormField::$key})
+     * @param string $class its data class, else its type
      *
      * @return array{'$ref': string}
      */
-    private function reference(string $formTypeClass, ?string $dataClass): array
+    private function reference(string $key, string $class): array
     {
-        if (!isset($this->defNames[$formTypeClass])) {
-            $short = substr(strrchr('\\' . ($dataClass ?? $formTypeClass), '\\') ?: '', 1);
+        if (!isset($this->defNames[$key])) {
+            $short = substr(strrchr('\\' . $class, '\\') ?: '', 1);
             $name = $short;
             for ($n = 2; \in_array($name, $this->defNames, true); ++$n) {
                 $name = $short . $n;
             }
-            $this->defNames[$formTypeClass] = $name;
+            $this->defNames[$key] = $name;
         }
 
-        return ['$ref' => '#/$defs/' . $this->defNames[$formTypeClass]];
+        return ['$ref' => '#/$defs/' . $this->defNames[$key]];
     }
 
     /**
@@ -899,14 +903,14 @@ final class McpManifestBuilder
      *
      * @return array<string, mixed>
      */
-    private function defined(string $formTypeClass, array $schema): array
+    private function defined(string $key, array $schema): array
     {
-        if (!isset($this->defNames[$formTypeClass])) {
+        if (!isset($this->defNames[$key])) {
             return $schema;
         }
-        $this->defs[$this->defNames[$formTypeClass]] ??= $schema;
+        $this->defs[$this->defNames[$key]] ??= $schema;
 
-        return ['$ref' => '#/$defs/' . $this->defNames[$formTypeClass]];
+        return ['$ref' => '#/$defs/' . $this->defNames[$key]];
     }
 
     /**
@@ -915,11 +919,11 @@ final class McpManifestBuilder
      */
     private function defineRoot(?CollectedInputReference $input, bool $json, bool $makes): void
     {
-        if (null === $input?->formClass || !isset($this->defNames[$input->formClass]) || isset($this->defs[$this->defNames[$input->formClass]])) {
+        if (null === $input?->formKey || !isset($this->defNames[$input->formKey]) || isset($this->defs[$this->defNames[$input->formKey]])) {
             return;
         }
 
-        $this->defs[$this->defNames[$input->formClass]] = $this->objectSchema($input->fields, self::shapeKeys($input->keys()), $json, $makes);
+        $this->defs[$this->defNames[$input->formKey]] = $this->objectSchema($input->fields, self::shapeKeys($input->keys()), $json, $makes);
     }
 
     /**
