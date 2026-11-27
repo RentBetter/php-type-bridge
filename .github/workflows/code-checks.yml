@@ -1,0 +1,67 @@
+# The two gates on every pull request, and on main once it merges: the test suite passes, and the
+# package passes its own PHPStan run. The ruleset on main requires both before a merge.
+#
+# Dependencies are the ones composer.lock names, so a run changes only when the code or the lock
+# does. One of them, ptgs/phpstan-rules, comes from GitHub: Composer is given the run's own
+# read-only token for that download, which GitHub otherwise rate-limits by the runner's address.
+#
+# Actions are pinned to a commit, with the release it is in the comment beside it. Nothing here
+# needs a secret, and the token can only read.
+name: Code checks
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+        env:
+          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ github.token }}"}}'
+
+      - name: Run tests
+        run: composer test
+
+  phpstan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+        env:
+          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ github.token }}"}}'
+
+      - name: Run PHPStan
+        run: composer phpstan -- --no-progress
