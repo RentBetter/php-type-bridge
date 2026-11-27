@@ -91,6 +91,7 @@ final class AliasedMapKeys
                     imports: $property->imports,
                     writtenIn: $property->writtenIn,
                     writtenInDomain: $property->writtenInDomain,
+                    metadata: $property->metadata,
                 );
             }, $response->properties);
 

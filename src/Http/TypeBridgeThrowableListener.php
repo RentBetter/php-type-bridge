@@ -16,7 +16,7 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * Converts typed ApiErrorResponse throwables into JsonResponse.
  *
  * Status is inferred from the throwable's HTTP marker interface; the public properties
- * of the throwable ARE the JSON body (via get_object_vars()). Propagation is stopped so
+ * of the throwable ARE the JSON body, each under its key ({@see ResponseFields}). Propagation is stopped so
  * the framework's default exception handling does not also run.
  */
 #[AsEventListener(event: KernelEvents::EXCEPTION, priority: -1)]
@@ -37,7 +37,7 @@ final readonly class TypeBridgeThrowableListener
         /** @var ReflectionClass<object> $reflection */
         $reflection = new ReflectionClass($throwable);
         $status = $this->resolver->resolve($reflection);
-        $event->setResponse(new JsonResponse(get_object_vars($throwable), $status));
+        $event->setResponse(new JsonResponse(ResponseFields::of($throwable), $status));
         $event->stopPropagation();
     }
 }

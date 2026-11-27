@@ -18,7 +18,7 @@ use Symfony\Component\HttpKernel\KernelEvents;
  *
  * Status is inferred from the DTO's HTTP marker interface (HttpOk, HttpCreated, etc).
  * HttpNoContent DTOs emit a 204 with an empty body. All other success DTOs serialize
- * their public properties directly as the JSON body via get_object_vars().
+ * their public properties directly as the JSON body, each under its key ({@see ResponseFields}).
  */
 #[AsEventListener(event: KernelEvents::VIEW, priority: -1)]
 final readonly class TypeBridgeResponseSubscriber
@@ -46,6 +46,6 @@ final readonly class TypeBridgeResponseSubscriber
             return;
         }
 
-        $event->setResponse(new JsonResponse(get_object_vars($result), $status));
+        $event->setResponse(new JsonResponse(ResponseFields::of($result), $status));
     }
 }
