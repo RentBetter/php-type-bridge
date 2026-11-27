@@ -232,7 +232,7 @@ export interface ListNotesResponse {
 }
 ```
 
-No property can be named with a `$` itself, so a metadata key never collides with one. Only the key changes: the property is typed, and written out, as any other is, and an `include` or `expand` path names it by its key (`$pagination.total`).
+No property can be named with a `$` itself, so a metadata key never collides with one. Only the key changes: the property is typed, and written out, as any other is, and an `include` or `expand` path names it by its key (`$pagination.total`). A subclass that redeclares the property, by promoting it in its own constructor, keeps the key.
 
 ### PHPStan types in shapes
 

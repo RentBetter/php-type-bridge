@@ -89,6 +89,14 @@ final class MapKeyTest extends TestCase
         self::assertStringContainsString("export interface Flagged {\n  byFlag: Record<string, string> | string[];\n  byLocal: Record<string, string> | string[];\n}", $rows);
     }
 
+    public function test_a_metadata_property_whose_map_is_rekeyed_keeps_its_key(): void
+    {
+        // The property is rebuilt to key its map by any key, and is still published behind a `$`.
+        $rows = self::emit(__DIR__ . '/../Fixture/MetadataMapKeyFixtures', ['AnyKey' => 'string | number'])['Rows'];
+
+        self::assertStringContainsString("export interface IndexedRowsResponse {\n  rows: string[];\n  \$index: Record<string, string> | string[];\n}", $rows);
+    }
+
     public function test_a_module_whose_maps_are_keyed_as_they_were_is_the_same_module(): void
     {
         // `array<string>` is keyed by any key already: nothing is rebuilt to say so again.

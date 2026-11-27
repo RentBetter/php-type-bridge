@@ -47,9 +47,36 @@ final class ResponseFields
         return self::isMetadata($property) ? Metadata::key($property->getName()) : $property->getName();
     }
 
+    /**
+     * Whether a response property is marked {@see Metadata}, where it is declared or on the property
+     * it redeclares. PHP does not carry an attribute over to a redeclaration, so a subclass that
+     * promotes the property in its own constructor would otherwise be sent under another key than
+     * its parent.
+     */
     public static function isMetadata(ReflectionProperty $property): bool
     {
-        return [] !== $property->getAttributes(Metadata::class);
+        for ($declared = $property; null !== $declared; $declared = self::redeclared($declared)) {
+            if ([] !== $declared->getAttributes(Metadata::class)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The parent's property a property redeclares, where it does. A parent's private property is
+     * another property of the same name, not one redeclared.
+     */
+    private static function redeclared(ReflectionProperty $property): ?ReflectionProperty
+    {
+        $parent = $property->getDeclaringClass()->getParentClass();
+        if (false === $parent || !$parent->hasProperty($property->getName())) {
+            return null;
+        }
+        $inherited = $parent->getProperty($property->getName());
+
+        return $inherited->isPrivate() ? null : $inherited;
     }
 
     /**

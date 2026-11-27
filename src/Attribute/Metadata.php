@@ -12,7 +12,8 @@ use Attribute;
  * before it — `#[Metadata] public array $pagination` is the body's `$pagination` — which no
  * property can be named itself, so it never collides with one.
  *
- * Only its key changes: it is typed, and written out, as any other property is.
+ * Only its key changes: it is typed, and written out, as any other property is. A subclass that
+ * redeclares the property keeps the key.
  */
 #[Attribute(Attribute::TARGET_PROPERTY)]
 final readonly class Metadata

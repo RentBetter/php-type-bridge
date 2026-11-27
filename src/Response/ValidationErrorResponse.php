@@ -10,8 +10,8 @@ use PTGS\TypeBridge\Status\HttpUnprocessableEntity;
 /**
  * Default typed 422 response for request/form validation failures.
  *
- * Serialized by TypeBridgeThrowableListener via get_object_vars(), so the public
- * properties below ARE the JSON body:
+ * Serialized by TypeBridgeThrowableListener through ResponseFields, so the public
+ * properties below ARE the JSON body, each under its name:
  *
  *   {
  *     "message": "Validation failed",
@@ -28,7 +28,7 @@ final class ValidationErrorResponse extends ThrowableApiResponse implements Http
 {
     /**
      * Redeclares \Exception's inherited (protected) $message as public so the
-     * TypeBridgeThrowableListener's get_object_vars() call exposes it on the wire. It
+     * TypeBridgeThrowableListener, which writes the public properties, sends it. It
      * must stay untyped — PHP forbids adding a type to a property already declared by
      * \Exception.
      *

@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use PTGS\TypeBridge\Http\TypeBridgeThrowableListener;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
 use PTGS\TypeBridge\Tests\Http\Fixtures\NotFoundError;
+use PTGS\TypeBridge\Tests\Http\Fixtures\TracedConflictError;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -25,9 +26,21 @@ final class TypeBridgeThrowableListenerTest extends TestCase
         $response = $event->getResponse();
         self::assertInstanceOf(JsonResponse::class, $response);
         self::assertSame(404, $response->getStatusCode());
-        // get_object_vars on a ThrowableApiResponse exposes the public $resource plus the
-        // public-promoted message; the listener serializes only what is public on the DTO.
+        // The listener writes only what is public on the DTO: its $resource. The exception's own
+        // message is protected, and stays off the wire.
         self::assertJsonStringEqualsJsonString('{"resource":"project"}', (string) $response->getContent());
+    }
+
+    public function test_it_sends_a_metadata_property_behind_a_dollar(): void
+    {
+        $event = $this->exceptionEvent(new TracedConflictError(resource: 'project', trace: 'abc123'));
+
+        (new TypeBridgeThrowableListener(new StatusCodeResolver()))($event);
+
+        $response = $event->getResponse();
+        self::assertInstanceOf(JsonResponse::class, $response);
+        self::assertSame(409, $response->getStatusCode());
+        self::assertJsonStringEqualsJsonString('{"resource":"project","$trace":"abc123"}', (string) $response->getContent());
     }
 
     public function test_it_stops_propagation_once_handled(): void
