@@ -8,6 +8,7 @@ use BackedEnum;
 use LogicException;
 use PTGS\TypeBridge\Contract\ApiSuccessResponse;
 use PTGS\TypeBridge\Enum\ApiEnum;
+use PTGS\TypeBridge\Http\ResponseFields;
 
 /**
  * Builds a response DTO's JSON body against the request's `?include=` and `?expand=`:
@@ -58,7 +59,7 @@ final readonly class IncludeResolver
      */
     public function body(ApiSuccessResponse $response, IncludeTree $include, IncludeTree $expand, bool $enumIds = false): array
     {
-        $fields = get_object_vars($response);
+        $fields = ResponseFields::of($response);
         self::assertRoots($include, 'include', $fields);
         self::assertRoots($expand, 'expand', $fields);
 

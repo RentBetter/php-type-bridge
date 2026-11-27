@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PTGS\TypeBridge\Collector;
 
 use PTGS\TypeBridge\Contract\ApiResponse;
+use PTGS\TypeBridge\Http\ResponseFields;
 use PTGS\TypeBridge\Model\CollectedApiResponseClass;
 use PTGS\TypeBridge\Model\CollectedResponseProperty;
 use PTGS\TypeBridge\Model\ImportedType;
@@ -184,6 +185,7 @@ final class ResponseClassCollector
                     imports: array_values($declared['imports']),
                     writtenIn: $declaringClass === $className ? null : $declaringClass,
                     writtenInDomain: $declaringClass === $className ? null : $declared['domain'],
+                    metadata: ResponseFields::isMetadata($property),
                 );
             }
 

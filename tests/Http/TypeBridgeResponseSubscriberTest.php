@@ -9,6 +9,7 @@ use PTGS\TypeBridge\Http\TypeBridgeResponseSubscriber;
 use PTGS\TypeBridge\Resolver\StatusCodeResolver;
 use PTGS\TypeBridge\Tests\Http\Fixtures\NoContentResponse;
 use PTGS\TypeBridge\Tests\Http\Fixtures\OkResponse;
+use PTGS\TypeBridge\Tests\Http\Fixtures\PagedResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\ViewEvent;
@@ -26,6 +27,15 @@ final class TypeBridgeResponseSubscriberTest extends TestCase
         self::assertInstanceOf(JsonResponse::class, $response);
         self::assertSame(200, $response->getStatusCode());
         self::assertSame('{"id":"abc","count":3}', $response->getContent());
+    }
+
+    public function test_it_sends_a_metadata_property_behind_a_dollar(): void
+    {
+        $event = $this->viewEvent(new PagedResponse(ids: ['a', 'b'], pagination: ['offset' => 0, 'hasMore' => true]));
+
+        (new TypeBridgeResponseSubscriber(new StatusCodeResolver()))($event);
+
+        self::assertSame('{"ids":["a","b"],"$pagination":{"offset":0,"hasMore":true}}', $event->getResponse()?->getContent());
     }
 
     public function test_it_renders_no_content_marker_as_empty_204(): void

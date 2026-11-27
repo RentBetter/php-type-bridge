@@ -67,7 +67,7 @@ final class ResponseClassEmitter implements TypeEmitter
             } catch (RuntimeException $e) {
                 throw self::failedProperty($response, $property, $e);
             }
-            $lines[] = \sprintf('  %s%s: %s;', $property->name, $property->optional || $context->converter->isIncluded($property->parsed) ? '?' : '', $type);
+            $lines[] = \sprintf('  %s%s: %s;', $property->key(), $property->optional || $context->converter->isIncluded($property->parsed) ? '?' : '', $type);
         }
         $lines[] = '}';
 
@@ -99,7 +99,7 @@ final class ResponseClassEmitter implements TypeEmitter
     /**
      * The properties of a response that are present whenever the request asks for them: a side-load
      * (an empty list when nothing is referenced), or an included value whose PHP property is not
-     * nullable.
+     * nullable. Each by the key it is sent under.
      *
      * @return list<string>
      */
@@ -108,7 +108,7 @@ final class ResponseClassEmitter implements TypeEmitter
         $included = [];
         foreach ($response->properties as $property) {
             if (self::isSideLoad($response->className, $property->name, $includes) || ($includes->isIncluded($property->parsed) && !$property->optional)) {
-                $included[] = $property->name;
+                $included[] = $property->key();
             }
         }
 

@@ -15,6 +15,7 @@ use PTGS\TypeBridge\Http\Include\Optional;
 use PTGS\TypeBridge\Http\Include\Ref;
 use PTGS\TypeBridge\Http\Include\RefRegistry;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\CheckStatus;
+use PTGS\TypeBridge\Tests\Http\Include\Fixtures\PagedRowsResponse;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\Priority;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\RecordingExpandGuard;
 use PTGS\TypeBridge\Tests\Http\Include\Fixtures\RowsResponse;
@@ -62,6 +63,25 @@ final class IncludeResolverTest extends TestCase
 
         self::assertSame(['rows' => []], $this->body($response));
         self::assertSame(['rows' => [], 'summary' => ['total' => 0]], $this->body($response, include: 'summary'));
+    }
+
+    public function testAMetadataFieldIsWrittenBehindADollarAndNamedByThatKey(): void
+    {
+        $response = new PagedRowsResponse(
+            rows: [['id' => 'a']],
+            page: ['offset' => 0, 'total' => new Optional(static fn (): int => 1)],
+        );
+
+        $body = $this->resolver->body($response, IncludeTree::parse(''), IncludeTree::parseExpand(''));
+        self::assertSame(['rows' => [['id' => 'a']], '$page' => ['offset' => 0]], $body);
+
+        // Written out as any other field is: a path reaches into it by the key it is sent under
+        $body = $this->resolver->body($response, IncludeTree::parse('$page.total'), IncludeTree::parseExpand(''));
+        self::assertSame(['offset' => 0, 'total' => 1], $body['$page']);
+
+        $this->expectException(InvalidIncludeException::class);
+        $this->expectExceptionMessage('`page` is not part of this response, whose fields are rows, $page.');
+        $this->resolver->body($response, IncludeTree::parse('page.total'), IncludeTree::parseExpand(''));
     }
 
     public function testARefIsItsIdUnlessItsPathIsExpanded(): void
